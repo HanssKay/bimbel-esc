@@ -245,8 +245,7 @@ while ($row = $result_hari_list->fetch_assoc()) {
 }
 $stmt_hari_list->close();
 
-// Ambil daftar jam yang tersedia untuk guru ini
-$sql_jam_list = "SELECT DISTINCT 
+$sql_jam_list = "SELECT 
                   TIME_FORMAT(jb.jam_mulai, '%H:%i') as jam_mulai,
                   TIME_FORMAT(jb.jam_selesai, '%H:%i') as jam_selesai,
                   CONCAT(TIME_FORMAT(jb.jam_mulai, '%H:%i'), '-', TIME_FORMAT(jb.jam_selesai, '%H:%i')) as jam_range
@@ -255,7 +254,8 @@ $sql_jam_list = "SELECT DISTINCT
                  WHERE sp.guru_id = ?
                  AND jb.status = 'aktif'
                  AND sp.status = 'aktif'
-                 ORDER BY jb.jam_mulai";
+                 GROUP BY TIME_FORMAT(jb.jam_mulai, '%H:%i'), TIME_FORMAT(jb.jam_selesai, '%H:%i')
+                 ORDER BY TIME_FORMAT(jb.jam_mulai, '%H:%i')";
 
 $stmt_jam_list = $conn->prepare($sql_jam_list);
 $stmt_jam_list->bind_param("i", $guru_id);
