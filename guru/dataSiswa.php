@@ -226,13 +226,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_siswa'])) {
     }
 }
 
-// AMBIL DATA SISWA YANG DIAJAR - FIXED FOR MANY-TO-MANY ORANGTUA
+// AMBIL DATA SISWA YANG DIAJAR - FIXED (HANYA PELAJARAN GURU INI)
 $siswa_data = [];
 if ($guru_id > 0) {
     try {
         // NONAKTIFKAN ONLY_FULL_GROUP_BY sementara
         $conn->query("SET SESSION sql_mode = ''");
-
+        
         $sql = "SELECT 
                     s.id,
                     s.nama_lengkap,
@@ -255,11 +255,21 @@ if ($guru_id > 0) {
                     ps.tingkat,
                     ps.jenis_kelas,
                     ps.tanggal_mulai,
+                    -- HANYA ambil pelajaran yang diajar oleh guru ini
+                    GROUP_CONCAT(
+                        DISTINCT CASE 
+                            WHEN sp.guru_id = ? THEN sp.nama_pelajaran
+                            ELSE NULL
+                        END
+                        ORDER BY sp.nama_pelajaran 
+                        SEPARATOR ', '
+                    ) as program_bimbel_diajar,
+                    -- Semua pelajaran untuk referensi (opsional)
                     GROUP_CONCAT(
                         DISTINCT sp.nama_pelajaran 
                         ORDER BY sp.nama_pelajaran 
                         SEPARATOR ', '
-                    ) as program_bimbel
+                    ) as semua_program_bimbel
                 FROM siswa_pelajaran sp
                 INNER JOIN siswa s ON sp.siswa_id = s.id
                 INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
@@ -275,16 +285,16 @@ if ($guru_id > 0) {
                 AND ps.status = 'aktif'
                 AND sp.status = 'aktif'
                 AND s.status = 'aktif'";
-
-        $params = [$guru_id];
-        $param_types = "i";
-
+        
+        $params = [$guru_id, $guru_id];
+        $param_types = "ii";
+        
         if (!empty($filter_tingkat)) {
             $sql .= " AND ps.tingkat = ?";
             $params[] = $filter_tingkat;
             $param_types .= "s";
         }
-
+        
         if (!empty($search)) {
             $sql .= " AND (s.nama_lengkap LIKE ? OR s.sekolah_asal LIKE ? OR o.nama_ortu LIKE ?)";
             $search_param = "%" . $search . "%";
@@ -293,29 +303,34 @@ if ($guru_id > 0) {
             $params[] = $search_param;
             $param_types .= "sss";
         }
-
+        
         $sql .= " GROUP BY s.id
                   ORDER BY s.nama_lengkap";
-
+        
         $stmt = $conn->prepare($sql);
         $stmt->bind_param($param_types, ...$params);
         $stmt->execute();
         $result = $stmt->get_result();
-
+        
         while ($row = $result->fetch_assoc()) {
-            // Format untuk tampilan
-            $row['program_bimbel'] = $row['program_bimbel'] . ' (' . $row['tingkat'] . ' - ' . $row['jenis_kelas'] . ')';
-
+            // Format untuk tampilan - gunakan hanya pelajaran yang diajar
+            if (!empty(trim($row['program_bimbel_diajar']))) {
+                $row['program_bimbel'] = $row['program_bimbel_diajar'] . ' (' . $row['tingkat'] . ' - ' . $row['jenis_kelas'] . ')';
+            } else {
+                // Jika tidak ada pelajaran yang diajar guru ini, tampilkan semua dengan tanda *
+                $row['program_bimbel'] = $row['semua_program_bimbel'] . ' (' . $row['tingkat'] . ' - ' . $row['jenis_kelas'] . ')*';
+            }
+            
             // Format no HP orangtua jika ada multiple
             if ($row['no_hp_ortu'] != '-' && strpos($row['no_hp_ortu'], ',') !== false) {
                 $row['no_hp_ortu'] = substr($row['no_hp_ortu'], 0, strpos($row['no_hp_ortu'], ',')) . '...';
             }
-
+            
             $siswa_data[] = $row;
         }
-
+        
         $stmt->close();
-
+        
     } catch (Exception $e) {
         error_log("Error fetching siswa: " . $e->getMessage());
     }
