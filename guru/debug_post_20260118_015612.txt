@@ -1,0 +1,16 @@
+Array
+(
+    [form_debug] => 1
+    [siswa_id] => 6
+    [kelas_id] => 4
+    [tanggal_penilaian] => 2026-01-18
+    [periode_penilaian] => January 2026
+    [willingness_learn] => 10
+    [problem_solving] => 10
+    [critical_thinking] => 10
+    [concentration] => 9
+    [independence] => 9
+    [catatan_guru] => tes
+    [rekomendasi] => tess
+    [simpan_penilaian] => 
+)

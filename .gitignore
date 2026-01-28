@@ -1,0 +1,31 @@
+# ============================================
+# FILE CONFIGURASI RAHASIA - JANGAN PUSH!
+# ============================================
+config.php
+.env
+*.env.*
+secret.php
+credentials.ini
+database.ini
+/app/Config/*.php
+
+# ============================================
+# DATABASE & BACKUP
+# ============================================
+*.sql
+*.backup
+*.dump
+*.db
+backup/
+exports/
+
+# ============================================
+# UPLOAD FILES & USER CONTENT
+# ============================================
+uploads/*
+!uploads/.gitkeep
+tmp/
+sessions/
+cache/
+/storage/*
+!/storage/.gitkeep
