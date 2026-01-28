@@ -218,7 +218,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_siswa'])) {
 $siswa_data = [];
 if ($guru_id > 0) {
     try {
-        $sql = "SELECT DISTINCT
+        // PERBAIKAN: Hapus DISTINCT karena sudah ada GROUP BY
+        $sql = "SELECT 
                     s.*,
                     o.nama_ortu,
                     o.no_hp as no_hp_ortu,
@@ -252,7 +253,7 @@ if ($guru_id > 0) {
         }
 
         $sql .= " GROUP BY s.id
-                  ORDER BY s.nama_lengkap";
+                  ORDER BY s.nama_lengkap";  // ORDER BY sekarang valid karena s.nama_lengkap ada di SELECT
 
         $stmt = $conn->prepare($sql);
         $stmt->bind_param($param_types, ...$params);
@@ -265,6 +266,9 @@ if ($guru_id > 0) {
         $stmt->close();
     } catch (Exception $e) {
         error_log("Error fetching siswa data: " . $e->getMessage());
+        // Debug info
+        error_log("SQL Error: " . $conn->error);
+        error_log("SQL Query: " . $sql);
     }
 }
 ?>
@@ -753,7 +757,6 @@ if ($guru_id > 0) {
                 <ul class="text-blue-700 space-y-1 text-sm">
                     <li>• Total siswa bimbingan Anda: <strong><?php echo count($siswa_data); ?></strong> siswa</li>
                     <li>• Klik <strong class="text-blue-600">Detail</strong> untuk melihat informasi lengkap termasuk jadwal belajar</li>
-                    <li>• Klik <strong class="text-yellow-600">Edit</strong> untuk mengedit data siswa</li>
                     <li>• Data diambil dari pendaftaran siswa yang aktif di jadwal Anda</li>
                 </ul>
             </div>
