@@ -4,8 +4,8 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
 require_once '../includes/config.php';
-require_once '../config/menu.php'; 
-require_once '../includes/menu_functions.php'; 
+require_once '../config/menu.php';
+require_once '../includes/menu_functions.php';
 
 // CEK LOGIN & ROLE
 if (!isset($_SESSION['user_id'])) {
@@ -46,7 +46,8 @@ if (isset($_SESSION['error_message'])) {
 }
 
 // Fungsi untuk cek hak akses guru ke siswa
-function guruBolehAksesSiswa($conn, $guru_id, $siswa_id) {
+function guruBolehAksesSiswa($conn, $guru_id, $siswa_id)
+{
     try {
         $sql = "SELECT 1 FROM siswa_pelajaran sp 
                 INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
@@ -78,12 +79,19 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
         try {
             $sql = "SELECT 
                         s.*,
-                        o.nama_ortu,
-                        o.no_hp as no_hp_ortu,
-                        o.email as email_ortu,
-                        o.pekerjaan,
-                        o.perusahaan,
-                        o.hubungan_dengan_siswa,
+                        -- Ambil semua orangtua (many-to-many)
+                        GROUP_CONCAT(DISTINCT CONCAT(o.nama_ortu, ' (', o.hubungan_dengan_siswa, ')') SEPARATOR ', ') as semua_ortu,
+                        GROUP_CONCAT(DISTINCT o.no_hp SEPARATOR ', ') as semua_no_hp_ortu,
+                        GROUP_CONCAT(DISTINCT o.email SEPARATOR ', ') as semua_email_ortu,
+                        GROUP_CONCAT(DISTINCT CONCAT(o.pekerjaan, ' di ', o.perusahaan) SEPARATOR '; ') as semua_pekerjaan,
+                        GROUP_CONCAT(DISTINCT o.hubungan_dengan_siswa SEPARATOR ', ') as semua_hubungan,
+                        -- Ambil orangtua pertama untuk kompatibilitas
+                        (SELECT o2.nama_ortu FROM siswa_orangtua so2 INNER JOIN orangtua o2 ON so2.orangtua_id = o2.id WHERE so2.siswa_id = s.id ORDER BY o2.id ASC LIMIT 1) as nama_ortu,
+                        (SELECT o2.no_hp FROM siswa_orangtua so2 INNER JOIN orangtua o2 ON so2.orangtua_id = o2.id WHERE so2.siswa_id = s.id ORDER BY o2.id ASC LIMIT 1) as no_hp_ortu,
+                        (SELECT o2.email FROM siswa_orangtua so2 INNER JOIN orangtua o2 ON so2.orangtua_id = o2.id WHERE so2.siswa_id = s.id ORDER BY o2.id ASC LIMIT 1) as email_ortu,
+                        (SELECT o2.pekerjaan FROM siswa_orangtua so2 INNER JOIN orangtua o2 ON so2.orangtua_id = o2.id WHERE so2.siswa_id = s.id ORDER BY o2.id ASC LIMIT 1) as pekerjaan,
+                        (SELECT o2.perusahaan FROM siswa_orangtua so2 INNER JOIN orangtua o2 ON so2.orangtua_id = o2.id WHERE so2.siswa_id = s.id ORDER BY o2.id ASC LIMIT 1) as perusahaan,
+                        (SELECT o2.hubungan_dengan_siswa FROM siswa_orangtua so2 INNER JOIN orangtua o2 ON so2.orangtua_id = o2.id WHERE so2.siswa_id = s.id ORDER BY o2.id ASC LIMIT 1) as hubungan_dengan_siswa,
                         ps.tingkat,
                         ps.jenis_kelas,
                         ps.tanggal_mulai,
@@ -92,15 +100,19 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                         COUNT(DISTINCT sp.id) as total_program,
                         COUNT(DISTINCT jb.id) as total_jadwal
                     FROM siswa s
-                    LEFT JOIN orangtua o ON s.orangtua_id = o.id
                     INNER JOIN siswa_pelajaran sp ON s.id = sp.siswa_id
                     INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                    LEFT JOIN siswa_orangtua so ON s.id = so.siswa_id
+                    LEFT JOIN orangtua o ON so.orangtua_id = o.id
                     LEFT JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id AND jb.status = 'aktif'
                     WHERE s.id = ? 
                     AND sp.guru_id = ? 
                     AND sp.status = 'aktif'
                     AND ps.status = 'aktif'
                     GROUP BY s.id";
+
+            // NONAKTIFKAN ONLY_FULL_GROUP_BY untuk query detail
+            $conn->query("SET SESSION sql_mode = ''");
 
             $stmt = $conn->prepare($sql);
             $stmt->bind_param("ii", $siswa_id, $guru_id);
@@ -131,7 +143,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'edit_form' && isset($_GET['sis
                     AND sp.status = 'aktif'
                     AND ps.status = 'aktif'
                     LIMIT 1";
-            
+
             $stmt = $conn->prepare($sql);
             $stmt->bind_param("ii", $siswa_id, $guru_id);
             $stmt->execute();
@@ -220,7 +232,7 @@ if ($guru_id > 0) {
     try {
         // NONAKTIFKAN ONLY_FULL_GROUP_BY sementara
         $conn->query("SET SESSION sql_mode = ''");
-        
+
         $sql = "SELECT 
                     s.id,
                     s.nama_lengkap,
@@ -263,16 +275,16 @@ if ($guru_id > 0) {
                 AND ps.status = 'aktif'
                 AND sp.status = 'aktif'
                 AND s.status = 'aktif'";
-        
+
         $params = [$guru_id];
         $param_types = "i";
-        
+
         if (!empty($filter_tingkat)) {
             $sql .= " AND ps.tingkat = ?";
             $params[] = $filter_tingkat;
             $param_types .= "s";
         }
-        
+
         if (!empty($search)) {
             $sql .= " AND (s.nama_lengkap LIKE ? OR s.sekolah_asal LIKE ? OR o.nama_ortu LIKE ?)";
             $search_param = "%" . $search . "%";
@@ -281,29 +293,29 @@ if ($guru_id > 0) {
             $params[] = $search_param;
             $param_types .= "sss";
         }
-        
+
         $sql .= " GROUP BY s.id
                   ORDER BY s.nama_lengkap";
-        
+
         $stmt = $conn->prepare($sql);
         $stmt->bind_param($param_types, ...$params);
         $stmt->execute();
         $result = $stmt->get_result();
-        
+
         while ($row = $result->fetch_assoc()) {
             // Format untuk tampilan
             $row['program_bimbel'] = $row['program_bimbel'] . ' (' . $row['tingkat'] . ' - ' . $row['jenis_kelas'] . ')';
-            
+
             // Format no HP orangtua jika ada multiple
             if ($row['no_hp_ortu'] != '-' && strpos($row['no_hp_ortu'], ',') !== false) {
                 $row['no_hp_ortu'] = substr($row['no_hp_ortu'], 0, strpos($row['no_hp_ortu'], ',')) . '...';
             }
-            
+
             $siswa_data[] = $row;
         }
-        
+
         $stmt->close();
-        
+
     } catch (Exception $e) {
         error_log("Error fetching siswa: " . $e->getMessage());
     }
@@ -347,7 +359,7 @@ if ($guru_id > 0) {
         .modal-sm {
             max-width: 500px;
         }
-        
+
         /* Dropdown styles */
         .dropdown-submenu {
             display: none;
@@ -363,7 +375,7 @@ if ($guru_id > 0) {
         .dropdown-toggle.open .arrow {
             transform: rotate(90deg);
         }
-        
+
         /* Active menu item */
         .menu-item.active {
             background-color: rgba(255, 255, 255, 0.1);
@@ -375,6 +387,7 @@ if ($guru_id > 0) {
                 opacity: 0;
                 transform: translateY(-20px);
             }
+
             to {
                 opacity: 1;
                 transform: translateY(0);
@@ -492,15 +505,15 @@ if ($guru_id > 0) {
             .desktop-sidebar {
                 display: block;
             }
-            
+
             .mobile-header {
                 display: none;
             }
-            
+
             #mobileMenu {
                 display: none;
             }
-            
+
             .menu-overlay {
                 display: none !important;
             }
@@ -510,16 +523,16 @@ if ($guru_id > 0) {
             .desktop-sidebar {
                 display: none;
             }
-            
+
             .modal-content {
                 width: 95%;
                 margin: 5% auto;
             }
-            
+
             .grid-2 {
                 grid-template-columns: 1fr;
             }
-            
+
             .form-input {
                 padding: 8px 10px;
                 font-size: 0.9rem;
@@ -663,16 +676,20 @@ if ($guru_id > 0) {
                             <option value="SD" <?php echo ($filter_tingkat == 'SD') ? 'selected' : ''; ?>>SD</option>
                             <option value="SMP" <?php echo ($filter_tingkat == 'SMP') ? 'selected' : ''; ?>>SMP</option>
                             <option value="SMA" <?php echo ($filter_tingkat == 'SMA') ? 'selected' : ''; ?>>SMA</option>
-                            <option value="Alumni" <?php echo ($filter_tingkat == 'Alumni') ? 'selected' : ''; ?>>Alumni</option>
-                            <option value="Umum" <?php echo ($filter_tingkat == 'Umum') ? 'selected' : ''; ?>>Umum</option>
+                            <option value="Alumni" <?php echo ($filter_tingkat == 'Alumni') ? 'selected' : ''; ?>>Alumni
+                            </option>
+                            <option value="Umum" <?php echo ($filter_tingkat == 'Umum') ? 'selected' : ''; ?>>Umum
+                            </option>
                         </select>
                     </div>
                     <div class="flex gap-2">
-                        <button type="submit" class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-700">
+                        <button type="submit"
+                            class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-700">
                             <i class="fas fa-search mr-2"></i> Cari
                         </button>
                         <?php if (!empty($search) || !empty($filter_tingkat)): ?>
-                            <a href="dataSiswa.php" class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-gray-300 text-gray-700 hover:bg-gray-400">
+                            <a href="dataSiswa.php"
+                                class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-gray-300 text-gray-700 hover:bg-gray-400">
                                 <i class="fas fa-times mr-2"></i> Reset
                             </a>
                         <?php endif; ?>
@@ -687,12 +704,24 @@ if ($guru_id > 0) {
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama Siswa</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kelas Sekolah</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kelas Bimbel</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Orang Tua</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
+                                    <th
+                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        No</th>
+                                    <th
+                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Nama Siswa</th>
+                                    <th
+                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Kelas Sekolah</th>
+                                    <th
+                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Kelas Bimbel</th>
+                                    <th
+                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Orang Tua</th>
+                                    <th
+                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Aksi</th>
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
@@ -703,7 +732,8 @@ if ($guru_id > 0) {
                                         </td>
                                         <td class="px-6 py-4">
                                             <div class="flex items-center">
-                                                <div class="flex-shrink-0 h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center">
+                                                <div
+                                                    class="flex-shrink-0 h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center">
                                                     <i class="fas fa-user-graduate text-blue-600"></i>
                                                 </div>
                                                 <div class="ml-4">
@@ -712,13 +742,15 @@ if ($guru_id > 0) {
                                                     </div>
                                                     <div class="text-sm text-gray-500">
                                                         <?php echo htmlspecialchars($siswa['sekolah_asal'] ?? '-'); ?>
-                                                        | <?php echo $siswa['jenis_kelamin'] == 'L' ? 'Laki-laki' : 'Perempuan'; ?>
+                                                        |
+                                                        <?php echo $siswa['jenis_kelamin'] == 'L' ? 'Laki-laki' : 'Perempuan'; ?>
                                                     </div>
                                                 </div>
                                             </div>
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap">
-                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                                            <span
+                                                class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
                                                 <?php echo htmlspecialchars($siswa['kelas']); ?>
                                             </span>
                                         </td>
@@ -742,9 +774,11 @@ if ($guru_id > 0) {
                                         <td class="px-6 py-4 whitespace-nowrap text-sm">
                                             <?php if (!empty($siswa['nama_ortu'])): ?>
                                                 <div>
-                                                    <div class="font-medium text-gray-900"><?php echo htmlspecialchars($siswa['nama_ortu']); ?></div>
+                                                    <div class="font-medium text-gray-900">
+                                                        <?php echo htmlspecialchars($siswa['nama_ortu']); ?></div>
                                                     <?php if (!empty($siswa['no_hp_ortu'])): ?>
-                                                        <div class="text-xs text-gray-500"><?php echo htmlspecialchars($siswa['no_hp_ortu']); ?></div>
+                                                        <div class="text-xs text-gray-500">
+                                                            <?php echo htmlspecialchars($siswa['no_hp_ortu']); ?></div>
                                                     <?php endif; ?>
                                                 </div>
                                             <?php else: ?>
@@ -754,7 +788,8 @@ if ($guru_id > 0) {
                                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                             <a href="?action=detail&siswa_id=<?php echo $siswa['id']; ?>"
                                                 onclick="showDetail(<?php echo $siswa['id']; ?>); return false;"
-                                                class="inline-flex items-center px-3 py-1 rounded-md text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 mr-2" title="Detail">
+                                                class="inline-flex items-center px-3 py-1 rounded-md text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 mr-2"
+                                                title="Detail">
                                                 <i class="fas fa-eye mr-1"></i> Detail
                                             </a>
                                         </td>
@@ -793,7 +828,8 @@ if ($guru_id > 0) {
                 </h3>
                 <ul class="text-blue-700 space-y-1 text-sm">
                     <li>• Total siswa bimbingan Anda: <strong><?php echo count($siswa_data); ?></strong> siswa</li>
-                    <li>• Klik <strong class="text-blue-600">Detail</strong> untuk melihat informasi lengkap termasuk jadwal belajar</li>
+                    <li>• Klik <strong class="text-blue-600">Detail</strong> untuk melihat informasi lengkap termasuk
+                        jadwal belajar</li>
                     <li>• Data diambil dari pendaftaran siswa yang aktif di jadwal Anda</li>
                 </ul>
             </div>
@@ -840,7 +876,8 @@ if ($guru_id > 0) {
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <span class="block font-semibold text-gray-700">Nama Lengkap</span>
-                                    <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['nama_lengkap']) ?></span>
+                                    <span
+                                        class="text-gray-600"><?= htmlspecialchars($siswa_detail['nama_lengkap']) ?></span>
                                 </div>
                                 <div>
                                     <span class="block font-semibold text-gray-700">Jenis Kelamin</span>
@@ -874,7 +911,8 @@ if ($guru_id > 0) {
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <span class="block font-semibold text-gray-700">Sekolah Asal</span>
-                                    <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['sekolah_asal']) ?></span>
+                                    <span
+                                        class="text-gray-600"><?= htmlspecialchars($siswa_detail['sekolah_asal']) ?></span>
                                 </div>
                                 <div>
                                     <span class="block font-semibold text-gray-700">Kelas Sekolah</span>
@@ -893,10 +931,10 @@ if ($guru_id > 0) {
                                     <span class="block font-semibold text-gray-700">Program Bimbel</span>
                                     <div class="mt-2 p-3 bg-white rounded border">
                                         <?php if (!empty($siswa_detail['program_bimbel'])): ?>
-                                            <?php 
+                                            <?php
                                             $program_list = explode(', ', $siswa_detail['program_bimbel']);
                                             foreach ($program_list as $program):
-                                            ?>
+                                                ?>
                                                 <div class="py-1">
                                                     <i class="fas fa-book text-blue-500 mr-2"></i>
                                                     <span class="text-gray-700"><?= htmlspecialchars(trim($program)) ?></span>
@@ -913,84 +951,126 @@ if ($guru_id > 0) {
                                         <?php endif; ?>
                                     </div>
                                 </div>
-                                
+
                                 <!-- JADWAL BELAJAR -->
                                 <?php if (!empty($siswa_detail['jadwal_belajar'])): ?>
-                                <div class="md:col-span-2 mt-4">
-                                    <h4 class="font-bold text-gray-800 mb-3 flex items-center">
-                                        <i class="fas fa-calendar-alt mr-2 text-blue-600"></i> Jadwal Belajar
-                                    </h4>
-                                    <div class="bg-white p-3 rounded border">
-                                        <?php 
-                                        $jadwal_list = explode(', ', $siswa_detail['jadwal_belajar']);
-                                        foreach ($jadwal_list as $jadwal):
-                                        ?>
-                                            <div class="flex items-center py-2 border-b last:border-b-0">
-                                                <i class="fas fa-clock text-gray-400 mr-3"></i>
-                                                <span class="text-gray-700"><?= htmlspecialchars(trim($jadwal)) ?></span>
-                                            </div>
-                                        <?php endforeach; ?>
-                                        <?php if ($siswa_detail['total_jadwal'] > 0): ?>
-                                            <div class="mt-3 text-sm text-gray-500">
-                                                <i class="fas fa-info-circle mr-1"></i>
-                                                Total: <?= $siswa_detail['total_jadwal'] ?> sesi per minggu
-                                            </div>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                                <?php elseif ($siswa_detail['total_program'] > 0): ?>
-                                <div class="md:col-span-2">
-                                    <div class="p-3 bg-yellow-50 border border-yellow-200 rounded">
-                                        <div class="flex items-center">
-                                            <i class="fas fa-exclamation-triangle text-yellow-500 mr-2"></i>
-                                            <span class="text-yellow-700">Belum ada jadwal belajar yang ditetapkan</span>
+                                    <div class="md:col-span-2 mt-4">
+                                        <h4 class="font-bold text-gray-800 mb-3 flex items-center">
+                                            <i class="fas fa-calendar-alt mr-2 text-blue-600"></i> Jadwal Belajar
+                                        </h4>
+                                        <div class="bg-white p-3 rounded border">
+                                            <?php
+                                            $jadwal_list = explode(', ', $siswa_detail['jadwal_belajar']);
+                                            foreach ($jadwal_list as $jadwal):
+                                                ?>
+                                                <div class="flex items-center py-2 border-b last:border-b-0">
+                                                    <i class="fas fa-clock text-gray-400 mr-3"></i>
+                                                    <span class="text-gray-700"><?= htmlspecialchars(trim($jadwal)) ?></span>
+                                                </div>
+                                            <?php endforeach; ?>
+                                            <?php if ($siswa_detail['total_jadwal'] > 0): ?>
+                                                <div class="mt-3 text-sm text-gray-500">
+                                                    <i class="fas fa-info-circle mr-1"></i>
+                                                    Total: <?= $siswa_detail['total_jadwal'] ?> sesi per minggu
+                                                </div>
+                                            <?php endif; ?>
                                         </div>
                                     </div>
-                                </div>
+                                <?php elseif ($siswa_detail['total_program'] > 0): ?>
+                                    <div class="md:col-span-2">
+                                        <div class="p-3 bg-yellow-50 border border-yellow-200 rounded">
+                                            <div class="flex items-center">
+                                                <i class="fas fa-exclamation-triangle text-yellow-500 mr-2"></i>
+                                                <span class="text-yellow-700">Belum ada jadwal belajar yang ditetapkan</span>
+                                            </div>
+                                        </div>
+                                    </div>
                                 <?php endif; ?>
                             </div>
                         </div>
 
                         <!-- Data Orang Tua -->
-                        <?php if (!empty($siswa_detail['nama_ortu'])): ?>
-                        <div class="bg-yellow-50 p-4 rounded-lg">
-                            <h3 class="font-bold text-lg text-yellow-800 mb-4 flex items-center">
-                                <i class="fas fa-user-friends mr-2"></i> Data Orang Tua/Wali
-                            </h3>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <span class="block font-semibold text-gray-700">Nama</span>
-                                    <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['nama_ortu']) ?></span>
+                        <?php if (!empty($siswa_detail['semua_ortu']) || !empty($siswa_detail['nama_ortu'])): ?>
+                            <div class="bg-yellow-50 p-4 rounded-lg">
+                                <h3 class="font-bold text-lg text-yellow-800 mb-4 flex items-center">
+                                    <i class="fas fa-user-friends mr-2"></i> Data Orang Tua/Wali
+                                </h3>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <span class="block font-semibold text-gray-700">Nama</span>
+                                        <span class="text-gray-600">
+                                            <?php
+                                            if (!empty($siswa_detail['semua_ortu'])) {
+                                                echo htmlspecialchars($siswa_detail['semua_ortu']);
+                                            } else {
+                                                echo htmlspecialchars($siswa_detail['nama_ortu']);
+                                            }
+                                            ?>
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span class="block font-semibold text-gray-700">Hubungan</span>
+                                        <span class="text-gray-600">
+                                            <?php
+                                            if (!empty($siswa_detail['semua_hubungan'])) {
+                                                echo htmlspecialchars($siswa_detail['semua_hubungan']);
+                                            } elseif (!empty($siswa_detail['hubungan_dengan_siswa'])) {
+                                                echo $siswa_detail['hubungan_dengan_siswa'] == 'ayah' ? 'Ayah' :
+                                                    ($siswa_detail['hubungan_dengan_siswa'] == 'ibu' ? 'Ibu' : 'Wali');
+                                            } else {
+                                                echo '-';
+                                            }
+                                            ?>
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span class="block font-semibold text-gray-700">No. HP</span>
+                                        <span class="text-gray-600">
+                                            <?php
+                                            if (!empty($siswa_detail['semua_no_hp_ortu'])) {
+                                                echo htmlspecialchars($siswa_detail['semua_no_hp_ortu']);
+                                            } elseif (!empty($siswa_detail['no_hp_ortu'])) {
+                                                echo htmlspecialchars($siswa_detail['no_hp_ortu']);
+                                            } else {
+                                                echo '-';
+                                            }
+                                            ?>
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span class="block font-semibold text-gray-700">Email</span>
+                                        <span class="text-gray-600">
+                                            <?php
+                                            if (!empty($siswa_detail['semua_email_ortu'])) {
+                                                echo htmlspecialchars($siswa_detail['semua_email_ortu']);
+                                            } elseif (!empty($siswa_detail['email_ortu'])) {
+                                                echo htmlspecialchars($siswa_detail['email_ortu']);
+                                            } else {
+                                                echo '-';
+                                            }
+                                            ?>
+                                        </span>
+                                    </div>
+                                    <?php if (!empty($siswa_detail['semua_pekerjaan'])): ?>
+                                        <div class="md:col-span-2">
+                                            <span class="block font-semibold text-gray-700">Pekerjaan</span>
+                                            <span
+                                                class="text-gray-600"><?= htmlspecialchars($siswa_detail['semua_pekerjaan']) ?></span>
+                                        </div>
+                                    <?php elseif (!empty($siswa_detail['pekerjaan'])): ?>
+                                        <div>
+                                            <span class="block font-semibold text-gray-700">Pekerjaan</span>
+                                            <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['pekerjaan']) ?></span>
+                                        </div>
+                                    <?php endif; ?>
+                                    <?php if (!empty($siswa_detail['perusahaan'])): ?>
+                                        <div>
+                                            <span class="block font-semibold text-gray-700">Perusahaan</span>
+                                            <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['perusahaan']) ?></span>
+                                        </div>
+                                    <?php endif; ?>
                                 </div>
-                                <div>
-                                    <span class="block font-semibold text-gray-700">Hubungan</span>
-                                    <span class="text-gray-600">
-                                        <?= $siswa_detail['hubungan_dengan_siswa'] == 'ayah' ? 'Ayah' : 
-                                           ($siswa_detail['hubungan_dengan_siswa'] == 'ibu' ? 'Ibu' : 'Wali') ?>
-                                    </span>
-                                </div>
-                                <div>
-                                    <span class="block font-semibold text-gray-700">No. HP</span>
-                                    <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['no_hp_ortu']) ?></span>
-                                </div>
-                                <div>
-                                    <span class="block font-semibold text-gray-700">Email</span>
-                                    <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['email_ortu']) ?></span>
-                                </div>
-                                <?php if (!empty($siswa_detail['pekerjaan'])): ?>
-                                <div>
-                                    <span class="block font-semibold text-gray-700">Pekerjaan</span>
-                                    <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['pekerjaan']) ?></span>
-                                </div>
-                                <?php endif; ?>
-                                <?php if (!empty($siswa_detail['perusahaan'])): ?>
-                                <div>
-                                    <span class="block font-semibold text-gray-700">Perusahaan</span>
-                                    <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['perusahaan']) ?></span>
-                                </div>
-                                <?php endif; ?>
                             </div>
-                        </div>
                         <?php endif; ?>
                     </div>
                 <?php else: ?>
@@ -1001,7 +1081,8 @@ if ($guru_id > 0) {
                 <?php endif; ?>
             </div>
             <div class="modal-footer">
-                <button type="button" onclick="closeModal('detailModal')" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+                <button type="button" onclick="closeModal('detailModal')"
+                    class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
                     Tutup
                 </button>
             </div>
@@ -1016,104 +1097,104 @@ if ($guru_id > 0) {
     <!--            <span class="close" onclick="closeModal('editModal')">&times;</span>-->
     <!--        </div>-->
     <!--        <?php if ($siswa_edit): ?>-->
-    <!--            <form method="POST" action="dataSiswa.php">-->
-    <!--                <input type="hidden" name="siswa_id" value="<?= $siswa_edit['id'] ?>">-->
-    <!--                <input type="hidden" name="update_siswa" value="1">-->
+        <!--            <form method="POST" action="dataSiswa.php">-->
+        <!--                <input type="hidden" name="siswa_id" value="<?= $siswa_edit['id'] ?>">-->
+        <!--                <input type="hidden" name="update_siswa" value="1">-->
 
-    <!--                <div class="modal-body">-->
-    <!--                    <div class="space-y-4">-->
-    <!--                        <div class="form-group">-->
-    <!--                            <label class="form-label">Nama Lengkap *</label>-->
-    <!--                            <input type="text" name="nama_lengkap" value="<?= htmlspecialchars($siswa_edit['nama_lengkap']) ?>" class="form-input" required>-->
-    <!--                        </div>-->
+        <!--                <div class="modal-body">-->
+        <!--                    <div class="space-y-4">-->
+        <!--                        <div class="form-group">-->
+        <!--                            <label class="form-label">Nama Lengkap *</label>-->
+        <!--                            <input type="text" name="nama_lengkap" value="<?= htmlspecialchars($siswa_edit['nama_lengkap']) ?>" class="form-input" required>-->
+        <!--                        </div>-->
 
-    <!--                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">-->
-    <!--                            <div class="form-group">-->
-    <!--                                <label class="form-label">Tempat Lahir</label>-->
-    <!--                                <input type="text" name="tempat_lahir" value="<?= htmlspecialchars($siswa_edit['tempat_lahir']) ?>" class="form-input">-->
-    <!--                            </div>-->
-                                
-    <!--                            <div class="form-group">-->
-    <!--                                <label class="form-label">Tanggal Lahir</label>-->
-    <!--                                <input type="date" name="tanggal_lahir" value="<?= htmlspecialchars($siswa_edit['tanggal_lahir']) ?>" class="form-input">-->
-    <!--                            </div>-->
-                                
-    <!--                            <div class="form-group">-->
-    <!--                                <label class="form-label">Jenis Kelamin</label>-->
-    <!--                                <select name="jenis_kelamin" class="form-input">-->
-    <!--                                    <option value="L" <?= $siswa_edit['jenis_kelamin'] == 'L' ? 'selected' : '' ?>>Laki-laki</option>-->
-    <!--                                    <option value="P" <?= $siswa_edit['jenis_kelamin'] == 'P' ? 'selected' : '' ?>>Perempuan</option>-->
-    <!--                                </select>-->
-    <!--                            </div>-->
-                                
-    <!--                            <div class="form-group">-->
-    <!--                                <label class="form-label">Agama</label>-->
-    <!--                                <select name="agama" class="form-input">-->
-    <!--                                    <option value="">Pilih Agama</option>-->
-    <!--                                    <option value="Islam" <?= $siswa_edit['agama'] == 'Islam' ? 'selected' : '' ?>>Islam</option>-->
-    <!--                                    <option value="Kristen" <?= $siswa_edit['agama'] == 'Kristen' ? 'selected' : '' ?>>Kristen</option>-->
-    <!--                                    <option value="Katolik" <?= $siswa_edit['agama'] == 'Katolik' ? 'selected' : '' ?>>Katolik</option>-->
-    <!--                                    <option value="Hindu" <?= $siswa_edit['agama'] == 'Hindu' ? 'selected' : '' ?>>Hindu</option>-->
-    <!--                                    <option value="Buddha" <?= $siswa_edit['agama'] == 'Buddha' ? 'selected' : '' ?>>Buddha</option>-->
-    <!--                                    <option value="Konghucu" <?= $siswa_edit['agama'] == 'Konghucu' ? 'selected' : '' ?>>Konghucu</option>-->
-    <!--                                </select>-->
-    <!--                            </div>-->
-                                
-    <!--                            <div class="form-group">-->
-    <!--                                <label class="form-label">Kelas Sekolah</label>-->
-    <!--                                <select name="kelas" class="form-input">-->
-    <!--                                    <option value="">Pilih Kelas</option>-->
-    <!--                                    <option value="Paud" <?= $siswa_edit['kelas'] == 'Paud' ? 'selected' : '' ?>>Paud</option>-->
-    <!--                                    <option value="TK" <?= $siswa_edit['kelas'] == 'TK' ? 'selected' : '' ?>>TK</option>-->
-    <!--                                    <option value="1 SD" <?= $siswa_edit['kelas'] == '1 SD' ? 'selected' : '' ?>>1 SD</option>-->
-    <!--                                    <option value="2 SD" <?= $siswa_edit['kelas'] == '2 SD' ? 'selected' : '' ?>>2 SD</option>-->
-    <!--                                    <option value="3 SD" <?= $siswa_edit['kelas'] == '3 SD' ? 'selected' : '' ?>>3 SD</option>-->
-    <!--                                    <option value="4 SD" <?= $siswa_edit['kelas'] == '4 SD' ? 'selected' : '' ?>>4 SD</option>-->
-    <!--                                    <option value="5 SD" <?= $siswa_edit['kelas'] == '5 SD' ? 'selected' : '' ?>>5 SD</option>-->
-    <!--                                    <option value="6 SD" <?= $siswa_edit['kelas'] == '6 SD' ? 'selected' : '' ?>>6 SD</option>-->
-    <!--                                    <option value="7 SMP" <?= $siswa_edit['kelas'] == '7 SMP' ? 'selected' : '' ?>>7 SMP</option>-->
-    <!--                                    <option value="8 SMP" <?= $siswa_edit['kelas'] == '8 SMP' ? 'selected' : '' ?>>8 SMP</option>-->
-    <!--                                    <option value="9 SMP" <?= $siswa_edit['kelas'] == '9 SMP' ? 'selected' : '' ?>>9 SMP</option>-->
-    <!--                                    <option value="10 SMA" <?= $siswa_edit['kelas'] == '10 SMA' ? 'selected' : '' ?>>10 SMA</option>-->
-    <!--                                    <option value="11 SMA" <?= $siswa_edit['kelas'] == '11 SMA' ? 'selected' : '' ?>>11 SMA</option>-->
-    <!--                                    <option value="12 SMA" <?= $siswa_edit['kelas'] == '12 SMA' ? 'selected' : '' ?>>12 SMA</option>-->
-    <!--                                    <option value="Alumni" <?= $siswa_edit['kelas'] == 'Alumni' ? 'selected' : '' ?>>Alumni</option>-->
-    <!--                                    <option value="Umum" <?= $siswa_edit['kelas'] == 'Umum' ? 'selected' : '' ?>>Umum</option>-->
-    <!--                                </select>-->
-    <!--                            </div>-->
-    <!--                        </div>-->
+        <!--                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">-->
+        <!--                            <div class="form-group">-->
+        <!--                                <label class="form-label">Tempat Lahir</label>-->
+        <!--                                <input type="text" name="tempat_lahir" value="<?= htmlspecialchars($siswa_edit['tempat_lahir']) ?>" class="form-input">-->
+        <!--                            </div>-->
 
-    <!--                        <div class="form-group">-->
-    <!--                            <label class="form-label">Alamat</label>-->
-    <!--                            <textarea name="alamat" class="form-input" rows="3"><?= htmlspecialchars($siswa_edit['alamat']) ?></textarea>-->
-    <!--                        </div>-->
+        <!--                            <div class="form-group">-->
+        <!--                                <label class="form-label">Tanggal Lahir</label>-->
+        <!--                                <input type="date" name="tanggal_lahir" value="<?= htmlspecialchars($siswa_edit['tanggal_lahir']) ?>" class="form-input">-->
+        <!--                            </div>-->
 
-    <!--                        <div class="form-group">-->
-    <!--                            <label class="form-label">Sekolah Asal</label>-->
-    <!--                            <input type="text" name="sekolah_asal" value="<?= htmlspecialchars($siswa_edit['sekolah_asal']) ?>" class="form-input">-->
-    <!--                        </div>-->
-    <!--                    </div>-->
-    <!--                </div>-->
-    <!--                <div class="modal-footer">-->
-    <!--                    <button type="button" onclick="closeModal('editModal')" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 mr-2">-->
-    <!--                        Batal-->
-    <!--                    </button>-->
-    <!--                    <button type="submit" class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 flex items-center">-->
-    <!--                        <i class="fas fa-save mr-2"></i> Simpan Perubahan-->
-    <!--                    </button>-->
-    <!--                </div>-->
-    <!--            </form>-->
-    <!--        <?php else: ?>-->
-    <!--            <div class="modal-body">-->
-    <!--                <div class="text-center py-8 text-red-600">-->
-    <!--                    <i class="fas fa-exclamation-triangle text-2xl"></i>-->
-    <!--                    <p class="mt-2">Data siswa tidak ditemukan</p>-->
-    <!--                    <button onclick="closeModal('editModal')" class="mt-4 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">-->
-    <!--                        Tutup-->
-    <!--                    </button>-->
-    <!--                </div>-->
-    <!--            </div>-->
-    <!--        <?php endif; ?>-->
+        <!--                            <div class="form-group">-->
+        <!--                                <label class="form-label">Jenis Kelamin</label>-->
+        <!--                                <select name="jenis_kelamin" class="form-input">-->
+        <!--                                    <option value="L" <?= $siswa_edit['jenis_kelamin'] == 'L' ? 'selected' : '' ?>>Laki-laki</option>-->
+        <!--                                    <option value="P" <?= $siswa_edit['jenis_kelamin'] == 'P' ? 'selected' : '' ?>>Perempuan</option>-->
+        <!--                                </select>-->
+        <!--                            </div>-->
+
+        <!--                            <div class="form-group">-->
+        <!--                                <label class="form-label">Agama</label>-->
+        <!--                                <select name="agama" class="form-input">-->
+        <!--                                    <option value="">Pilih Agama</option>-->
+        <!--                                    <option value="Islam" <?= $siswa_edit['agama'] == 'Islam' ? 'selected' : '' ?>>Islam</option>-->
+        <!--                                    <option value="Kristen" <?= $siswa_edit['agama'] == 'Kristen' ? 'selected' : '' ?>>Kristen</option>-->
+        <!--                                    <option value="Katolik" <?= $siswa_edit['agama'] == 'Katolik' ? 'selected' : '' ?>>Katolik</option>-->
+        <!--                                    <option value="Hindu" <?= $siswa_edit['agama'] == 'Hindu' ? 'selected' : '' ?>>Hindu</option>-->
+        <!--                                    <option value="Buddha" <?= $siswa_edit['agama'] == 'Buddha' ? 'selected' : '' ?>>Buddha</option>-->
+        <!--                                    <option value="Konghucu" <?= $siswa_edit['agama'] == 'Konghucu' ? 'selected' : '' ?>>Konghucu</option>-->
+        <!--                                </select>-->
+        <!--                            </div>-->
+
+        <!--                            <div class="form-group">-->
+        <!--                                <label class="form-label">Kelas Sekolah</label>-->
+        <!--                                <select name="kelas" class="form-input">-->
+        <!--                                    <option value="">Pilih Kelas</option>-->
+        <!--                                    <option value="Paud" <?= $siswa_edit['kelas'] == 'Paud' ? 'selected' : '' ?>>Paud</option>-->
+        <!--                                    <option value="TK" <?= $siswa_edit['kelas'] == 'TK' ? 'selected' : '' ?>>TK</option>-->
+        <!--                                    <option value="1 SD" <?= $siswa_edit['kelas'] == '1 SD' ? 'selected' : '' ?>>1 SD</option>-->
+        <!--                                    <option value="2 SD" <?= $siswa_edit['kelas'] == '2 SD' ? 'selected' : '' ?>>2 SD</option>-->
+        <!--                                    <option value="3 SD" <?= $siswa_edit['kelas'] == '3 SD' ? 'selected' : '' ?>>3 SD</option>-->
+        <!--                                    <option value="4 SD" <?= $siswa_edit['kelas'] == '4 SD' ? 'selected' : '' ?>>4 SD</option>-->
+        <!--                                    <option value="5 SD" <?= $siswa_edit['kelas'] == '5 SD' ? 'selected' : '' ?>>5 SD</option>-->
+        <!--                                    <option value="6 SD" <?= $siswa_edit['kelas'] == '6 SD' ? 'selected' : '' ?>>6 SD</option>-->
+        <!--                                    <option value="7 SMP" <?= $siswa_edit['kelas'] == '7 SMP' ? 'selected' : '' ?>>7 SMP</option>-->
+        <!--                                    <option value="8 SMP" <?= $siswa_edit['kelas'] == '8 SMP' ? 'selected' : '' ?>>8 SMP</option>-->
+        <!--                                    <option value="9 SMP" <?= $siswa_edit['kelas'] == '9 SMP' ? 'selected' : '' ?>>9 SMP</option>-->
+        <!--                                    <option value="10 SMA" <?= $siswa_edit['kelas'] == '10 SMA' ? 'selected' : '' ?>>10 SMA</option>-->
+        <!--                                    <option value="11 SMA" <?= $siswa_edit['kelas'] == '11 SMA' ? 'selected' : '' ?>>11 SMA</option>-->
+        <!--                                    <option value="12 SMA" <?= $siswa_edit['kelas'] == '12 SMA' ? 'selected' : '' ?>>12 SMA</option>-->
+        <!--                                    <option value="Alumni" <?= $siswa_edit['kelas'] == 'Alumni' ? 'selected' : '' ?>>Alumni</option>-->
+        <!--                                    <option value="Umum" <?= $siswa_edit['kelas'] == 'Umum' ? 'selected' : '' ?>>Umum</option>-->
+        <!--                                </select>-->
+        <!--                            </div>-->
+        <!--                        </div>-->
+
+        <!--                        <div class="form-group">-->
+        <!--                            <label class="form-label">Alamat</label>-->
+        <!--                            <textarea name="alamat" class="form-input" rows="3"><?= htmlspecialchars($siswa_edit['alamat']) ?></textarea>-->
+        <!--                        </div>-->
+
+        <!--                        <div class="form-group">-->
+        <!--                            <label class="form-label">Sekolah Asal</label>-->
+        <!--                            <input type="text" name="sekolah_asal" value="<?= htmlspecialchars($siswa_edit['sekolah_asal']) ?>" class="form-input">-->
+        <!--                        </div>-->
+        <!--                    </div>-->
+        <!--                </div>-->
+        <!--                <div class="modal-footer">-->
+        <!--                    <button type="button" onclick="closeModal('editModal')" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 mr-2">-->
+        <!--                        Batal-->
+        <!--                    </button>-->
+        <!--                    <button type="submit" class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 flex items-center">-->
+        <!--                        <i class="fas fa-save mr-2"></i> Simpan Perubahan-->
+        <!--                    </button>-->
+        <!--                </div>-->
+        <!--            </form>-->
+        <!--        <?php else: ?>-->
+        <!--            <div class="modal-body">-->
+        <!--                <div class="text-center py-8 text-red-600">-->
+        <!--                    <i class="fas fa-exclamation-triangle text-2xl"></i>-->
+        <!--                    <p class="mt-2">Data siswa tidak ditemukan</p>-->
+        <!--                    <button onclick="closeModal('editModal')" class="mt-4 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">-->
+        <!--                        Tutup-->
+        <!--                    </button>-->
+        <!--                </div>-->
+        <!--            </div>-->
+        <!--        <?php endif; ?>-->
     <!--    </div>-->
     <!--</div>-->
 
@@ -1156,17 +1237,17 @@ if ($guru_id > 0) {
                 document.body.style.overflow = 'auto';
             });
         });
-        
+
         // Dropdown functionality
         document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-            toggle.addEventListener('click', function(e) {
+            toggle.addEventListener('click', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
-                
+
                 const dropdownGroup = this.closest('.mb-1');
                 const submenu = dropdownGroup.querySelector('.dropdown-submenu');
                 const arrow = this.querySelector('.arrow');
-                
+
                 // Toggle current dropdown
                 if (submenu.style.display === 'block') {
                     submenu.style.display = 'none';
@@ -1181,7 +1262,7 @@ if ($guru_id > 0) {
                         t.classList.remove('open');
                         t.querySelector('.arrow').style.transform = 'rotate(0deg)';
                     });
-                    
+
                     // Open this dropdown
                     submenu.style.display = 'block';
                     arrow.style.transform = 'rotate(-90deg)';
@@ -1191,7 +1272,7 @@ if ($guru_id > 0) {
         });
 
         // Close dropdowns when clicking outside
-        document.addEventListener('click', function(e) {
+        document.addEventListener('click', function (e) {
             if (!e.target.closest('.mb-1')) {
                 document.querySelectorAll('.dropdown-submenu').forEach(submenu => {
                     submenu.style.display = 'none';
@@ -1251,7 +1332,7 @@ if ($guru_id > 0) {
         }
 
         // Close modal when clicking outside
-        window.onclick = function(event) {
+        window.onclick = function (event) {
             const modals = ['detailModal', 'editModal'];
             modals.forEach(modalId => {
                 const modal = document.getElementById(modalId);
@@ -1262,7 +1343,7 @@ if ($guru_id > 0) {
         }
 
         // Auto open modals based on URL parameters
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             <?php if (isset($_GET['action']) && $_GET['action'] == 'detail'): ?>
                 openModal('detailModal');
             <?php endif; ?>
@@ -1295,4 +1376,5 @@ if ($guru_id > 0) {
         });
     </script>
 </body>
+
 </html>
