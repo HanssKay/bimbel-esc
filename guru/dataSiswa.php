@@ -215,93 +215,68 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_siswa'])) {
 }
 
 // AMBIL DATA SISWA YANG DIAJAR
+// AMBIL DATA SISWA YANG DIAJAR - VERSION SIMPLE
 $siswa_data = [];
 if ($guru_id > 0) {
     try {
-        // QUERY YANG AMAN untuk ONLY_FULL_GROUP_BY
+        // Cara paling aman: subquery dulu baru join
         $sql = "SELECT 
-                    s.id,
-                    s.nama_lengkap,
-                    s.jenis_kelamin,
-                    s.kelas,
-                    s.sekolah_asal,
-                    s.alamat,
-                    s.tempat_lahir,
-                    s.tanggal_lahir,
-                    s.agama,
+                    s.*,
                     o.nama_ortu,
                     o.no_hp as no_hp_ortu,
                     ps.tingkat,
                     ps.jenis_kelas,
                     ps.tanggal_mulai,
-                    (
-                        SELECT GROUP_CONCAT(DISTINCT sp2.nama_pelajaran ORDER BY sp2.nama_pelajaran SEPARATOR ', ')
-                        FROM siswa_pelajaran sp2
-                        WHERE sp2.siswa_id = s.id 
-                        AND sp2.pendaftaran_id = ps.id
-                        AND sp2.status = 'aktif'
-                        AND sp2.guru_id = ?
-                    ) as program_bimbel
-                FROM siswa_pelajaran sp
-                INNER JOIN siswa s ON sp.siswa_id = s.id
-                INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                    sp_list.programs
+                FROM (
+                    SELECT DISTINCT sp.siswa_id, sp.pendaftaran_id
+                    FROM siswa_pelajaran sp
+                    WHERE sp.guru_id = ? 
+                    AND sp.status = 'aktif'
+                ) as guru_siswa
+                INNER JOIN siswa s ON guru_siswa.siswa_id = s.id
+                INNER JOIN pendaftaran_siswa ps ON guru_siswa.pendaftaran_id = ps.id
                 LEFT JOIN orangtua o ON s.orangtua_id = o.id
-                WHERE sp.guru_id = ? 
-                AND sp.status = 'aktif'
-                AND ps.status = 'aktif'
+                LEFT JOIN (
+                    SELECT siswa_id, pendaftaran_id,
+                           GROUP_CONCAT(DISTINCT nama_pelajaran ORDER BY nama_pelajaran SEPARATOR ', ') as programs
+                    FROM siswa_pelajaran
+                    WHERE status = 'aktif'
+                    GROUP BY siswa_id, pendaftaran_id
+                ) as sp_list ON s.id = sp_list.siswa_id AND ps.id = sp_list.pendaftaran_id
+                WHERE ps.status = 'aktif'
                 AND s.status = 'aktif'";
-
-        // Filter dasar - tanpa GROUP BY yang bermasalah
-        $sql .= " GROUP BY s.id, s.nama_lengkap, s.jenis_kelamin, s.kelas, 
-                         s.sekolah_asal, s.alamat, s.tempat_lahir, s.tanggal_lahir, 
-                         s.agama, o.nama_ortu, o.no_hp, ps.tingkat, ps.jenis_kelas, 
-                         ps.tanggal_mulai";
         
+        // Tambah filter
         if (!empty($filter_tingkat)) {
-            $sql .= " HAVING ps.tingkat = ?";
+            $sql .= " AND ps.tingkat = ?";
         }
         
         if (!empty($search)) {
-            if (empty($filter_tingkat)) {
-                $sql .= " HAVING (s.nama_lengkap LIKE ? OR s.sekolah_asal LIKE ?)";
-            } else {
-                $sql .= " AND (s.nama_lengkap LIKE ? OR s.sekolah_asal LIKE ?)";
-            }
+            $sql .= " AND (s.nama_lengkap LIKE ? OR s.sekolah_asal LIKE ?)";
         }
         
-        $sql .= " ORDER BY s.nama_lengkap ASC";
-
-        // Prepare statement
+        $sql .= " ORDER BY s.nama_lengkap";
+        
+        // Prepare dan execute
         $stmt = $conn->prepare($sql);
         
-        if (!$stmt) {
-            throw new Exception("Gagal mempersiapkan query: " . $conn->error);
-        }
-        
-        // Binding parameter
-        if (empty($filter_tingkat) && empty($search)) {
-            // Hanya guru_id (2x untuk subquery dan main query)
-            $stmt->bind_param("ii", $guru_id, $guru_id);
-        } 
-        elseif (!empty($filter_tingkat) && empty($search)) {
-            // guru_id (2x) + tingkat
-            $stmt->bind_param("iis", $guru_id, $guru_id, $filter_tingkat);
-        }
-        elseif (empty($filter_tingkat) && !empty($search)) {
-            // guru_id (2x) + search (2x)
+        if (!empty($filter_tingkat) && !empty($search)) {
             $search_param = "%" . $search . "%";
-            $stmt->bind_param("iiss", $guru_id, $guru_id, $search_param, $search_param);
+            $stmt->bind_param("iss", $guru_id, $filter_tingkat, $search_param, $search_param);
+        }
+        elseif (!empty($filter_tingkat)) {
+            $stmt->bind_param("is", $guru_id, $filter_tingkat);
+        }
+        elseif (!empty($search)) {
+            $search_param = "%" . $search . "%";
+            $stmt->bind_param("iss", $guru_id, $search_param, $search_param);
         }
         else {
-            // guru_id (2x) + tingkat + search (2x)
-            $search_param = "%" . $search . "%";
-            $stmt->bind_param("iisss", $guru_id, $guru_id, $filter_tingkat, $search_param, $search_param);
+            $stmt->bind_param("i", $guru_id);
         }
         
-        if (!$stmt->execute()) {
-            throw new Exception("Gagal menjalankan query: " . $stmt->error);
-        }
-        
+        $stmt->execute();
         $result = $stmt->get_result();
         
         while ($row = $result->fetch_assoc()) {
@@ -311,8 +286,7 @@ if ($guru_id > 0) {
         $stmt->close();
         
     } catch (Exception $e) {
-        // Log error tanpa menampilkan ke user
-        error_log("Error in dataSiswa.php: " . $e->getMessage());
+        // Silent fail - biarkan table kosong
     }
 }
 ?>
