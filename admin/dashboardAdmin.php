@@ -166,51 +166,51 @@ try {
         }
     }
 
-// 4. Guru Aktif - SIMPLIFIED VERSION
-$guru_aktif = [];
+    // 4. Guru Aktif - SIMPLIFIED VERSION
+    $guru_aktif = [];
 
-// Ambil data guru dulu
-$sql_guru = "SELECT * FROM guru WHERE status = 'aktif' ORDER BY id ASC LIMIT 3";
-$result_guru = $conn->query($sql_guru);
+    // Ambil data guru dulu
+    $sql_guru = "SELECT * FROM guru WHERE status = 'aktif' ORDER BY id ASC LIMIT 3";
+    $result_guru = $conn->query($sql_guru);
 
-if ($result_guru && $result_guru->num_rows > 0) {
-    while ($guru = $result_guru->fetch_assoc()) {
-        // Ambil data user
-        $user_id = $guru['user_id'];
-        $sql_user = "SELECT full_name, email FROM users WHERE id = ?";
-        $stmt_user = $conn->prepare($sql_user);
-        if ($stmt_user) {
-            $stmt_user->bind_param("i", $user_id);
-            $stmt_user->execute();
-            $result_user = $stmt_user->get_result();
-            $user_data = $result_user->fetch_assoc();
-            $stmt_user->close();
-            
-            // Gabungkan data
-            $guru['full_name'] = $user_data['full_name'] ?? 'Unknown';
-            $guru['email'] = $user_data['email'] ?? '';
-        }
-        
-        // Hitung jumlah siswa yang diajar
-        $guru_id = $guru['id'];
-        $sql_count = "SELECT COUNT(*) as jumlah_siswa 
+    if ($result_guru && $result_guru->num_rows > 0) {
+        while ($guru = $result_guru->fetch_assoc()) {
+            // Ambil data user
+            $user_id = $guru['user_id'];
+            $sql_user = "SELECT full_name, email FROM users WHERE id = ?";
+            $stmt_user = $conn->prepare($sql_user);
+            if ($stmt_user) {
+                $stmt_user->bind_param("i", $user_id);
+                $stmt_user->execute();
+                $result_user = $stmt_user->get_result();
+                $user_data = $result_user->fetch_assoc();
+                $stmt_user->close();
+
+                // Gabungkan data
+                $guru['full_name'] = $user_data['full_name'] ?? 'Unknown';
+                $guru['email'] = $user_data['email'] ?? '';
+            }
+
+            // Hitung jumlah siswa yang diajar
+            $guru_id = $guru['id'];
+            $sql_count = "SELECT COUNT(*) as jumlah_siswa 
                       FROM siswa_pelajaran 
                       WHERE guru_id = ? AND status = 'aktif'";
-        $stmt_count = $conn->prepare($sql_count);
-        if ($stmt_count) {
-            $stmt_count->bind_param("i", $guru_id);
-            $stmt_count->execute();
-            $result_count = $stmt_count->get_result();
-            $count_data = $result_count->fetch_assoc();
-            $guru['jumlah_siswa'] = $count_data['jumlah_siswa'] ?? 0;
-            $stmt_count->close();
-        } else {
-            $guru['jumlah_siswa'] = 0;
+            $stmt_count = $conn->prepare($sql_count);
+            if ($stmt_count) {
+                $stmt_count->bind_param("i", $guru_id);
+                $stmt_count->execute();
+                $result_count = $stmt_count->get_result();
+                $count_data = $result_count->fetch_assoc();
+                $guru['jumlah_siswa'] = $count_data['jumlah_siswa'] ?? 0;
+                $stmt_count->close();
+            } else {
+                $guru['jumlah_siswa'] = 0;
+            }
+
+            $guru_aktif[] = $guru;
         }
-        
-        $guru_aktif[] = $guru;
     }
-}
 
     // 5. Pendaftaran Terbaru
     $pendaftaran_terbaru = [];
@@ -630,23 +630,23 @@ if ($result_guru && $result_guru->num_rows > 0) {
                     <div class="px-4 py-2 sm:p-6">
                         <div class="flow-root">
                             <ul class="divide-y divide-gray-200">
+                                <!-- Di bagian yang menampilkan data guru: -->
                                 <?php if (count($guru_aktif) > 0): ?>
                                     <?php foreach ($guru_aktif as $guru): ?>
                                         <li class="py-3">
                                             <div class="flex items-center space-x-4">
                                                 <div class="flex-shrink-0">
                                                     <div class="h-10 w-10 rounded-full 
-                                                        <?php
-                                                        // Warna berdasarkan pengalaman atau bidang
-                                                        $experience = $guru['pengalaman_tahun'] ?? 0;
-                                                        if ($experience >= 5) {
-                                                            echo 'bg-purple-100 text-purple-600';
-                                                        } elseif ($experience >= 3) {
-                                                            echo 'bg-indigo-100 text-indigo-600';
-                                                        } else {
-                                                            echo 'bg-green-100 text-green-600';
-                                                        }
-                                                        ?> flex items-center justify-center">
+                        <?php
+                        $experience = $guru['pengalaman_tahun'] ?? 0;
+                        if ($experience >= 5) {
+                            echo 'bg-purple-100 text-purple-600';
+                        } elseif ($experience >= 3) {
+                            echo 'bg-indigo-100 text-indigo-600';
+                        } else {
+                            echo 'bg-green-100 text-green-600';
+                        }
+                        ?> flex items-center justify-center">
                                                         <i class="fas fa-user-tie"></i>
                                                     </div>
                                                 </div>
@@ -670,14 +670,6 @@ if ($result_guru && $result_guru->num_rows > 0) {
                                                     <div class="text-xs text-gray-500">
                                                         Pengalaman: <?php echo $guru['pengalaman_tahun'] ?? 0; ?> tahun
                                                     </div>
-                                                    <?php if (!empty($guru['status_pegawai'])): ?>
-                                                        <span class="mt-1 px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                                            <?php echo $guru['status_pegawai'] == 'tetap'
-                                                                ? 'bg-green-100 text-green-800'
-                                                                : 'bg-yellow-100 text-yellow-800'; ?>">
-                                                            <?php echo ucfirst($guru['status_pegawai']); ?>
-                                                        </span>
-                                                    <?php endif; ?>
                                                 </div>
                                             </div>
                                         </li>
