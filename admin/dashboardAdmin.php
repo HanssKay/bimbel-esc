@@ -166,22 +166,18 @@ try {
         }
     }
 
-    // 4. Guru Aktif dengan jumlah siswa yang diajar
+    // 4. Guru Aktif dengan jumlah siswa yang diajar - COMPATIBLE VERSION
     $guru_aktif = [];
-    $sql = "SELECT g.id, g.user_id, g.status,
-        ANY_VALUE(u.full_name) as full_name,
-        ANY_VALUE(u.email) as email,
-        COUNT(DISTINCT sp.siswa_id) as jumlah_siswa,
-        ANY_VALUE(g.bidang_keahlian) as bidang_keahlian,
-        ANY_VALUE(g.pendidikan_terakhir) as pendidikan_terakhir,
-        ANY_VALUE(g.pengalaman_tahun) as pengalaman_tahun,
-        ANY_VALUE(g.tanggal_bergabung) as tanggal_bergabung
+    $sql = "SELECT g.*, u.full_name, u.email, 
+        g.bidang_keahlian, g.pendidikan_terakhir, 
+        g.pengalaman_tahun, g.status, g.tanggal_bergabung,
+        (SELECT COUNT(DISTINCT sp2.siswa_id) 
+         FROM siswa_pelajaran sp2 
+         WHERE sp2.guru_id = g.id AND sp2.status = 'aktif') as jumlah_siswa
         FROM guru g
         JOIN users u ON g.user_id = u.id
-        LEFT JOIN siswa_pelajaran sp ON g.id = sp.guru_id 
         WHERE g.status = 'aktif'
-        GROUP BY g.id
-        ORDER BY full_name ASC LIMIT 3";
+        ORDER BY u.full_name ASC LIMIT 3";
 
     $result = $conn->query($sql);
     if ($result && $result->num_rows > 0) {
@@ -189,6 +185,7 @@ try {
             $guru_aktif[] = $row;
         }
     }
+
     // 5. Pendaftaran Terbaru
     $pendaftaran_terbaru = [];
     $sql = "SELECT ps.*, s.nama_lengkap, s.kelas,
