@@ -166,44 +166,41 @@ try {
         }
     }
 
-    // 4. Guru Aktif - PRODUCTION READY VERSION
-    $guru_aktif = [];
+// 4. Guru Aktif - NO SUBQUERY VERSION
+$guru_aktif = [];
 
-    // Query yang compatible dengan strict mode MySQL/MariaDB
-    $sql = "SELECT 
-        g.id,
-        g.user_id,
-        g.bidang_keahlian,
-        g.pendidikan_terakhir,
-        g.pengalaman_tahun,
-        g.status,
-        g.tanggal_bergabung,
-        u.full_name,
-        u.email,
-        COALESCE(siswa_counts.jumlah_siswa, 0) as jumlah_siswa
-        FROM guru g
-        INNER JOIN users u ON g.user_id = u.id
-        LEFT JOIN (
-            SELECT guru_id, COUNT(siswa_id) as jumlah_siswa
-            FROM siswa_pelajaran 
-            WHERE status = 'aktif'
-            GROUP BY guru_id
-        ) siswa_counts ON g.id = siswa_counts.guru_id
-        WHERE g.status = 'aktif'
-        ORDER BY u.full_name ASC 
-        LIMIT 3";
+// Ambil data guru dulu
+$sql_guru = "SELECT g.*, u.full_name, u.email
+             FROM guru g
+             INNER JOIN users u ON g.user_id = u.id
+             WHERE g.status = 'aktif'
+             ORDER BY u.full_name ASC 
+             LIMIT 3";
 
-    $stmt = $conn->prepare($sql);
-    if ($stmt) {
-        $stmt->execute();
-        $result = $stmt->get_result();
-        if ($result && $result->num_rows > 0) {
-            while ($row = $result->fetch_assoc()) {
-                $guru_aktif[] = $row;
-            }
+$result = $conn->query($sql_guru);
+if ($result && $result->num_rows > 0) {
+    while ($guru = $result->fetch_assoc()) {
+        // Hitung jumlah siswa terpisah
+        $guru_id = $guru['id'];
+        $count_sql = "SELECT COUNT(*) as jumlah_siswa 
+                      FROM siswa_pelajaran 
+                      WHERE guru_id = ? AND status = 'aktif'";
+        
+        $stmt = $conn->prepare($count_sql);
+        if ($stmt) {
+            $stmt->bind_param("i", $guru_id);
+            $stmt->execute();
+            $count_result = $stmt->get_result();
+            $count_data = $count_result->fetch_assoc();
+            $guru['jumlah_siswa'] = $count_data['jumlah_siswa'] ?? 0;
+            $stmt->close();
+        } else {
+            $guru['jumlah_siswa'] = 0;
         }
-        $stmt->close();
+        
+        $guru_aktif[] = $guru;
     }
+}
 
     // 5. Pendaftaran Terbaru
     $pendaftaran_terbaru = [];
@@ -538,7 +535,7 @@ try {
             </div>
 
             <!-- Charts and Recent Data -->
-            <div class="grid grid-cols-1 gap-8 mb-8">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
                 <!-- Siswa Terbaru -->
                 <div class="bg-white shadow rounded-lg">
                     <div class="px-4 py-5 sm:px-6 border-b border-gray-200">
@@ -614,7 +611,75 @@ try {
                 </div>
 
                 <!-- Guru Aktif -->
-
+                <div class="bg-white shadow rounded-lg">
+                    <div class="px-4 py-5 sm:px-6 border-b border-gray-200">
+                        <h3 class="text-lg font-medium leading-6 text-gray-900">
+                            <i class="fas fa-chalkboard-teacher mr-2"></i> Guru Aktif
+                        </h3>
+                    </div>
+                    <div class="px-4 py-2 sm:p-6">
+                        <div class="flow-root">
+                            <ul class="divide-y divide-gray-200">
+                                <!-- Di bagian yang menampilkan data guru: -->
+                                <?php if (count($guru_aktif) > 0): ?>
+                                    <?php foreach ($guru_aktif as $guru): ?>
+                                        <li class="py-3">
+                                            <div class="flex items-center space-x-4">
+                                                <div class="flex-shrink-0">
+                                                    <div class="h-10 w-10 rounded-full 
+                        <?php
+                        $experience = $guru['pengalaman_tahun'] ?? 0;
+                        if ($experience >= 5) {
+                            echo 'bg-purple-100 text-purple-600';
+                        } elseif ($experience >= 3) {
+                            echo 'bg-indigo-100 text-indigo-600';
+                        } else {
+                            echo 'bg-green-100 text-green-600';
+                        }
+                        ?> flex items-center justify-center">
+                                                        <i class="fas fa-user-tie"></i>
+                                                    </div>
+                                                </div>
+                                                <div class="flex-1 min-w-0">
+                                                    <p class="text-sm font-medium text-gray-900 truncate">
+                                                        <?php echo htmlspecialchars($guru['full_name'] ?? 'N/A'); ?>
+                                                    </p>
+                                                    <p class="text-sm text-gray-500 truncate">
+                                                        <?php if (!empty($guru['bidang_keahlian'])): ?>
+                                                            <?php echo htmlspecialchars($guru['bidang_keahlian']); ?>
+                                                        <?php endif; ?>
+                                                        <?php if (!empty($guru['pendidikan_terakhir'])): ?>
+                                                            | <?php echo htmlspecialchars($guru['pendidikan_terakhir']); ?>
+                                                        <?php endif; ?>
+                                                    </p>
+                                                </div>
+                                                <div class="text-right">
+                                                    <div class="text-sm font-semibold text-gray-900">
+                                                        <?php echo $guru['jumlah_siswa'] ?? 0; ?> siswa
+                                                    </div>
+                                                    <div class="text-xs text-gray-500">
+                                                        Pengalaman: <?php echo $guru['pengalaman_tahun'] ?? 0; ?> tahun
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </li>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <li class="py-4 text-center text-gray-500">
+                                        <i class="fas fa-chalkboard-teacher text-2xl mb-2"></i>
+                                        <p>Tidak ada guru aktif</p>
+                                    </li>
+                                <?php endif; ?>
+                            </ul>
+                        </div>
+                        <div class="mt-4 text-center">
+                            <a href="dataGuru.php?status=aktif"
+                                class="inline-flex items-center text-sm text-blue-600 hover:text-blue-900">
+                                <i class="fas fa-list mr-1"></i> Lihat semua guru aktif
+                            </a>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Quick Actions -->
