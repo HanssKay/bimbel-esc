@@ -166,47 +166,45 @@ try {
         }
     }
 
-    // 4. Guru Aktif - VERSI SUPER AMAN
+    // 4. Guru Aktif - PRODUCTION READY VERSION
     $guru_aktif = [];
 
-    // Step 1: Ambil data guru
-    $sql_guru = "SELECT * FROM guru WHERE status = 'aktif' LIMIT 3";
-    $result_guru = $conn->query($sql_guru);
+    // Query yang compatible dengan strict mode MySQL/MariaDB
+    $sql = "SELECT 
+        g.id,
+        g.user_id,
+        g.bidang_keahlian,
+        g.pendidikan_terakhir,
+        g.pengalaman_tahun,
+        g.status,
+        g.tanggal_bergabung,
+        u.full_name,
+        u.email,
+        COALESCE(siswa_counts.jumlah_siswa, 0) as jumlah_siswa
+        FROM guru g
+        INNER JOIN users u ON g.user_id = u.id
+        LEFT JOIN (
+            SELECT guru_id, COUNT(siswa_id) as jumlah_siswa
+            FROM siswa_pelajaran 
+            WHERE status = 'aktif'
+            GROUP BY guru_id
+        ) siswa_counts ON g.id = siswa_counts.guru_id
+        WHERE g.status = 'aktif'
+        ORDER BY u.full_name ASC 
+        LIMIT 3";
 
-    if ($result_guru && $result_guru->num_rows > 0) {
-        while ($guru = $result_guru->fetch_assoc()) {
-            // Step 2: Ambil data user
-            $user_id = $guru['user_id'];
-            $sql_user = "SELECT full_name, email FROM users WHERE id = ?";
-            $stmt_user = $conn->prepare($sql_user);
-            $stmt_user->bind_param("i", $user_id);
-            $stmt_user->execute();
-            $result_user = $stmt_user->get_result();
-            $user_data = $result_user->fetch_assoc();
-            $stmt_user->close();
-
-            // Step 3: Hitung jumlah siswa
-            $guru_id = $guru['id'];
-            $sql_count = "SELECT COUNT(*) as jumlah_siswa 
-                      FROM siswa_pelajaran 
-                      WHERE guru_id = ? AND status = 'aktif'";
-            $stmt_count = $conn->prepare($sql_count);
-            $stmt_count->bind_param("i", $guru_id);
-            $stmt_count->execute();
-            $result_count = $stmt_count->get_result();
-            $count_data = $result_count->fetch_assoc();
-            $stmt_count->close();
-
-            // Gabungkan semua data
-            $guru_data = array_merge($guru, [
-                'full_name' => $user_data['full_name'] ?? 'Unknown',
-                'email' => $user_data['email'] ?? '',
-                'jumlah_siswa' => $count_data['jumlah_siswa'] ?? 0
-            ]);
-
-            $guru_aktif[] = $guru_data;
+    $stmt = $conn->prepare($sql);
+    if ($stmt) {
+        $stmt->execute();
+        $result = $stmt->get_result();
+        if ($result && $result->num_rows > 0) {
+            while ($row = $result->fetch_assoc()) {
+                $guru_aktif[] = $row;
+            }
         }
+        $stmt->close();
     }
+
     // 5. Pendaftaran Terbaru
     $pendaftaran_terbaru = [];
     $sql = "SELECT ps.*, s.nama_lengkap, s.kelas,
