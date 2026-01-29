@@ -169,15 +169,19 @@ try {
     // 4. Guru Aktif dengan jumlah siswa yang diajar
     $guru_aktif = [];
     $sql = "SELECT g.*, u.full_name, u.email, 
-            COUNT(DISTINCT sp.siswa_id) as jumlah_siswa,
-            g.bidang_keahlian, g.pendidikan_terakhir, 
-            g.pengalaman_tahun, g.status
-            FROM guru g
-            JOIN users u ON g.user_id = u.id
-            LEFT JOIN siswa_pelajaran sp ON g.id = sp.guru_id 
-            WHERE g.status = 'aktif'
-            GROUP BY g.id
-            ORDER BY u.full_name ASC LIMIT 3";
+        COALESCE(siswa_counts.jumlah_siswa, 0) as jumlah_siswa,
+        g.bidang_keahlian, g.pendidikan_terakhir, 
+        g.pengalaman_tahun, g.status, g.tanggal_bergabung
+        FROM guru g
+        JOIN users u ON g.user_id = u.id
+        LEFT JOIN (
+            SELECT guru_id, COUNT(DISTINCT siswa_id) as jumlah_siswa
+            FROM siswa_pelajaran
+            WHERE status = 'aktif'
+            GROUP BY guru_id
+        ) as siswa_counts ON g.id = siswa_counts.guru_id
+        WHERE g.status = 'aktif'
+        ORDER BY u.full_name ASC LIMIT 3";
 
     $result = $conn->query($sql);
     if ($result && $result->num_rows > 0) {
