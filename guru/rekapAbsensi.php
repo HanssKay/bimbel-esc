@@ -698,8 +698,8 @@ if ($filter_minggu > 0) {
                 </div>
                 
                 <div class="grid grid-cols-2 md:grid-cols-6 gap-4">
-                    <div class="bg-gray-50 rounded-lg p-4">
-                        <div class="flex items-center">
+                    <div class="bg-white rounded-lg p-4 shadow">
+                        <div class="flex items-center md:mt-5">
                             <div class="p-2 bg-gray-100 rounded-lg mr-3">
                                 <i class="fas fa-users text-gray-600"></i>
                             </div>
@@ -724,7 +724,7 @@ if ($filter_minggu > 0) {
                         </div>
                     </div>
                     <div class="bg-white rounded-lg p-4 shadow">
-                        <div class="flex items-center">
+                        <div class="flex items-center md:mt-5">
                             <div class="p-2 bg-green-100 rounded-lg mr-3">
                                 <i class="fas fa-check text-green-600"></i>
                             </div>
@@ -739,7 +739,7 @@ if ($filter_minggu > 0) {
                         <!--</div>-->
                     </div>
                     <div class="bg-white rounded-lg p-4 shadow">
-                        <div class="flex items-center">
+                        <div class="flex items-center md:mt-5">
                             <div class="p-2 bg-yellow-100 rounded-lg mr-3">
                                 <i class="fas fa-envelope text-yellow-600"></i>
                             </div>
@@ -754,7 +754,7 @@ if ($filter_minggu > 0) {
                         <!--</div>-->
                     </div>
                     <div class="bg-white rounded-lg p-4 shadow">
-                        <div class="flex items-center">
+                        <div class="flex items-center md:mt-5">
                             <div class="p-2 bg-blue-100 rounded-lg mr-3">
                                 <i class="fas fa-thermometer text-blue-600"></i>
                             </div>
@@ -769,7 +769,7 @@ if ($filter_minggu > 0) {
                         <!--</div>-->
                     </div>
                     <div class="bg-white rounded-lg p-4 shadow">
-                        <div class="flex mt-3 items-center">
+                        <div class="flex mt-3 items-center md:mt-5">
                             <div class="p-2 bg-red-100 rounded-lg mr-3">
                                 <i class="fas fa-times text-red-600"></i>
                             </div>
