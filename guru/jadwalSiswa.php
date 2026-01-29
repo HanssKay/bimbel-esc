@@ -1559,9 +1559,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran_guru' && isset($_GET
                                 class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 <option value="">-- Pilih Siswa terlebih dahulu --</option>
                             </select>
-                            <p class="text-xs text-gray-500 mt-1">
-                                * Hanya menampilkan mata pelajaran yang BELUM ADA JADWAL sama sekali
-                            </p>
                         </div>
 
                         <!-- Pilih Hari -->
@@ -2088,62 +2085,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran_guru' && isset($_GET
             });
         }
 
-        function loadMataPelajaranGuru(siswaId = null) {
-            const siswaIdVal = siswaId || document.getElementById('selectedSiswaId').value;
-            const pelajaranSelect = document.getElementById('tambahMataPelajaran');
-
-            console.log("loadMataPelajaranGuru called with siswaId:", siswaIdVal);
-
-            if (!siswaIdVal) {
-                console.log("No siswa selected");
-                pelajaranSelect.innerHTML = '<option value="">-- Pilih Siswa terlebih dahulu --</option>';
-                pelajaranSelect.disabled = true;
-                return;
-            }
-
-            // Tampilkan loading
-            pelajaranSelect.innerHTML = '<option value="">Memuat mata pelajaran...</option>';
-            pelajaranSelect.disabled = true;
-
-            // AJAX request khusus untuk guru
-            $.ajax({
-                url: 'jadwalSiswa.php',
-                type: 'GET',
-                data: {
-                    ajax: 'get_pelajaran_guru',
-                    siswa_id: siswaIdVal
-                },
-                dataType: 'json',
-                success: function (data) {
-                    console.log("AJAX Response mata pelajaran:", data);
-
-                    if (Array.isArray(data)) {
-                        if (data.length > 0) {
-                            let options = '<option value="">-- Pilih Mata Pelajaran --</option>';
-                            data.forEach(function (pelajaran) {
-                                const guruStatus = pelajaran.guru_id ? ' (Sudah ditugaskan)' : ' (Belum ditugaskan)';
-                                options += `<option value="${pelajaran.id}">${pelajaran.nama_pelajaran} - ${pelajaran.tingkat}${guruStatus}</option>`;
-                            });
-                            pelajaranSelect.innerHTML = options;
-                        } else {
-                            pelajaranSelect.innerHTML = '<option value="">Tidak ada mata pelajaran yang tersedia</option>';
-                        }
-                    } else {
-                        console.error("Invalid response format:", data);
-                        pelajaranSelect.innerHTML = '<option value="">Format response tidak valid</option>';
-                    }
-                    pelajaranSelect.disabled = false;
-                },
-                error: function (xhr, status, error) {
-                    console.error("AJAX Error mata pelajaran:", status, error);
-                    console.error("Response text:", xhr.responseText);
-                    pelajaranSelect.innerHTML = '<option value="">Gagal memuat mata pelajaran</option>';
-                    pelajaranSelect.disabled = false;
-                }
-            });
-        }
-
-        // Juga perbaiki fungsi selectSiswa untuk logging:
+        // Fungsi pilih siswa
         function selectSiswa(data) {
             console.log("Siswa selected:", data);
 
@@ -2182,6 +2124,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran_guru' && isset($_GET
             document.getElementById('clearSearch').style.display = 'none';
         }
 
+        // ==================== LOAD MATA PELAJARAN (GURU) ====================
         function loadMataPelajaranGuru(siswaId = null) {
             const siswaIdVal = siswaId || document.getElementById('selectedSiswaId').value;
             const pelajaranSelect = document.getElementById('tambahMataPelajaran');
@@ -2215,7 +2158,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran_guru' && isset($_GET
                         if (data.length > 0) {
                             let options = '<option value="">-- Pilih Mata Pelajaran --</option>';
                             data.forEach(function (pelajaran) {
-                                const guruStatus = pelajaran.guru_id ? ' (Sudah ditugaskan)' : ' (Belum ditugaskan)';
+                                const guruStatus = pelajaran.guru_id ? ' (Sudah Terjadwal)' : ' (Belum Terjadwal)';
                                 options += `<option value="${pelajaran.id}">${pelajaran.nama_pelajaran} - ${pelajaran.tingkat}${guruStatus}</option>`;
                             });
                             pelajaranSelect.innerHTML = options;
@@ -2235,35 +2178,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran_guru' && isset($_GET
                     pelajaranSelect.disabled = false;
                 }
             });
-        }
-
-        // Juga perbaiki fungsi selectSiswa untuk logging:
-        function selectSiswa(data) {
-            console.log("Siswa selected:", data);
-
-            const selectedSiswaId = document.getElementById('selectedSiswaId');
-            const searchInput = document.getElementById('searchSiswa');
-            const dropdown = document.getElementById('siswaDropdown');
-
-            selectedSiswaId.value = data.id;
-            searchInput.value = data.nama;
-            dropdown.style.display = 'none';
-
-            // Tampilkan info siswa yang dipilih
-            document.getElementById('selectedSiswaName').textContent = data.nama;
-            document.getElementById('selectedSiswaKelas').textContent = data.kelas;
-            document.getElementById('selectedSiswaSekolah').textContent = data.sekolah || '-';
-
-            if (data.mapel) {
-                document.getElementById('selectedSiswaMapel').textContent = 'Mata Pelajaran: ' + data.mapel;
-            }
-
-            document.getElementById('selectedSiswaInfo').classList.remove('hidden');
-            document.getElementById('clearSearch').style.display = 'none';
-
-            console.log("Calling loadMataPelajaranGuru with siswaId:", data.id);
-            // Load mata pelajaran untuk siswa ini
-            loadMataPelajaranGuru(data.id);
         }
 
         // ==================== VALIDASI FORM ====================
