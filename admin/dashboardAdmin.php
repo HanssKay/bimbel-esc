@@ -166,39 +166,32 @@ try {
         }
     }
 
-    // 4. Guru Aktif - ALTERNATIVE VERSION
+    // 4. Guru Aktif - MINIMAL VERSION
     $guru_aktif = [];
 
-    // Query paling aman tanpa JOIN sama sekali
-    $sql = "SELECT * FROM guru WHERE status = 'aktif' LIMIT 3";
-    $result = $conn->query($sql);
+    // Query minimal
+    $sql = "SELECT 
+        g.id, 
+        g.user_id, 
+        g.bidang_keahlian,
+        g.pendidikan_terakhir,
+        g.pengalaman_tahun,
+        g.status,
+        u.full_name
+        FROM guru g
+        LEFT JOIN users u ON g.user_id = u.id
+        WHERE g.status = 'aktif'
+        LIMIT 3";
 
-    if ($result && $result->num_rows > 0) {
-        while ($guru = $result->fetch_assoc()) {
-            // Ambil data user
-            $user_id = $guru['user_id'];
-            $user_sql = "SELECT full_name, email FROM users WHERE id = '$user_id'";
-            $user_result = $conn->query($user_sql);
-            if ($user_result && $user_row = $user_result->fetch_assoc()) {
-                $guru['full_name'] = $user_row['full_name'];
-                $guru['email'] = $user_row['email'];
-            } else {
-                $guru['full_name'] = 'Unknown';
-                $guru['email'] = '';
-            }
-
-            // Hitung jumlah siswa
-            $guru_id = $guru['id'];
-            $count_sql = "SELECT COUNT(*) as jumlah_siswa FROM siswa_pelajaran WHERE guru_id = '$guru_id' AND status = 'aktif'";
-            $count_result = $conn->query($count_sql);
-            if ($count_result && $count_row = $count_result->fetch_assoc()) {
-                $guru['jumlah_siswa'] = $count_row['jumlah_siswa'];
-            } else {
-                $guru['jumlah_siswa'] = 0;
-            }
-
-            $guru_aktif[] = $guru;
+    $stmt = $conn->prepare($sql);
+    if ($stmt) {
+        $stmt->execute();
+        $result = $stmt->get_result();
+        while ($row = $result->fetch_assoc()) {
+            $row['jumlah_siswa'] = 0; // Default value
+            $guru_aktif[] = $row;
         }
+        $stmt->close();
     }
 
     // 5. Pendaftaran Terbaru
