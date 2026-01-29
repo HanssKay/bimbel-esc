@@ -142,12 +142,22 @@ while ($row = $result_guru->fetch_assoc()) {
     $guru_list[] = $row;
 }
 
-// HITUNG STATISTIK
+// HITUNG STATISTIK sederhana
 $total_jadwal = count($jadwal_siswa);
 $total_siswa = count(array_unique(array_column($jadwal_siswa, 'siswa_id')));
 $total_guru = count(array_unique(array_column($jadwal_siswa, 'guru_id')));
 
-// Group by hari untuk statistik
+// Hitung total orang tua yang memiliki data
+$total_orangtua_terdata = 0;
+$orangtua_seen = [];
+foreach ($jadwal_siswa as $jadwal) {
+    if (!empty($jadwal['nama_ortu']) && !in_array($jadwal['nama_ortu'], $orangtua_seen)) {
+        $orangtua_seen[] = $jadwal['nama_ortu'];
+        $total_orangtua_terdata++;
+    }
+}
+
+// Group by hari untuk statistik - tetap sama
 $jadwal_by_hari = [];
 $jadwal_by_tingkat = [];
 $jadwal_by_pelajaran = [];
@@ -530,6 +540,39 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['hapus_jadwal'])) {
     }
 }
 
+// AJAX: Ambil daftar siswa untuk autocomplete
+if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
+    $siswa_list_ajax = [];
+
+    $sql_siswa_ajax = "SELECT 
+                        s.id, 
+                        s.nama_lengkap, 
+                        s.kelas,
+                        s.sekolah_asal,
+                        GROUP_CONCAT(DISTINCT CONCAT(o.hubungan_dengan_siswa, ': ', o.nama_ortu) ORDER BY 
+                            CASE o.hubungan_dengan_siswa 
+                                WHEN 'ayah' THEN 1
+                                WHEN 'ibu' THEN 2
+                                WHEN 'wali' THEN 3
+                                ELSE 4
+                            END SEPARATOR '; ') as orangtua_info
+                    FROM siswa s
+                    LEFT JOIN siswa_orangtua so ON s.id = so.siswa_id
+                    LEFT JOIN orangtua o ON so.orangtua_id = o.id
+                    WHERE s.status = 'aktif' 
+                    GROUP BY s.id
+                    ORDER BY s.nama_lengkap";
+
+    $result_siswa_ajax = $conn->query($sql_siswa_ajax);
+    while ($row = $result_siswa_ajax->fetch_assoc()) {
+        $siswa_list_ajax[] = $row;
+    }
+
+    header('Content-Type: application/json');
+    echo json_encode($siswa_list_ajax);
+    exit();
+}
+
 // AJAX: Ambil mata pelajaran berdasarkan siswa dan guru
 if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['siswa_id'])) {
     $siswa_id = $_GET['siswa_id'];
@@ -561,6 +604,116 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
         .stat-card:hover {
             transform: translateY(-5px);
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        /* CSS tambahan untuk autocomplete */
+        .autocomplete-container {
+            position: relative;
+            width: 100%;
+        }
+
+        .autocomplete-input {
+            width: 100%;
+            padding: 0.75rem 2.5rem 0.75rem 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+        }
+
+        .autocomplete-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+        }
+
+        .autocomplete-clear {
+            position: absolute;
+            right: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: #9ca3af;
+            cursor: pointer;
+            display: none;
+        }
+
+        .autocomplete-clear:hover {
+            color: #6b7280;
+        }
+
+        .autocomplete-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            max-height: 300px;
+            overflow-y: auto;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.5rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            display: none;
+        }
+
+        .autocomplete-item {
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            border-bottom: 1px solid #f3f4f6;
+            transition: background-color 0.2s;
+        }
+
+        .autocomplete-item:last-child {
+            border-bottom: none;
+        }
+
+        .autocomplete-item:hover {
+            background-color: #f9fafb;
+        }
+
+        .autocomplete-item.active {
+            background-color: #eff6ff;
+        }
+
+        .autocomplete-item .siswa-nama {
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .autocomplete-item .siswa-info {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 0.25rem;
+        }
+
+        .no-results {
+            padding: 1rem;
+            text-align: center;
+            color: #6b7280;
+            font-style: italic;
+        }
+
+        /* Loading spinner */
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
         }
 
         /* Dropdown styles */
@@ -1196,13 +1349,15 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
                                             <td><?php echo $no++; ?></td>
                                             <td>
                                                 <div class="font-medium text-gray-900">
-                                                    <?php echo htmlspecialchars($jadwal['nama_siswa']); ?></div>
+                                                    <?php echo htmlspecialchars($jadwal['nama_siswa']); ?>
+                                                </div>
                                                 <div class="text-xs text-gray-500"><?php echo $jadwal['kelas_sekolah']; ?></div>
                                                 <div class="text-xs text-gray-500"><?php echo $jadwal['sekolah_asal']; ?></div>
                                             </td>
                                             <td>
                                                 <div class="font-medium">
-                                                    <?php echo htmlspecialchars($jadwal['nama_pelajaran']); ?></div>
+                                                    <?php echo htmlspecialchars($jadwal['nama_pelajaran']); ?>
+                                                </div>
                                                 <span
                                                     class="badge <?php echo $jadwal['jenis_kelas'] == 'Excellent' ? 'badge-success' : 'badge-warning'; ?>">
                                                     <?php echo $jadwal['jenis_kelas']; ?>
@@ -1408,21 +1563,39 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
 
                 <form id="formTambahJadwal" method="POST" action="">
                     <div class="space-y-4">
-                        <!-- Pilih Siswa -->
+                        <!-- Pilih Siswa dengan Search/Autocomplete -->
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">
-                                Pilih Siswa
+                                Cari Siswa
+                                <span class="text-xs text-gray-500">(ketik nama siswa)</span>
                             </label>
-                            <select name="siswa_id" id="tambahSiswa" required
-                                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <option value="">-- Pilih Siswa --</option>
-                                <?php foreach ($siswa_list as $siswa): ?>
-                                    <option value="<?php echo $siswa['id']; ?>">
-                                        <?php echo htmlspecialchars($siswa['nama_lengkap']); ?>
-                                        (<?php echo $siswa['kelas']; ?>)
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
+                            <div class="autocomplete-container">
+                                <input type="text" id="searchSiswa" class="autocomplete-input"
+                                    placeholder="Ketik nama siswa..." autocomplete="off">
+                                <input type="hidden" name="siswa_id" id="selectedSiswaId">
+                                <button type="button" id="clearSearch" class="autocomplete-clear">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                                <div id="siswaDropdown" class="autocomplete-dropdown"></div>
+                            </div>
+
+                            <!-- Info siswa yang dipilih -->
+                            <div id="selectedSiswaInfo" class="mt-2 p-3 bg-blue-50 rounded-lg hidden">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <div class="font-medium text-gray-900" id="selectedSiswaName"></div>
+                                        <div class="text-sm text-gray-600">
+                                            Kelas: <span id="selectedSiswaKelas"></span> |
+                                            Sekolah: <span id="selectedSiswaSekolah"></span>
+                                        </div>
+                                        <div class="text-xs text-gray-500 mt-1" id="selectedSiswaOrangtua"></div>
+                                    </div>
+                                    <button type="button" onclick="clearSelectedSiswa()"
+                                        class="text-gray-400 hover:text-gray-600">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Pilih Guru -->
@@ -1449,8 +1622,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
                             </label>
                             <select name="siswa_pelajaran_id" id="tambahMataPelajaran" required
                                 class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <option value="">-- Pilih Mata Pelajaran --</option>
-                                <!-- Data akan diisi via AJAX -->
+                                <option value="">-- Pilih Siswa terlebih dahulu --</option>
                             </select>
                             <p class="text-xs text-gray-500 mt-1">
                                 * Hanya menampilkan mata pelajaran yang belum memiliki jadwal
@@ -1718,19 +1890,35 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
         setInterval(updateServerTime, 1000);
         updateServerTime();
 
-        // Modal Functions
+        // ==================== VARIABEL GLOBAL ====================
+        let jadwalIdToDelete = null;
+        let siswaData = [];
+        let searchTimeout;
+        let searchCache = {};
+
+        // ==================== FUNGSI MODAL ====================
         function openTambahModal() {
             document.getElementById('modalTambah').classList.add('active');
             document.body.style.overflow = 'hidden';
+
             // Reset form
-            document.getElementById('tambahMataPelajaran').innerHTML = '<option value="">-- Pilih Mata Pelajaran --</option>';
+            clearSelectedSiswa();
+            document.getElementById('tambahGuru').value = '';
+            document.getElementById('tambahMataPelajaran').innerHTML = '<option value="">-- Pilih Siswa terlebih dahulu --</option>';
+            document.getElementById('tambahMataPelajaran').disabled = true;
+
+            // Focus ke search input
+            setTimeout(() => {
+                document.getElementById('searchSiswa').focus();
+            }, 100);
         }
 
         function closeTambahModal() {
             document.getElementById('modalTambah').classList.remove('active');
             document.body.style.overflow = 'auto';
             document.getElementById('formTambahJadwal').reset();
-            document.getElementById('tambahMataPelajaran').innerHTML = '<option value="">-- Pilih Mata Pelajaran --</option>';
+            clearSelectedSiswa();
+            searchCache = {}; // Clear cache
         }
 
         function openEditModal(jadwalId, hari, jamMulai, jamSelesai) {
@@ -1748,10 +1936,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
             document.body.style.overflow = 'auto';
         }
 
-        // Variabel global untuk menyimpan ID jadwal yang akan dihapus
-        let jadwalIdToDelete = null;
-
-        // Fungsi untuk membuka modal hapus
+        // ==================== MODAL HAPUS ====================
         function openHapusModal(jadwalId, namaSiswa, namaGuru, hari, waktu) {
             jadwalIdToDelete = jadwalId;
 
@@ -1766,14 +1951,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
             document.body.style.overflow = 'hidden';
         }
 
-        // Fungsi untuk menutup modal hapus
         function closeHapusModal() {
             document.getElementById('modalHapus').classList.remove('active');
             document.body.style.overflow = 'auto';
             jadwalIdToDelete = null;
         }
 
-        // Fungsi untuk memproses hapus
         function prosesHapus() {
             if (jadwalIdToDelete) {
                 document.getElementById('hapusJadwalId').value = jadwalIdToDelete;
@@ -1781,14 +1964,246 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
             }
         }
 
-        // AJAX: Ambil mata pelajaran berdasarkan siswa dan guru
-        function loadMataPelajaran() {
-            const siswaId = document.getElementById('tambahSiswa').value;
+        // ==================== AUTOSEARCH SISWA ====================
+        // Fungsi untuk load data siswa
+        function loadSiswaData() {
+            $.ajax({
+                url: 'jadwalSiswa.php',
+                type: 'GET',
+                data: {
+                    ajax: 'get_siswa_list'
+                },
+                dataType: 'json',
+                success: function (data) {
+                    siswaData = data;
+                    console.log('Data siswa loaded:', siswaData.length, 'records');
+                    // Inisialisasi autocomplete setelah data loaded
+                    initAutocomplete();
+                },
+                error: function () {
+                    console.error('Failed to load siswa data');
+                }
+            });
+        }
+
+        // Inisialisasi autocomplete
+        function initAutocomplete() {
+            const searchInput = document.getElementById('searchSiswa');
+            const clearButton = document.getElementById('clearSearch');
+            const dropdown = document.getElementById('siswaDropdown');
+            const selectedSiswaId = document.getElementById('selectedSiswaId');
+
+            let selectedIndex = -1;
+
+            // Tampilkan dropdown saat fokus
+            searchInput.addEventListener('focus', function () {
+                if (this.value.length > 0) {
+                    filterSiswa(this.value);
+                }
+            });
+
+            // Filter siswa saat mengetik dengan debounce
+            searchInput.addEventListener('input', function (e) {
+                clearTimeout(searchTimeout);
+                const query = this.value;
+
+                if (query.length < 2) {
+                    dropdown.style.display = 'none';
+                    clearButton.style.display = 'none';
+                    return;
+                }
+
+                searchTimeout = setTimeout(() => {
+                    filterSiswa(query);
+                }, 300);
+
+                clearButton.style.display = query.length > 0 ? 'block' : 'none';
+            });
+
+            // Clear search
+            clearButton.addEventListener('click', function () {
+                searchInput.value = '';
+                searchInput.focus();
+                clearButton.style.display = 'none';
+                dropdown.style.display = 'none';
+                clearSelectedSiswa();
+            });
+
+            // Navigasi dengan keyboard
+            searchInput.addEventListener('keydown', function (e) {
+                const items = dropdown.querySelectorAll('.autocomplete-item');
+
+                switch (e.key) {
+                    case 'ArrowDown':
+                        e.preventDefault();
+                        selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+                        updateSelectedItem();
+                        break;
+
+                    case 'ArrowUp':
+                        e.preventDefault();
+                        selectedIndex = Math.max(selectedIndex - 1, -1);
+                        updateSelectedItem();
+                        break;
+
+                    case 'Enter':
+                        e.preventDefault();
+                        if (selectedIndex >= 0 && items[selectedIndex]) {
+                            selectSiswa(items[selectedIndex].dataset);
+                        }
+                        break;
+
+                    case 'Escape':
+                        dropdown.style.display = 'none';
+                        selectedIndex = -1;
+                        break;
+                }
+            });
+
+            // Close dropdown saat klik di luar
+            document.addEventListener('click', function (e) {
+                if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+                    dropdown.style.display = 'none';
+                }
+            });
+        }
+
+        // Fungsi filter siswa dengan caching
+        function filterSiswa(query) {
+            const dropdown = document.getElementById('siswaDropdown');
+
+            // Cek cache
+            const cacheKey = query.toLowerCase();
+            if (searchCache[cacheKey]) {
+                renderDropdown(searchCache[cacheKey]);
+                return;
+            }
+
+            // Filter dari data yang sudah di-load
+            const filtered = siswaData.filter(siswa =>
+                siswa.nama_lengkap.toLowerCase().includes(cacheKey) ||
+                siswa.kelas.toLowerCase().includes(cacheKey) ||
+                (siswa.sekolah_asal && siswa.sekolah_asal.toLowerCase().includes(cacheKey))
+            );
+
+            // Simpan ke cache
+            searchCache[cacheKey] = filtered;
+            renderDropdown(filtered);
+        }
+
+        // Render dropdown
+        function renderDropdown(data) {
+            const dropdown = document.getElementById('siswaDropdown');
+            dropdown.innerHTML = '';
+
+            if (data.length === 0) {
+                dropdown.innerHTML = '<div class="no-results">Tidak ditemukan siswa</div>';
+                dropdown.style.display = 'block';
+                return;
+            }
+
+            data.forEach((siswa, index) => {
+                const item = document.createElement('div');
+                item.className = 'autocomplete-item';
+                item.dataset.id = siswa.id;
+                item.dataset.nama = siswa.nama_lengkap;
+                item.dataset.kelas = siswa.kelas;
+                item.dataset.sekolah = siswa.sekolah_asal || '';
+                item.dataset.orangtua = siswa.orangtua_info || '';
+
+                item.innerHTML = `
+                <div class="siswa-nama">${siswa.nama_lengkap}</div>
+                <div class="siswa-info">
+                    Kelas: ${siswa.kelas} | 
+                    Sekolah: ${siswa.sekolah_asal || '-'}
+                    ${siswa.orangtua_info ? '<br>Orang Tua: ' + siswa.orangtua_info : ''}
+                </div>
+            `;
+
+                item.addEventListener('click', function () {
+                    selectSiswa(this.dataset);
+                });
+
+                item.addEventListener('mouseenter', function () {
+                    const items = dropdown.querySelectorAll('.autocomplete-item');
+                    selectedIndex = Array.from(items).indexOf(this);
+                    updateSelectedItem();
+                });
+
+                dropdown.appendChild(item);
+            });
+
+            dropdown.style.display = 'block';
+            selectedIndex = -1;
+        }
+
+        // Update selected item style
+        function updateSelectedItem() {
+            const dropdown = document.getElementById('siswaDropdown');
+            const items = dropdown.querySelectorAll('.autocomplete-item');
+
+            items.forEach((item, index) => {
+                if (index === selectedIndex) {
+                    item.classList.add('active');
+                    // Scroll ke item yang dipilih
+                    item.scrollIntoView({ block: 'nearest' });
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+        }
+
+        // Fungsi pilih siswa
+        function selectSiswa(data) {
+            const selectedSiswaId = document.getElementById('selectedSiswaId');
+            const searchInput = document.getElementById('searchSiswa');
+            const dropdown = document.getElementById('siswaDropdown');
+
+            selectedSiswaId.value = data.id;
+            searchInput.value = data.nama;
+            dropdown.style.display = 'none';
+
+            // Tampilkan info siswa yang dipilih
+            document.getElementById('selectedSiswaName').textContent = data.nama;
+            document.getElementById('selectedSiswaKelas').textContent = data.kelas;
+            document.getElementById('selectedSiswaSekolah').textContent = data.sekolah || '-';
+
+            if (data.orangtua) {
+                document.getElementById('selectedSiswaOrangtua').textContent = 'Orang Tua: ' + data.orangtua;
+            }
+
+            document.getElementById('selectedSiswaInfo').classList.remove('hidden');
+            document.getElementById('clearSearch').style.display = 'none';
+
+            // Load mata pelajaran untuk siswa ini
+            loadMataPelajaran(data.id);
+        }
+
+        // Fungsi clear selected siswa
+        function clearSelectedSiswa() {
+            document.getElementById('searchSiswa').value = '';
+            document.getElementById('selectedSiswaId').value = '';
+            document.getElementById('selectedSiswaInfo').classList.add('hidden');
+            document.getElementById('tambahMataPelajaran').innerHTML = '<option value="">-- Pilih Siswa terlebih dahulu --</option>';
+            document.getElementById('tambahMataPelajaran').disabled = true;
+            document.getElementById('clearSearch').style.display = 'none';
+        }
+
+        // ==================== LOAD MATA PELAJARAN ====================
+        function loadMataPelajaran(siswaId = null) {
+            const siswaIdVal = siswaId || document.getElementById('selectedSiswaId').value;
             const guruId = document.getElementById('tambahGuru').value;
             const pelajaranSelect = document.getElementById('tambahMataPelajaran');
 
-            if (!siswaId || !guruId) {
-                pelajaranSelect.innerHTML = '<option value="">-- Pilih Mata Pelajaran --</option>';
+            if (!siswaIdVal) {
+                pelajaranSelect.innerHTML = '<option value="">-- Pilih Siswa terlebih dahulu --</option>';
+                pelajaranSelect.disabled = true;
+                return;
+            }
+
+            if (!guruId) {
+                pelajaranSelect.innerHTML = '<option value="">-- Pilih Guru terlebih dahulu --</option>';
+                pelajaranSelect.disabled = true;
                 return;
             }
 
@@ -1802,7 +2217,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
                 type: 'GET',
                 data: {
                     ajax: 'get_pelajaran',
-                    siswa_id: siswaId,
+                    siswa_id: siswaIdVal,
                     guru_id: guruId
                 },
                 dataType: 'json',
@@ -1825,9 +2240,13 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
             });
         }
 
+        // ==================== EVENT LISTENERS ====================
         // Event listeners untuk form tambah
-        document.getElementById('tambahSiswa').addEventListener('change', loadMataPelajaran);
-        document.getElementById('tambahGuru').addEventListener('change', loadMataPelajaran);
+        document.getElementById('tambahGuru').addEventListener('change', function () {
+            if (document.getElementById('selectedSiswaId').value) {
+                loadMataPelajaran();
+            }
+        });
 
         // Close modal on escape key
         document.addEventListener('keydown', function (e) {
@@ -1849,11 +2268,34 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
             });
         });
 
+        // ==================== VALIDASI FORM ====================
         // Validasi form tambah: Jam selesai harus > jam mulai
         document.getElementById('formTambahJadwal').addEventListener('submit', function (e) {
             const jamMulai = document.querySelector('#formTambahJadwal input[name="jam_mulai"]').value;
             const jamSelesai = document.querySelector('#formTambahJadwal input[name="jam_selesai"]').value;
+            const siswaId = document.getElementById('selectedSiswaId').value;
             const siswaPelajaran = document.getElementById('tambahMataPelajaran').value;
+            const hari = document.querySelector('#formTambahJadwal select[name="hari"]').value;
+            const guruId = document.querySelector('#formTambahJadwal select[name="guru_id"]').value;
+
+            if (!siswaId) {
+                e.preventDefault();
+                alert('Silakan pilih siswa terlebih dahulu!');
+                document.getElementById('searchSiswa').focus();
+                return;
+            }
+
+            if (!guruId) {
+                e.preventDefault();
+                alert('Silakan pilih guru terlebih dahulu!');
+                return;
+            }
+
+            if (!hari) {
+                e.preventDefault();
+                alert('Silakan pilih hari terlebih dahulu!');
+                return;
+            }
 
             if (!siswaPelajaran) {
                 e.preventDefault();
@@ -1871,11 +2313,25 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
         document.getElementById('formEditJadwal').addEventListener('submit', function (e) {
             const jamMulai = document.getElementById('editJamMulai').value;
             const jamSelesai = document.getElementById('editJamSelesai').value;
+            const hari = document.getElementById('editHari').value;
+
+            if (!hari) {
+                e.preventDefault();
+                alert('Silakan pilih hari terlebih dahulu!');
+                return;
+            }
 
             if (jamSelesai <= jamMulai) {
                 e.preventDefault();
                 alert('Jam selesai harus setelah jam mulai!');
             }
+        });
+
+        // ==================== INITIALIZATION ====================
+        // Load siswa data saat page load
+        $(document).ready(function () {
+            // Load data siswa untuk autocomplete
+            loadSiswaData();
         });
     </script>
 </body>
