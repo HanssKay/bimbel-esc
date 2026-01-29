@@ -167,38 +167,33 @@ try {
     }
 
 // 4. Guru Aktif - NO SUBQUERY VERSION
+// 4. Guru Aktif - RECOMMENDED VERSION (PAKAI INI)
 $guru_aktif = [];
 
-// Ambil data guru dulu
-$sql_guru = "SELECT g.*, u.full_name, u.email
-             FROM guru g
-             INNER JOIN users u ON g.user_id = u.id
-             WHERE g.status = 'aktif'
-             ORDER BY u.full_name ASC 
-             LIMIT 3";
+$sql = "SELECT 
+        g.id,
+        g.user_id,
+        g.bidang_keahlian,
+        g.pendidikan_terakhir,
+        g.pengalaman_tahun,
+        g.status,
+        g.tanggal_bergabung,
+        u.full_name,
+        u.email,
+        (SELECT COUNT(*) 
+         FROM siswa_pelajaran sp 
+         WHERE sp.guru_id = g.id 
+         AND sp.status = 'aktif') as jumlah_siswa
+        FROM guru g
+        INNER JOIN users u ON g.user_id = u.id
+        WHERE g.status = 'aktif'
+        ORDER BY u.full_name ASC 
+        LIMIT 3";
 
-$result = $conn->query($sql_guru);
+$result = $conn->query($sql);
 if ($result && $result->num_rows > 0) {
-    while ($guru = $result->fetch_assoc()) {
-        // Hitung jumlah siswa terpisah
-        $guru_id = $guru['id'];
-        $count_sql = "SELECT COUNT(*) as jumlah_siswa 
-                      FROM siswa_pelajaran 
-                      WHERE guru_id = ? AND status = 'aktif'";
-        
-        $stmt = $conn->prepare($count_sql);
-        if ($stmt) {
-            $stmt->bind_param("i", $guru_id);
-            $stmt->execute();
-            $count_result = $stmt->get_result();
-            $count_data = $count_result->fetch_assoc();
-            $guru['jumlah_siswa'] = $count_data['jumlah_siswa'] ?? 0;
-            $stmt->close();
-        } else {
-            $guru['jumlah_siswa'] = 0;
-        }
-        
-        $guru_aktif[] = $guru;
+    while ($row = $result->fetch_assoc()) {
+        $guru_aktif[] = $row;
     }
 }
 
