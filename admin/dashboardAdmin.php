@@ -168,19 +168,16 @@ try {
 
     // 4. Guru Aktif dengan jumlah siswa yang diajar
     $guru_aktif = [];
-    $sql = "SELECT g.*, u.full_name, u.email, 
-        COALESCE(siswa_counts.jumlah_siswa, 0) as jumlah_siswa,
-        g.bidang_keahlian, g.pendidikan_terakhir, 
-        g.pengalaman_tahun, g.status, g.tanggal_bergabung
+    $sql = "SELECT g.id, g.user_id, g.bidang_keahlian, g.pendidikan_terakhir, 
+        g.pengalaman_tahun, g.status, g.tanggal_bergabung,
+        ANY_VALUE(u.full_name) as full_name,
+        ANY_VALUE(u.email) as email,
+        COUNT(DISTINCT sp.siswa_id) as jumlah_siswa
         FROM guru g
         JOIN users u ON g.user_id = u.id
-        LEFT JOIN (
-            SELECT guru_id, COUNT(DISTINCT siswa_id) as jumlah_siswa
-            FROM siswa_pelajaran
-            WHERE status = 'aktif'
-            GROUP BY guru_id
-        ) as siswa_counts ON g.id = siswa_counts.guru_id
+        LEFT JOIN siswa_pelajaran sp ON g.id = sp.guru_id AND sp.status = 'aktif'
         WHERE g.status = 'aktif'
+        GROUP BY g.id
         ORDER BY u.full_name ASC LIMIT 3";
 
     $result = $conn->query($sql);
@@ -189,7 +186,6 @@ try {
             $guru_aktif[] = $row;
         }
     }
-
     // 5. Pendaftaran Terbaru
     $pendaftaran_terbaru = [];
     $sql = "SELECT ps.*, s.nama_lengkap, s.kelas,
