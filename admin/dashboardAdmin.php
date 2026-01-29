@@ -166,33 +166,27 @@ try {
         }
     }
 
-    // 4. Guru Aktif dengan jumlah siswa yang diajar - SIMPLE VERSION
+    // 4. Guru Aktif dengan jumlah siswa yang diajar - SAFE VERSION
     $guru_aktif = [];
-    $sql = "SELECT g.*, u.full_name, u.email, 
-        g.bidang_keahlian, g.pendidikan_terakhir, 
-        g.pengalaman_tahun, g.status, g.tanggal_bergabung
+    $sql = "SELECT g.id, g.user_id, g.bidang_keahlian, g.pendidikan_terakhir, 
+        g.pengalaman_tahun, g.status, g.tanggal_bergabung,
+        u.full_name, u.email,
+        COALESCE(siswa_count.jumlah_siswa, 0) as jumlah_siswa
         FROM guru g
         JOIN users u ON g.user_id = u.id
+        LEFT JOIN (
+            SELECT guru_id, COUNT(DISTINCT siswa_id) as jumlah_siswa
+            FROM siswa_pelajaran
+            WHERE status = 'aktif'
+            GROUP BY guru_id
+        ) siswa_count ON g.id = siswa_count.guru_id
         WHERE g.status = 'aktif'
         ORDER BY u.full_name ASC LIMIT 3";
 
     $result = $conn->query($sql);
     if ($result && $result->num_rows > 0) {
         while ($row = $result->fetch_assoc()) {
-            // Hitung jumlah siswa untuk setiap guru
-            $guru_id = $row['id'];
-            $count_sql = "SELECT COUNT(DISTINCT siswa_id) as jumlah_siswa 
-                      FROM siswa_pelajaran 
-                      WHERE guru_id = ? AND status = 'aktif'";
-            $count_stmt = $conn->prepare($count_sql);
-            $count_stmt->bind_param("i", $guru_id);
-            $count_stmt->execute();
-            $count_result = $count_stmt->get_result();
-            $count_data = $count_result->fetch_assoc();
-
-            $row['jumlah_siswa'] = $count_data['jumlah_siswa'] ?? 0;
             $guru_aktif[] = $row;
-            $count_stmt->close();
         }
     }
 
