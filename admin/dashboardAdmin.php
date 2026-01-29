@@ -166,44 +166,33 @@ try {
         }
     }
 
-    // 4. Guru Aktif - SIMPLIFIED VERSION
+    // 4. Guru Aktif - ALTERNATIVE VERSION
     $guru_aktif = [];
 
-    // Ambil data guru dulu
-    $sql_guru = "SELECT * FROM guru WHERE status = 'aktif' ORDER BY id ASC LIMIT 3";
-    $result_guru = $conn->query($sql_guru);
+    // Query paling aman tanpa JOIN sama sekali
+    $sql = "SELECT * FROM guru WHERE status = 'aktif' LIMIT 3";
+    $result = $conn->query($sql);
 
-    if ($result_guru && $result_guru->num_rows > 0) {
-        while ($guru = $result_guru->fetch_assoc()) {
+    if ($result && $result->num_rows > 0) {
+        while ($guru = $result->fetch_assoc()) {
             // Ambil data user
             $user_id = $guru['user_id'];
-            $sql_user = "SELECT full_name, email FROM users WHERE id = ?";
-            $stmt_user = $conn->prepare($sql_user);
-            if ($stmt_user) {
-                $stmt_user->bind_param("i", $user_id);
-                $stmt_user->execute();
-                $result_user = $stmt_user->get_result();
-                $user_data = $result_user->fetch_assoc();
-                $stmt_user->close();
-
-                // Gabungkan data
-                $guru['full_name'] = $user_data['full_name'] ?? 'Unknown';
-                $guru['email'] = $user_data['email'] ?? '';
+            $user_sql = "SELECT full_name, email FROM users WHERE id = '$user_id'";
+            $user_result = $conn->query($user_sql);
+            if ($user_result && $user_row = $user_result->fetch_assoc()) {
+                $guru['full_name'] = $user_row['full_name'];
+                $guru['email'] = $user_row['email'];
+            } else {
+                $guru['full_name'] = 'Unknown';
+                $guru['email'] = '';
             }
 
-            // Hitung jumlah siswa yang diajar
+            // Hitung jumlah siswa
             $guru_id = $guru['id'];
-            $sql_count = "SELECT COUNT(*) as jumlah_siswa 
-                      FROM siswa_pelajaran 
-                      WHERE guru_id = ? AND status = 'aktif'";
-            $stmt_count = $conn->prepare($sql_count);
-            if ($stmt_count) {
-                $stmt_count->bind_param("i", $guru_id);
-                $stmt_count->execute();
-                $result_count = $stmt_count->get_result();
-                $count_data = $result_count->fetch_assoc();
-                $guru['jumlah_siswa'] = $count_data['jumlah_siswa'] ?? 0;
-                $stmt_count->close();
+            $count_sql = "SELECT COUNT(*) as jumlah_siswa FROM siswa_pelajaran WHERE guru_id = '$guru_id' AND status = 'aktif'";
+            $count_result = $conn->query($count_sql);
+            if ($count_result && $count_row = $count_result->fetch_assoc()) {
+                $guru['jumlah_siswa'] = $count_row['jumlah_siswa'];
             } else {
                 $guru['jumlah_siswa'] = 0;
             }
