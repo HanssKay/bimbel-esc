@@ -95,31 +95,27 @@ if (isset($_GET['action']) && $_GET['action'] != '') {
     exit();
 }
 
-// FUNGSI GET LAPORAN MINGGUAN YANG LEBIH AMAN
+// FUNGSI GET LAPORAN MINGGUAN YANG LEBIH SIMPLE UNTUK VPS
 function getLaporanMingguan($conn, $orangtua_id, $params) {
     header('Content-Type: application/json');
     
     try {
-        // Validasi dan sanitize semua parameter input
+        // Validasi parameter
         $siswa_id = isset($params['siswa']) ? intval($params['siswa']) : 0;
         $tahun = isset($params['tahun']) ? intval($params['tahun']) : date('Y');
         $bulan = isset($params['bulan']) ? intval($params['bulan']) : 0;
         $minggu = isset($params['minggu']) ? preg_replace('/[^a-z0-9_]/', '', $params['minggu']) : '';
         
-        // Validasi rentang input
+        // Validasi rentang
         if ($tahun < 2000 || $tahun > 2100) $tahun = date('Y');
         if ($bulan < 0 || $bulan > 12) $bulan = 0;
         if ($siswa_id < 0) $siswa_id = 0;
         
-        // VERIFIKASI HAK AKSES: Pastikan siswa ini milik orangtua
+        // Verifikasi hak akses
         if ($siswa_id > 0) {
-            $sql_verify = "SELECT 1 
-                          FROM siswa s 
+            $sql_verify = "SELECT 1 FROM siswa s 
                           INNER JOIN siswa_orangtua so ON s.id = so.siswa_id
-                          WHERE s.id = ? 
-                          AND so.orangtua_id = ?
-                          AND s.status = 'aktif'
-                          LIMIT 1";
+                          WHERE s.id = ? AND so.orangtua_id = ? AND s.status = 'aktif' LIMIT 1";
             
             $stmt_verify = $conn->prepare($sql_verify);
             $stmt_verify->bind_param("ii", $siswa_id, $orangtua_id);
@@ -129,52 +125,44 @@ function getLaporanMingguan($conn, $orangtua_id, $params) {
             $stmt_verify->close();
             
             if (!$is_verified) {
-                echo json_encode(['success' => false, 'message' => 'Akses ditolak: Siswa tidak ditemukan']);
+                echo json_encode(['success' => false, 'message' => 'Akses ditolak']);
                 exit();
             }
         }
         
-        // Bangun kondisi WHERE secara dinamis - AMAN
+        // Build WHERE conditions
         $where_conditions = ["so.orangtua_id = ?", "s.status = 'aktif'"];
         $bind_types = "i";
         $bind_values = [$orangtua_id];
         
-        // Filter siswa
         if ($siswa_id > 0) {
             $where_conditions[] = "s.id = ?";
             $bind_types .= "i";
             $bind_values[] = $siswa_id;
         }
         
-        // Filter tahun
         if ($tahun > 0) {
             $where_conditions[] = "YEAR(ps.tanggal_penilaian) = ?";
             $bind_types .= "i";
             $bind_values[] = $tahun;
         }
         
-        // Filter bulan
         if ($bulan > 0 && $bulan <= 12) {
             $where_conditions[] = "MONTH(ps.tanggal_penilaian) = ?";
             $bind_types .= "i";
             $bind_values[] = $bulan;
         }
         
-        // Filter minggu - PERHITUNGAN YANG BENAR
+        // Filter minggu
         if ($minggu == 'last_4') {
-            // 4 minggu terakhir dari tanggal saat ini
             $start_date = date('Y-m-d', strtotime('-4 weeks'));
             $where_conditions[] = "ps.tanggal_penilaian >= ?";
             $bind_types .= "s";
             $bind_values[] = $start_date;
         } elseif (is_numeric($minggu) && $minggu >= 1 && $minggu <= 5) {
-            // Filter berdasarkan rentang tanggal dalam bulan
             if ($bulan > 0 && $tahun > 0) {
-                // Hitung rentang tanggal untuk minggu yang dipilih
                 $start_day = ($minggu - 1) * 7 + 1;
                 $end_day = $minggu * 7;
-                
-                // Cek jumlah hari dalam bulan
                 $days_in_month = date('t', strtotime("$tahun-$bulan-01"));
                 $end_day = min($end_day, $days_in_month);
                 
@@ -189,7 +177,8 @@ function getLaporanMingguan($conn, $orangtua_id, $params) {
         
         $where_clause = implode(" AND ", $where_conditions);
         
-        // QUERY UTAMA YANG AMAN - GROUP BY berdasarkan minggu dalam bulan
+        // **QUERY YANG LEBIH SEDERHANA UNTUK VPS** 
+        // Ambil dulu data dasar
         $sql_main = "
             SELECT 
                 s.id as siswa_id,
@@ -199,57 +188,28 @@ function getLaporanMingguan($conn, $orangtua_id, $params) {
                 COALESCE(sp.nama_pelajaran, 'Umum') as nama_pelajaran,
                 YEAR(ps.tanggal_penilaian) as tahun,
                 MONTH(ps.tanggal_penilaian) as bulan,
-                -- Hitung minggu dalam bulan (1-5) berdasarkan tanggal
-                CASE 
-                    WHEN DAYOFMONTH(ps.tanggal_penilaian) BETWEEN 1 AND 7 THEN 1
-                    WHEN DAYOFMONTH(ps.tanggal_penilaian) BETWEEN 8 AND 14 THEN 2
-                    WHEN DAYOFMONTH(ps.tanggal_penilaian) BETWEEN 15 AND 21 THEN 3
-                    WHEN DAYOFMONTH(ps.tanggal_penilaian) BETWEEN 22 AND 28 THEN 4
-                    ELSE 5
-                END as minggu_dalam_bulan,
-                MIN(ps.tanggal_penilaian) as tanggal_mulai,
-                MAX(ps.tanggal_penilaian) as tanggal_akhir,
-                COUNT(DISTINCT ps.id) as jumlah_penilaian,
-                AVG(ps.willingness_learn) as rata_willingness,
-                AVG(ps.problem_solving) as rata_problem,
-                AVG(ps.critical_thinking) as rata_critical,
-                AVG(ps.concentration) as rata_concentration,
-                AVG(ps.independence) as rata_independence,
-                AVG(ps.total_score) as rata_total_score,
-                AVG(ps.persentase) as rata_persentase,
-                MAX(ps.total_score) as skor_tertinggi,
-                MIN(ps.total_score) as skor_terendah
+                DAYOFMONTH(ps.tanggal_penilaian) as tanggal,
+                ps.tanggal_penilaian,
+                ps.willingness_learn,
+                ps.problem_solving,
+                ps.critical_thinking,
+                ps.concentration,
+                ps.independence,
+                ps.total_score,
+                ps.persentase,
+                ps.catatan_guru,
+                ps.rekomendasi,
+                ps.guru_id,
+                u.full_name as nama_guru
             FROM siswa s
             INNER JOIN siswa_orangtua so ON s.id = so.siswa_id
             INNER JOIN pendaftaran_siswa pds ON s.id = pds.siswa_id AND pds.status = 'aktif'
             INNER JOIN penilaian_siswa ps ON ps.siswa_id = s.id AND ps.pendaftaran_id = pds.id
             LEFT JOIN siswa_pelajaran sp ON ps.siswa_pelajaran_id = sp.id
+            LEFT JOIN guru g ON ps.guru_id = g.id
+            LEFT JOIN users u ON g.user_id = u.id
             WHERE $where_clause
-            GROUP BY 
-                s.id, 
-                COALESCE(sp.id, 0), 
-                YEAR(ps.tanggal_penilaian), 
-                MONTH(ps.tanggal_penilaian), 
-                CASE 
-                    WHEN DAYOFMONTH(ps.tanggal_penilaian) BETWEEN 1 AND 7 THEN 1
-                    WHEN DAYOFMONTH(ps.tanggal_penilaian) BETWEEN 8 AND 14 THEN 2
-                    WHEN DAYOFMONTH(ps.tanggal_penilaian) BETWEEN 15 AND 21 THEN 3
-                    WHEN DAYOFMONTH(ps.tanggal_penilaian) BETWEEN 22 AND 28 THEN 4
-                    ELSE 5
-                END
-            HAVING COUNT(DISTINCT ps.id) > 0
-            ORDER BY 
-                YEAR(ps.tanggal_penilaian) DESC, 
-                MONTH(ps.tanggal_penilaian) DESC, 
-                CASE 
-                    WHEN DAYOFMONTH(ps.tanggal_penilaian) BETWEEN 1 AND 7 THEN 1
-                    WHEN DAYOFMONTH(ps.tanggal_penilaian) BETWEEN 8 AND 14 THEN 2
-                    WHEN DAYOFMONTH(ps.tanggal_penilaian) BETWEEN 15 AND 21 THEN 3
-                    WHEN DAYOFMONTH(ps.tanggal_penilaian) BETWEEN 22 AND 28 THEN 4
-                    ELSE 5
-                END DESC, 
-                s.nama_lengkap,
-                COALESCE(sp.nama_pelajaran, 'Umum')
+            ORDER BY ps.tanggal_penilaian DESC
         ";
         
         $stmt = $conn->prepare($sql_main);
@@ -261,140 +221,113 @@ function getLaporanMingguan($conn, $orangtua_id, $params) {
             $stmt->execute();
             $result = $stmt->get_result();
             
-            $laporan = [];
+            // **PROSES DATA DI PHP** - Hindari GROUP BY kompleks di MySQL
+            $raw_data = [];
             while ($row = $result->fetch_assoc()) {
-                // Format data untuk response
-                $minggu_display = $row['minggu_dalam_bulan'] ?: 1;
-                $tahun_penilaian = $row['tahun'];
-                $bulan_penilaian = $row['bulan'];
-                $siswa_pelajaran_id = $row['siswa_pelajaran_id'];
-                
-                // AMBIL CATATAN & REKOMENDASI UNTUK MINGGU INI - AMAN
-                $catatan_guru = null;
-                $rekomendasi = null;
-                $nama_guru = null;
-                
-                if ($siswa_pelajaran_id > 0) {
-                    $sql_catatan = "
-                        SELECT 
-                            ps.catatan_guru,
-                            ps.rekomendasi,
-                            u.full_name as nama_guru
-                        FROM penilaian_siswa ps
-                        JOIN guru g ON ps.guru_id = g.id
-                        JOIN users u ON g.user_id = u.id
-                        WHERE ps.siswa_id = ?
-                        AND YEAR(ps.tanggal_penilaian) = ?
-                        AND MONTH(ps.tanggal_penilaian) = ?
-                        AND ps.siswa_pelajaran_id = ?
-                        AND (
-                            ps.catatan_guru IS NOT NULL 
-                            OR ps.rekomendasi IS NOT NULL
-                        )
-                        ORDER BY ps.tanggal_penilaian DESC
-                        LIMIT 1
-                    ";
-                    
-                    $stmt_catatan = $conn->prepare($sql_catatan);
-                    if ($stmt_catatan) {
-                        $stmt_catatan->bind_param("iiii", 
-                            $row['siswa_id'], 
-                            $tahun_penilaian, 
-                            $bulan_penilaian,
-                            $siswa_pelajaran_id
-                        );
-                        $stmt_catatan->execute();
-                        $result_catatan = $stmt_catatan->get_result();
-                        
-                        if ($catatan_row = $result_catatan->fetch_assoc()) {
-                            $catatan_guru = $catatan_row['catatan_guru'];
-                            $rekomendasi = $catatan_row['rekomendasi'];
-                            $nama_guru = $catatan_row['nama_guru'];
-                        }
-                        $stmt_catatan->close();
-                    }
+                $raw_data[] = $row;
+            }
+            $stmt->close();
+            
+            // Group data di PHP (lebih aman untuk VPS)
+            $grouped_data = [];
+            foreach ($raw_data as $item) {
+                // Hitung minggu dalam bulan
+                $tanggal = intval($item['tanggal']);
+                if ($tanggal <= 7) {
+                    $minggu_dalam_bulan = 1;
+                } elseif ($tanggal <= 14) {
+                    $minggu_dalam_bulan = 2;
+                } elseif ($tanggal <= 21) {
+                    $minggu_dalam_bulan = 3;
+                } elseif ($tanggal <= 28) {
+                    $minggu_dalam_bulan = 4;
                 } else {
-                    // Untuk pelajaran umum
-                    $sql_catatan = "
-                        SELECT 
-                            ps.catatan_guru,
-                            ps.rekomendasi,
-                            u.full_name as nama_guru
-                        FROM penilaian_siswa ps
-                        JOIN guru g ON ps.guru_id = g.id
-                        JOIN users u ON g.user_id = u.id
-                        WHERE ps.siswa_id = ?
-                        AND YEAR(ps.tanggal_penilaian) = ?
-                        AND MONTH(ps.tanggal_penilaian) = ?
-                        AND ps.siswa_pelajaran_id IS NULL
-                        AND (
-                            ps.catatan_guru IS NOT NULL 
-                            OR ps.rekomendasi IS NOT NULL
-                        )
-                        ORDER BY ps.tanggal_penilaian DESC
-                        LIMIT 1
-                    ";
-                    
-                    $stmt_catatan = $conn->prepare($sql_catatan);
-                    if ($stmt_catatan) {
-                        $stmt_catatan->bind_param("iii", 
-                            $row['siswa_id'], 
-                            $tahun_penilaian, 
-                            $bulan_penilaian
-                        );
-                        $stmt_catatan->execute();
-                        $result_catatan = $stmt_catatan->get_result();
-                        
-                        if ($catatan_row = $result_catatan->fetch_assoc()) {
-                            $catatan_guru = $catatan_row['catatan_guru'];
-                            $rekomendasi = $catatan_row['rekomendasi'];
-                            $nama_guru = $catatan_row['nama_guru'];
-                        }
-                        $stmt_catatan->close();
-                    }
+                    $minggu_dalam_bulan = 5;
                 }
                 
-                // Jika tidak ada catatan, cari guru yang memberikan penilaian
-                if (!$nama_guru) {
-                    $sql_guru = "
-                        SELECT DISTINCT u.full_name as nama_guru
-                        FROM penilaian_siswa ps
-                        JOIN guru g ON ps.guru_id = g.id
-                        JOIN users u ON g.user_id = u.id
-                        WHERE ps.siswa_id = ?
-                        AND YEAR(ps.tanggal_penilaian) = ?
-                        AND MONTH(ps.tanggal_penilaian) = ?
-                        " . ($siswa_pelajaran_id > 0 ? "AND ps.siswa_pelajaran_id = ?" : "AND ps.siswa_pelajaran_id IS NULL") . "
-                        LIMIT 1
-                    ";
-                    
-                    $stmt_guru = $conn->prepare($sql_guru);
-                    if ($stmt_guru) {
-                        if ($siswa_pelajaran_id > 0) {
-                            $stmt_guru->bind_param("iii", 
-                                $row['siswa_id'], 
-                                $tahun_penilaian, 
-                                $bulan_penilaian
-                            );
-                        } else {
-                            $stmt_guru->bind_param("iii", 
-                                $row['siswa_id'], 
-                                $tahun_penilaian, 
-                                $bulan_penilaian
-                            );
-                        }
-                        $stmt_guru->execute();
-                        $result_guru = $stmt_guru->get_result();
-                        
-                        if ($guru_row = $result_guru->fetch_assoc()) {
-                            $nama_guru = $guru_row['nama_guru'];
-                        }
-                        $stmt_guru->close();
-                    }
+                // Buat key untuk grouping
+                $key = $item['siswa_id'] . '_' . 
+                       $item['siswa_pelajaran_id'] . '_' . 
+                       $item['tahun'] . '_' . 
+                       $item['bulan'] . '_' . 
+                       $minggu_dalam_bulan;
+                
+                if (!isset($grouped_data[$key])) {
+                    $grouped_data[$key] = [
+                        'siswa_id' => $item['siswa_id'],
+                        'nama_lengkap' => $item['nama_lengkap'],
+                        'kelas' => $item['kelas'],
+                        'siswa_pelajaran_id' => $item['siswa_pelajaran_id'],
+                        'nama_pelajaran' => $item['nama_pelajaran'],
+                        'tahun' => $item['tahun'],
+                        'bulan' => $item['bulan'],
+                        'minggu_dalam_bulan' => $minggu_dalam_bulan,
+                        'tanggal_mulai' => $item['tanggal_penilaian'],
+                        'tanggal_akhir' => $item['tanggal_penilaian'],
+                        'jumlah_penilaian' => 0,
+                        'willingness_values' => [],
+                        'problem_values' => [],
+                        'critical_values' => [],
+                        'concentration_values' => [],
+                        'independence_values' => [],
+                        'total_score_values' => [],
+                        'persentase_values' => [],
+                        'catatan_guru' => $item['catatan_guru'],
+                        'rekomendasi' => $item['rekomendasi'],
+                        'nama_guru' => $item['nama_guru']
+                    ];
                 }
                 
-                // Hitung kategori berdasarkan persentase
-                $rata_persentase = floatval($row['rata_persentase'] ?? 0);
+                // Update data
+                $grouped_data[$key]['jumlah_penilaian']++;
+                $grouped_data[$key]['willingness_values'][] = $item['willingness_learn'];
+                $grouped_data[$key]['problem_values'][] = $item['problem_solving'];
+                $grouped_data[$key]['critical_values'][] = $item['critical_thinking'];
+                $grouped_data[$key]['concentration_values'][] = $item['concentration'];
+                $grouped_data[$key]['independence_values'][] = $item['independence'];
+                $grouped_data[$key]['total_score_values'][] = $item['total_score'];
+                $grouped_data[$key]['persentase_values'][] = $item['persentase'];
+                
+                // Update tanggal range
+                if ($item['tanggal_penilaian'] < $grouped_data[$key]['tanggal_mulai']) {
+                    $grouped_data[$key]['tanggal_mulai'] = $item['tanggal_penilaian'];
+                }
+                if ($item['tanggal_penilaian'] > $grouped_data[$key]['tanggal_akhir']) {
+                    $grouped_data[$key]['tanggal_akhir'] = $item['tanggal_penilaian'];
+                }
+                
+                // Prioritize catatan yang ada isinya
+                if (!empty($item['catatan_guru']) && empty($grouped_data[$key]['catatan_guru'])) {
+                    $grouped_data[$key]['catatan_guru'] = $item['catatan_guru'];
+                }
+                if (!empty($item['rekomendasi']) && empty($grouped_data[$key]['rekomendasi'])) {
+                    $grouped_data[$key]['rekomendasi'] = $item['rekomendasi'];
+                }
+                if (!empty($item['nama_guru']) && empty($grouped_data[$key]['nama_guru'])) {
+                    $grouped_data[$key]['nama_guru'] = $item['nama_guru'];
+                }
+            }
+            
+            // **PROSES AKHIR: Hitung rata-rata dan format output**
+            $laporan = [];
+            foreach ($grouped_data as $key => $data) {
+                // Hitung rata-rata
+                $rata_willingness = !empty($data['willingness_values']) ? 
+                    array_sum($data['willingness_values']) / count($data['willingness_values']) : 0;
+                $rata_problem = !empty($data['problem_values']) ? 
+                    array_sum($data['problem_values']) / count($data['problem_values']) : 0;
+                $rata_critical = !empty($data['critical_values']) ? 
+                    array_sum($data['critical_values']) / count($data['critical_values']) : 0;
+                $rata_concentration = !empty($data['concentration_values']) ? 
+                    array_sum($data['concentration_values']) / count($data['concentration_values']) : 0;
+                $rata_independence = !empty($data['independence_values']) ? 
+                    array_sum($data['independence_values']) / count($data['independence_values']) : 0;
+                $rata_total_score = !empty($data['total_score_values']) ? 
+                    array_sum($data['total_score_values']) / count($data['total_score_values']) : 0;
+                $rata_persentase = !empty($data['persentase_values']) ? 
+                    array_sum($data['persentase_values']) / count($data['persentase_values']) : 0;
+                
+                // Hitung kategori
                 if ($rata_persentase >= 85) {
                     $kategori = 'Sangat Baik';
                     $badge_class = 'badge-sangat-baik';
@@ -409,25 +342,48 @@ function getLaporanMingguan($conn, $orangtua_id, $params) {
                     $badge_class = 'badge-kurang';
                 }
                 
-                // Format tanggal untuk display
-                $tanggal_mulai = !empty($row['tanggal_mulai']) ? 
-                    date('d M', strtotime($row['tanggal_mulai'])) : '';
-                $tanggal_akhir = !empty($row['tanggal_akhir']) ? 
-                    date('d M Y', strtotime($row['tanggal_akhir'])) : '';
-                
-                $row['kategori'] = $kategori;
-                $row['badge_class'] = $badge_class;
-                $row['minggu'] = $minggu_display;
-                $row['bulan_nama'] = date('F', mktime(0, 0, 0, $row['bulan'], 1));
-                $row['periode'] = "Minggu {$minggu_display} ({$tanggal_mulai} - {$tanggal_akhir})";
-                $row['catatan_guru'] = $catatan_guru;
-                $row['rekomendasi'] = $rekomendasi;
-                $row['nama_guru'] = $nama_guru ?? 'Guru';
-                
-                $laporan[] = $row;
+                // Format output
+                $laporan[] = [
+                    'siswa_id' => $data['siswa_id'],
+                    'nama_lengkap' => $data['nama_lengkap'],
+                    'kelas' => $data['kelas'],
+                    'siswa_pelajaran_id' => $data['siswa_pelajaran_id'],
+                    'nama_pelajaran' => $data['nama_pelajaran'],
+                    'tahun' => $data['tahun'],
+                    'bulan' => $data['bulan'],
+                    'minggu' => $data['minggu_dalam_bulan'],
+                    'minggu_dalam_bulan' => $data['minggu_dalam_bulan'],
+                    'bulan_nama' => date('F', mktime(0, 0, 0, $data['bulan'], 1)),
+                    'tanggal_mulai' => date('d M', strtotime($data['tanggal_mulai'])),
+                    'tanggal_akhir' => date('d M Y', strtotime($data['tanggal_akhir'])),
+                    'periode' => "Minggu {$data['minggu_dalam_bulan']} (" . 
+                                 date('d M', strtotime($data['tanggal_mulai'])) . " - " . 
+                                 date('d M Y', strtotime($data['tanggal_akhir'])) . ")",
+                    'jumlah_penilaian' => $data['jumlah_penilaian'],
+                    'rata_willingness' => round($rata_willingness, 1),
+                    'rata_problem' => round($rata_problem, 1),
+                    'rata_critical' => round($rata_critical, 1),
+                    'rata_concentration' => round($rata_concentration, 1),
+                    'rata_independence' => round($rata_independence, 1),
+                    'rata_total_score' => round($rata_total_score, 1),
+                    'rata_persentase' => round($rata_persentase, 1),
+                    'skor_tertinggi' => !empty($data['total_score_values']) ? max($data['total_score_values']) : 0,
+                    'skor_terendah' => !empty($data['total_score_values']) ? min($data['total_score_values']) : 0,
+                    'kategori' => $kategori,
+                    'badge_class' => $badge_class,
+                    'catatan_guru' => $data['catatan_guru'],
+                    'rekomendasi' => $data['rekomendasi'],
+                    'nama_guru' => $data['nama_guru'] ?: 'Guru'
+                ];
             }
             
-            $stmt->close();
+            // Sort laporan
+            usort($laporan, function($a, $b) {
+                if ($a['tahun'] != $b['tahun']) return $b['tahun'] - $a['tahun'];
+                if ($a['bulan'] != $b['bulan']) return $b['bulan'] - $a['bulan'];
+                if ($a['minggu'] != $b['minggu']) return $b['minggu'] - $a['minggu'];
+                return strcmp($a['nama_lengkap'], $b['nama_lengkap']);
+            });
             
             echo json_encode([
                 'success' => true,
@@ -437,10 +393,12 @@ function getLaporanMingguan($conn, $orangtua_id, $params) {
                 'bulan' => $bulan > 0 ? date('F', mktime(0, 0, 0, $bulan, 1)) : 'Semua',
                 'minggu' => $minggu
             ]);
+            
         } else {
             error_log("Prepare statement failed: " . $conn->error);
             echo json_encode(['success' => false, 'message' => 'Database error: Failed to prepare statement']);
         }
+        
     } catch (Exception $e) {
         error_log("Error in getLaporanMingguan: " . $e->getMessage());
         echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
