@@ -166,10 +166,10 @@ try {
         }
     }
 
-// 4. Guru Aktif - JOIN VERSION
-$guru_aktif = [];
+    // 4. Guru Aktif - JOIN VERSION
+    $guru_aktif = [];
 
-$sql = "SELECT 
+    $sql = "SELECT 
         g.id,
         g.user_id,
         g.bidang_keahlian,
@@ -194,12 +194,12 @@ $sql = "SELECT
         ORDER BY u.full_name ASC 
         LIMIT 3";
 
-$result = $conn->query($sql);
-if ($result && $result->num_rows > 0) {
-    while ($row = $result->fetch_assoc()) {
-        $guru_aktif[] = $row;
+    $result = $conn->query($sql);
+    if ($result && $result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $guru_aktif[] = $row;
+        }
     }
-}
     // 5. Pendaftaran Terbaru
     $pendaftaran_terbaru = [];
     $sql = "SELECT ps.*, s.nama_lengkap, s.kelas,
@@ -625,16 +625,16 @@ if ($result && $result->num_rows > 0) {
                                             <div class="flex items-center space-x-4">
                                                 <div class="flex-shrink-0">
                                                     <div class="h-10 w-10 rounded-full 
-                        <?php
-                        $experience = $guru['pengalaman_tahun'] ?? 0;
-                        if ($experience >= 5) {
-                            echo 'bg-purple-100 text-purple-600';
-                        } elseif ($experience >= 3) {
-                            echo 'bg-indigo-100 text-indigo-600';
-                        } else {
-                            echo 'bg-green-100 text-green-600';
-                        }
-                        ?> flex items-center justify-center">
+                    <?php
+                    $experience = $guru['pengalaman_tahun'] ?? 0;
+                    if ($experience >= 5) {
+                        echo 'bg-purple-100 text-purple-600';
+                    } elseif ($experience >= 3) {
+                        echo 'bg-indigo-100 text-indigo-600';
+                    } else {
+                        echo 'bg-green-100 text-green-600';
+                    }
+                    ?> flex items-center justify-center">
                                                         <i class="fas fa-user-tie"></i>
                                                     </div>
                                                 </div>
@@ -666,6 +666,8 @@ if ($result && $result->num_rows > 0) {
                                     <li class="py-4 text-center text-gray-500">
                                         <i class="fas fa-chalkboard-teacher text-2xl mb-2"></i>
                                         <p>Tidak ada guru aktif</p>
+                                        <p class="text-xs mt-1">Debug:
+                                            <?php echo htmlspecialchars($conn->error ?? 'No error'); ?></p>
                                     </li>
                                 <?php endif; ?>
                             </ul>
