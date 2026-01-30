@@ -166,35 +166,50 @@ try {
         }
     }
 
-// 4. Guru Aktif - ANY_VALUE VERSION
+// 4. Guru Aktif - NO GROUP BY VERSION
 $guru_aktif = [];
 
-$sql = "SELECT 
-        g.id,
-        g.user_id,
-        g.bidang_keahlian,
-        g.pendidikan_terakhir,
-        g.pengalaman_tahun,
-        g.status,
-        g.tanggal_bergabung,
-        ANY_VALUE(u.full_name) as full_name,
-        ANY_VALUE(u.email) as email,
-        COUNT(DISTINCT sp.siswa_id) as jumlah_siswa
-        FROM guru g
-        INNER JOIN users u ON g.user_id = u.id
-        LEFT JOIN siswa_pelajaran sp ON g.id = sp.guru_id 
-            AND sp.status = 'aktif'
-        LEFT JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id 
-            AND ps.status = 'aktif'
-        WHERE g.status = 'aktif'
-        GROUP BY g.id
-        ORDER BY full_name ASC 
-        LIMIT 3";
+// Langkah 1: Ambil data guru aktif saja dulu
+$sql_guru = "SELECT 
+            g.id,
+            g.user_id,
+            g.bidang_keahlian,
+            g.pendidikan_terakhir,
+            g.pengalaman_tahun,
+            g.status,
+            g.tanggal_bergabung,
+            u.full_name,
+            u.email
+            FROM guru g
+            INNER JOIN users u ON g.user_id = u.id
+            WHERE g.status = 'aktif'
+            ORDER BY u.full_name ASC 
+            LIMIT 3";
 
-$result = $conn->query($sql);
-if ($result && $result->num_rows > 0) {
-    while ($row = $result->fetch_assoc()) {
-        $guru_aktif[] = $row;
+$result_guru = $conn->query($sql_guru);
+
+if ($result_guru && $result_guru->num_rows > 0) {
+    while ($guru_row = $result_guru->fetch_assoc()) {
+        // Langkah 2: Hitung jumlah siswa untuk masing-masing guru
+        $guru_id = $guru_row['id'];
+        
+        // Query hitung siswa - VERSION 1: Simple count
+        $sql_count = "SELECT COUNT(DISTINCT sp.siswa_id) as jumlah_siswa 
+                     FROM siswa_pelajaran sp
+                     WHERE sp.guru_id = $guru_id 
+                     AND sp.status = 'aktif'";
+        
+        $result_count = $conn->query($sql_count);
+        $jumlah_siswa = 0;
+        
+        if ($result_count && $result_count->num_rows > 0) {
+            $count_row = $result_count->fetch_assoc();
+            $jumlah_siswa = $count_row['jumlah_siswa'];
+        }
+        
+        // Tambahkan ke array
+        $guru_row['jumlah_siswa'] = $jumlah_siswa;
+        $guru_aktif[] = $guru_row;
     }
 }
 
