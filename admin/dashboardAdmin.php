@@ -166,7 +166,7 @@ try {
         }
     }
 
-// 4. Guru Aktif - COMPATIBLE VERSION
+// 4. Guru Aktif - ANY_VALUE VERSION
 $guru_aktif = [];
 
 $sql = "SELECT 
@@ -177,53 +177,24 @@ $sql = "SELECT
         g.pengalaman_tahun,
         g.status,
         g.tanggal_bergabung,
-        u.full_name,
-        u.email,
-        COALESCE(sp_count.jumlah_siswa, 0) as jumlah_siswa
+        ANY_VALUE(u.full_name) as full_name,
+        ANY_VALUE(u.email) as email,
+        COUNT(DISTINCT sp.siswa_id) as jumlah_siswa
         FROM guru g
         INNER JOIN users u ON g.user_id = u.id
-        LEFT JOIN (
-            SELECT sp.guru_id, COUNT(DISTINCT sp.siswa_id) as jumlah_siswa
-            FROM siswa_pelajaran sp
-            INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-            WHERE sp.guru_id IS NOT NULL 
+        LEFT JOIN siswa_pelajaran sp ON g.id = sp.guru_id 
             AND sp.status = 'aktif'
+        LEFT JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id 
             AND ps.status = 'aktif'
-            GROUP BY sp.guru_id
-        ) sp_count ON g.id = sp_count.guru_id
         WHERE g.status = 'aktif'
-        ORDER BY u.full_name ASC 
+        GROUP BY g.id
+        ORDER BY full_name ASC 
         LIMIT 3";
 
 $result = $conn->query($sql);
 if ($result && $result->num_rows > 0) {
     while ($row = $result->fetch_assoc()) {
         $guru_aktif[] = $row;
-    }
-} else {
-    // Fallback query tanpa subquery jika masih error
-    $sql_simple = "SELECT 
-        g.id,
-        g.user_id,
-        g.bidang_keahlian,
-        g.pendidikan_terakhir,
-        g.pengalaman_tahun,
-        g.status,
-        g.tanggal_bergabung,
-        u.full_name,
-        u.email
-        FROM guru g
-        INNER JOIN users u ON g.user_id = u.id
-        WHERE g.status = 'aktif'
-        ORDER BY u.full_name ASC 
-        LIMIT 3";
-    
-    $result_simple = $conn->query($sql_simple);
-    if ($result_simple && $result_simple->num_rows > 0) {
-        while ($row = $result_simple->fetch_assoc()) {
-            $row['jumlah_siswa'] = 0; // Default value
-            $guru_aktif[] = $row;
-        }
     }
 }
 
