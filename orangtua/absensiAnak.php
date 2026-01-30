@@ -847,8 +847,6 @@ for ($i = 0; $i < 12; $i++) {
                                     <th>Izin</th>
                                     <th>Sakit</th>
                                     <th>Alpha</th>
-                                    <th>Persentase</th>
-                                    <th>Status</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -881,22 +879,6 @@ for ($i = 0; $i < 12; $i++) {
                                     <td>
                                         <span class="badge bg-red-100 text-red-800">
                                             <i class="fas fa-times mr-1"></i> <?php echo $rekap['total_alpha']; ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <div class="flex items-center">
-                                            <div class="w-20 bg-gray-200 rounded-full h-2 mr-2">
-                                                <div class="h-2 rounded-full <?php echo $persentase >= 80 ? 'bg-green-500' : ($persentase >= 60 ? 'bg-yellow-500' : 'bg-red-500'); ?>" 
-                                                     style="width: <?php echo min($persentase, 100); ?>%"></div>
-                                            </div>
-                                            <span class="font-bold <?php echo $status_class; ?>">
-                                                <?php echo $persentase; ?>%
-                                            </span>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <span class="badge <?php echo $persentase >= 80 ? 'bg-green-100 text-green-800' : ($persentase >= 60 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'); ?>">
-                                            <?php echo $status_text; ?>
                                         </span>
                                     </td>
                                 </tr>
