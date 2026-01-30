@@ -166,11 +166,10 @@ try {
         }
     }
 
-// 4. Guru Aktif - NO SUBQUERY VERSION
-// 4. Guru Aktif - RECOMMENDED VERSION (PAKAI INI)
-$guru_aktif = [];
+    // 4. Guru Aktif - FIXED VERSION
+    $guru_aktif = [];
 
-$sql = "SELECT 
+    $sql = "SELECT 
         g.id,
         g.user_id,
         g.bidang_keahlian,
@@ -180,22 +179,28 @@ $sql = "SELECT
         g.tanggal_bergabung,
         u.full_name,
         u.email,
-        (SELECT COUNT(*) 
-         FROM siswa_pelajaran sp 
-         WHERE sp.guru_id = g.id 
-         AND sp.status = 'aktif') as jumlah_siswa
+        COALESCE(sp_count.jumlah_siswa, 0) as jumlah_siswa
         FROM guru g
         INNER JOIN users u ON g.user_id = u.id
+        LEFT JOIN (
+            SELECT sp.guru_id, COUNT(DISTINCT sp.siswa_id) as jumlah_siswa
+            FROM siswa_pelajaran sp
+            INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+            WHERE sp.guru_id IS NOT NULL 
+            AND sp.status = 'aktif'
+            AND ps.status = 'aktif'
+            GROUP BY sp.guru_id
+        ) sp_count ON g.id = sp_count.guru_id
         WHERE g.status = 'aktif'
         ORDER BY u.full_name ASC 
         LIMIT 3";
 
-$result = $conn->query($sql);
-if ($result && $result->num_rows > 0) {
-    while ($row = $result->fetch_assoc()) {
-        $guru_aktif[] = $row;
+    $result = $conn->query($sql);
+    if ($result && $result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $guru_aktif[] = $row;
+        }
     }
-}
 
     // 5. Pendaftaran Terbaru
     $pendaftaran_terbaru = [];
