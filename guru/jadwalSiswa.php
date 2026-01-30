@@ -83,7 +83,7 @@ $where_conditions = ["sp.guru_id = ?", "ps.status = 'aktif'", "sp.status = 'akti
 $filter_params[] = $guru_id;
 
 if ($filter_hari !== '') {
-    $where_conditions[] = "jb.hari = ?";
+    $where_conditions[] = "smg.hari = ?";
     $filter_params[] = $filter_hari;
 }
 
@@ -107,19 +107,26 @@ $sql_jadwal_siswa = "
         ps.jenis_kelas,
         g.id as guru_id,
         u.full_name as nama_guru,
-        DATE_FORMAT(jb.jam_mulai, '%H:%i') as jam_mulai_format,
-        DATE_FORMAT(jb.jam_selesai, '%H:%i') as jam_selesai_format,
-        TIMESTAMPDIFF(MINUTE, jb.jam_mulai, jb.jam_selesai) as durasi_menit
+        smg.id as sesi_id,
+        smg.hari,
+        smg.jam_mulai,
+        smg.jam_selesai,
+        smg.kapasitas_maks,
+        smg.kapasitas_terisi,
+        DATE_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai_format,
+        DATE_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai_format,
+        TIMESTAMPDIFF(MINUTE, smg.jam_mulai, smg.jam_selesai) as durasi_menit
     FROM jadwal_belajar jb
     JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
     JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
     JOIN siswa s ON ps.siswa_id = s.id
     LEFT JOIN guru g ON sp.guru_id = g.id
     LEFT JOIN users u ON g.user_id = u.id
+    JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
     WHERE {$where_clause}
     ORDER BY 
-        FIELD(jb.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
-        jb.jam_mulai,
+        FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
+        smg.jam_mulai,
         s.nama_lengkap
 ";
 
@@ -277,6 +284,60 @@ function getMataPelajaranTanpaJadwal($conn, $siswa_id, $guru_id)
     return $mata_pelajaran;
 }
 
+// FUNGSI: Cari atau buat sesi guru
+function findOrCreateSesiGuru($conn, $guru_id, $hari, $jam_mulai, $jam_selesai)
+{
+    // Cek apakah sudah ada sesi dengan waktu yang sama
+    $sql_cek_sesi = "SELECT id, kapasitas_maks, kapasitas_terisi, status 
+                     FROM sesi_mengajar_guru 
+                     WHERE guru_id = ? 
+                     AND hari = ? 
+                     AND jam_mulai = ? 
+                     AND jam_selesai = ?";
+    
+    $stmt_cek = $conn->prepare($sql_cek_sesi);
+    $stmt_cek->bind_param("isss", $guru_id, $hari, $jam_mulai, $jam_selesai);
+    $stmt_cek->execute();
+    $result_cek = $stmt_cek->get_result();
+    
+    if ($result_cek->num_rows > 0) {
+        $sesi = $result_cek->fetch_assoc();
+        $stmt_cek->close();
+        return $sesi; // Kembalikan sesi yang sudah ada
+    }
+    $stmt_cek->close();
+    
+    // Buat sesi baru jika tidak ada
+    $kapasitas_maks = 10; // Default capacity
+    $sql_buat_sesi = "INSERT INTO sesi_mengajar_guru 
+                     (guru_id, hari, jam_mulai, jam_selesai, kapasitas_maks, kapasitas_terisi, status) 
+                     VALUES (?, ?, ?, ?, ?, 0, 'tersedia')";
+    
+    $stmt_buat = $conn->prepare($sql_buat_sesi);
+    $stmt_buat->bind_param("isssi", $guru_id, $hari, $jam_mulai, $jam_selesai, $kapasitas_maks);
+    
+    if ($stmt_buat->execute()) {
+        $sesi_id = $stmt_buat->insert_id;
+        $stmt_buat->close();
+        
+        // Ambil data sesi yang baru dibuat
+        $sql_get_sesi = "SELECT id, kapasitas_maks, kapasitas_terisi, status 
+                        FROM sesi_mengajar_guru 
+                        WHERE id = ?";
+        $stmt_get = $conn->prepare($sql_get_sesi);
+        $stmt_get->bind_param("i", $sesi_id);
+        $stmt_get->execute();
+        $result_get = $stmt_get->get_result();
+        $sesi = $result_get->fetch_assoc();
+        $stmt_get->close();
+        
+        return $sesi;
+    } else {
+        $stmt_buat->close();
+        return false;
+    }
+}
+
 // PROSES TAMBAH JADWAL
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tambah_jadwal'])) {
     $siswa_pelajaran_id = $_POST['siswa_pelajaran_id'] ?? '';
@@ -328,23 +389,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tambah_jadwal'])) {
                                      FROM jadwal_belajar jb
                                      JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
                                      JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                                     JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
                                      WHERE ps.siswa_id = ? 
-                                     AND jb.hari = ? 
+                                     AND smg.hari = ? 
                                      AND jb.status = 'aktif'
                                      AND jb.siswa_pelajaran_id != ?
-                                     AND (
-                                         (jb.jam_mulai < ? AND jb.jam_selesai > ?) OR
-                                         (? BETWEEN jb.jam_mulai AND jb.jam_selesai)
-                                     )";
+                                     AND smg.jam_mulai = ? 
+                                     AND smg.jam_selesai = ?";
                     $stmt_cek = $conn->prepare($sql_cek_siswa);
                     $stmt_cek->bind_param(
-                        "isisss",
+                        "issss",
                         $siswa_id,
                         $hari,
                         $siswa_pelajaran_id,
-                        $jam_selesai,
                         $jam_mulai,
-                        $jam_mulai
+                        $jam_selesai
                     );
                     $stmt_cek->execute();
                     $result_cek = $stmt_cek->get_result();
@@ -355,52 +414,119 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tambah_jadwal'])) {
                     } else {
                         $stmt_cek->close();
 
-                        // Cek apakah guru sudah memiliki jadwal dengan siswa lain pada waktu yang sama
-                        $sql_cek_guru = "SELECT jb.id 
-                                       FROM jadwal_belajar jb
-                                       JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
-                                       WHERE sp.guru_id = ?
-                                       AND jb.hari = ? 
-                                       AND jb.status = 'aktif'
-                                       AND jb.siswa_pelajaran_id != ?
-                                       AND (
-                                           (jb.jam_mulai < ? AND jb.jam_selesai > ?) OR
-                                           (? BETWEEN jb.jam_mulai AND jb.jam_selesai)
-                                       )";
-                        $stmt_cek_guru = $conn->prepare($sql_cek_guru);
-                        $stmt_cek_guru->bind_param(
-                            "isisss",
-                            $guru_id,
-                            $hari,
-                            $siswa_pelajaran_id,
-                            $jam_selesai,
-                            $jam_mulai,
-                            $jam_mulai
-                        );
-                        $stmt_cek_guru->execute();
-                        $result_cek_guru = $stmt_cek_guru->get_result();
+                        // Cek apakah mata pelajaran ini sudah ada jadwal di sesi lain
+                        $sql_cek_mapel = "SELECT COUNT(*) as jumlah_jadwal 
+                                        FROM jadwal_belajar jb
+                                        WHERE jb.siswa_pelajaran_id = ? 
+                                        AND jb.status = 'aktif'";
+                        $stmt_cek_mapel = $conn->prepare($sql_cek_mapel);
+                        $stmt_cek_mapel->bind_param("i", $siswa_pelajaran_id);
+                        $stmt_cek_mapel->execute();
+                        $result_cek_mapel = $stmt_cek_mapel->get_result();
+                        $row_cek_mapel = $result_cek_mapel->fetch_assoc();
+                        $stmt_cek_mapel->close();
 
-                        if ($result_cek_guru->num_rows > 0) {
-                            $_SESSION['error_message'] = "Anda sudah memiliki jadwal dengan siswa lain pada waktu yang sama!";
-                            $stmt_cek_guru->close();
+                        if ($row_cek_mapel['jumlah_jadwal'] > 0) {
+                            $_SESSION['error_message'] = "Mata pelajaran ini sudah memiliki jadwal!";
                         } else {
-                            $stmt_cek_guru->close();
+                            // Cari sesi yang sudah ada dengan hari dan jam yang sama
+                            $sql_cek_sesi = "SELECT id, kapasitas_maks, kapasitas_terisi, status 
+                                           FROM sesi_mengajar_guru 
+                                           WHERE guru_id = ? 
+                                           AND hari = ? 
+                                           AND jam_mulai = ? 
+                                           AND jam_selesai = ?";
+                            $stmt_cek_sesi = $conn->prepare($sql_cek_sesi);
+                            $stmt_cek_sesi->bind_param("isss", $guru_id, $hari, $jam_mulai, $jam_selesai);
+                            $stmt_cek_sesi->execute();
+                            $result_cek_sesi = $stmt_cek_sesi->get_result();
+                            
+                            if ($result_cek_sesi->num_rows > 0) {
+                                // Gunakan sesi yang sudah ada
+                                $sesi_data = $result_cek_sesi->fetch_assoc();
+                                $stmt_cek_sesi->close();
+                                
+                                if ($sesi_data['kapasitas_terisi'] >= $sesi_data['kapasitas_maks']) {
+                                    $_SESSION['error_message'] = "Kapasitas sesi mengajar sudah penuh!";
+                                } else if ($sesi_data['status'] != 'tersedia') {
+                                    $_SESSION['error_message'] = "Sesi mengajar tidak tersedia!";
+                                } else {
+                                    // Tambah jadwal ke sesi yang sudah ada
+                                    $sql_tambah = "INSERT INTO jadwal_belajar 
+                                                  (pendaftaran_id, siswa_pelajaran_id, sesi_guru_id, status) 
+                                                  VALUES (?, ?, ?, 'aktif')";
+                                    $stmt_tambah = $conn->prepare($sql_tambah);
+                                    $stmt_tambah->bind_param("iii", $pendaftaran_id, $siswa_pelajaran_id, $sesi_data['id']);
 
-                            // Tambah jadwal baru
-                            $sql_tambah = "INSERT INTO jadwal_belajar 
-                                          (pendaftaran_id, siswa_pelajaran_id, hari, jam_mulai, jam_selesai, status) 
-                                          VALUES (?, ?, ?, ?, ?, 'aktif')";
-                            $stmt_tambah = $conn->prepare($sql_tambah);
-                            $stmt_tambah->bind_param("iisss", $pendaftaran_id, $siswa_pelajaran_id, $hari, $jam_mulai, $jam_selesai);
-
-                            if ($stmt_tambah->execute()) {
-                                $_SESSION['success_message'] = "Jadwal berhasil ditambahkan!";
-                                $stmt_tambah->close();
-                                header("Location: jadwalSiswa.php");
-                                exit();
+                                    if ($stmt_tambah->execute()) {
+                                        // Update kapasitas terisi di sesi mengajar
+                                        $sql_update_kapasitas = "UPDATE sesi_mengajar_guru 
+                                                                SET kapasitas_terisi = kapasitas_terisi + 1 
+                                                                WHERE id = ?";
+                                        $stmt_update_kap = $conn->prepare($sql_update_kapasitas);
+                                        $stmt_update_kap->bind_param("i", $sesi_data['id']);
+                                        $stmt_update_kap->execute();
+                                        $stmt_update_kap->close();
+                                        
+                                        $_SESSION['success_message'] = "Jadwal berhasil ditambahkan!";
+                                        $stmt_tambah->close();
+                                        header("Location: jadwalSiswa.php");
+                                        exit();
+                                    } else {
+                                        $_SESSION['error_message'] = "Gagal menambahkan jadwal! Error: " . $stmt_tambah->error;
+                                        $stmt_tambah->close();
+                                    }
+                                }
                             } else {
-                                $_SESSION['error_message'] = "Gagal menambahkan jadwal! Error: " . $stmt_tambah->error;
-                                $stmt_tambah->close();
+                                $stmt_cek_sesi->close();
+                                
+                                // Buat sesi baru (handle error trigger dengan try-catch)
+                                try {
+                                    $kapasitas_maks = 5; // Sesuai data di tabel guru
+                                    $sql_buat_sesi = "INSERT INTO sesi_mengajar_guru 
+                                                     (guru_id, hari, jam_mulai, jam_selesai, kapasitas_maks, kapasitas_terisi, status) 
+                                                     VALUES (?, ?, ?, ?, ?, 0, 'tersedia')";
+                                    
+                                    $stmt_buat = $conn->prepare($sql_buat_sesi);
+                                    $stmt_buat->bind_param("isssi", $guru_id, $hari, $jam_mulai, $jam_selesai, $kapasitas_maks);
+                                    
+                                    if ($stmt_buat->execute()) {
+                                        $sesi_id = $stmt_buat->insert_id;
+                                        $stmt_buat->close();
+                                        
+                                        // Tambah jadwal baru
+                                        $sql_tambah = "INSERT INTO jadwal_belajar 
+                                                      (pendaftaran_id, siswa_pelajaran_id, sesi_guru_id, status) 
+                                                      VALUES (?, ?, ?, 'aktif')";
+                                        $stmt_tambah = $conn->prepare($sql_tambah);
+                                        $stmt_tambah->bind_param("iii", $pendaftaran_id, $siswa_pelajaran_id, $sesi_id);
+
+                                        if ($stmt_tambah->execute()) {
+                                            // Update kapasitas terisi di sesi mengajar
+                                            $sql_update_kapasitas = "UPDATE sesi_mengajar_guru 
+                                                                    SET kapasitas_terisi = kapasitas_terisi + 1 
+                                                                    WHERE id = ?";
+                                            $stmt_update_kap = $conn->prepare($sql_update_kapasitas);
+                                            $stmt_update_kap->bind_param("i", $sesi_id);
+                                            $stmt_update_kap->execute();
+                                            $stmt_update_kap->close();
+                                            
+                                            $_SESSION['success_message'] = "Jadwal berhasil ditambahkan!";
+                                            $stmt_tambah->close();
+                                            header("Location: jadwalSiswa.php");
+                                            exit();
+                                        } else {
+                                            $_SESSION['error_message'] = "Gagal menambahkan jadwal! Error: " . $stmt_tambah->error;
+                                            $stmt_tambah->close();
+                                        }
+                                    } else {
+                                        $_SESSION['error_message'] = "Gagal membuat sesi mengajar! Error: " . $stmt_buat->error;
+                                        $stmt_buat->close();
+                                    }
+                                } catch (Exception $e) {
+                                    // Jika trigger mencegah pembuatan sesi karena konflik waktu
+                                    $_SESSION['error_message'] = "Anda sudah memiliki sesi mengajar dengan waktu yang bertabrakan!";
+                                }
                             }
                         }
                     }
@@ -424,7 +550,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['edit_jadwal'])) {
     if ($jadwal_id && $hari && $jam_mulai && $jam_selesai) {
         try {
             // Ambil data jadwal lama
-            $sql_get = "SELECT jb.siswa_pelajaran_id, sp.siswa_id, sp.guru_id, jb.pendaftaran_id
+            $sql_get = "SELECT jb.siswa_pelajaran_id, jb.sesi_guru_id, sp.siswa_id, sp.guru_id, jb.pendaftaran_id
                        FROM jadwal_belajar jb
                        JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
                        WHERE jb.id = ? AND sp.guru_id = ?";
@@ -445,86 +571,163 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['edit_jadwal'])) {
             $siswa_id = $old_data['siswa_id'] ?? 0;
             $current_guru_id = $old_data['guru_id'] ?? 0;
             $pendaftaran_id = $old_data['pendaftaran_id'] ?? 0;
+            $old_sesi_id = $old_data['sesi_guru_id'] ?? 0;
 
             if ($siswa_pelajaran_id && $siswa_id && $current_guru_id && $pendaftaran_id) {
-                // Cek bentrok untuk siswa
+                // Cek apakah siswa sudah memiliki jadwal pada hari dan jam yang sama (untuk mata pelajaran LAIN)
                 $sql_cek_siswa = "SELECT jb.id 
                                FROM jadwal_belajar jb
                                JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
                                JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                               JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
                                WHERE ps.siswa_id = ? 
-                               AND jb.hari = ? 
+                               AND smg.hari = ? 
                                AND jb.id != ?
                                AND jb.status = 'aktif'
-                               AND (
-                                   (jb.jam_mulai < ? AND jb.jam_selesai > ?) OR
-                                   (? BETWEEN jb.jam_mulai AND jb.jam_selesai)
-                               )";
+                               AND smg.jam_mulai = ? 
+                               AND smg.jam_selesai = ?";
                 $stmt_cek_siswa = $conn->prepare($sql_cek_siswa);
                 $stmt_cek_siswa->bind_param(
-                    "isisss",
+                    "issss",
                     $siswa_id,
                     $hari,
                     $jadwal_id,
-                    $jam_selesai,
                     $jam_mulai,
-                    $jam_mulai
+                    $jam_selesai
                 );
                 $stmt_cek_siswa->execute();
-                $result_cek_siswa = $stmt_cek_siswa->get_result();
+                $result_cek_siswa = $stmt_cek_siswa->get_result(); // PERBAIKAN: $stmt_cek_siswa, bukan $stmt_cek_sisiwa
 
                 if ($result_cek_siswa->num_rows > 0) {
-                    $_SESSION['error_message'] = "Siswa sudah memiliki jadwal lain pada waktu ini!";
+                    $_SESSION['error_message'] = "Siswa sudah memiliki jadwal lain pada hari dan jam ini!";
                     $stmt_cek_siswa->close();
                 } else {
                     $stmt_cek_siswa->close();
 
-                    // Cek bentrok untuk guru
-                    $sql_cek_guru = "SELECT jb.id 
-                                   FROM jadwal_belajar jb
-                                   JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
-                                   WHERE sp.guru_id = ?
-                                   AND jb.hari = ? 
-                                   AND jb.id != ?
-                                   AND jb.status = 'aktif'
-                                   AND (
-                                       (jb.jam_mulai < ? AND jb.jam_selesai > ?) OR
-                                       (? BETWEEN jb.jam_mulai AND jb.jam_selesai)
-                                   )";
-                    $stmt_cek_guru = $conn->prepare($sql_cek_guru);
-                    $stmt_cek_guru->bind_param(
-                        "isisss",
-                        $guru_id,
-                        $hari,
-                        $jadwal_id,
-                        $jam_selesai,
-                        $jam_mulai,
-                        $jam_mulai
-                    );
-                    $stmt_cek_guru->execute();
-                    $result_cek_guru = $stmt_cek_guru->get_result();
-
-                    if ($result_cek_guru->num_rows > 0) {
-                        $_SESSION['error_message'] = "Anda sudah memiliki jadwal lain pada waktu yang sama!";
-                        $stmt_cek_guru->close();
-                    } else {
-                        $stmt_cek_guru->close();
-
-                        // Update jadwal
-                        $sql_update = "UPDATE jadwal_belajar 
-                                      SET hari = ?, jam_mulai = ?, jam_selesai = ?, updated_at = NOW()
-                                      WHERE id = ?";
-                        $stmt_update = $conn->prepare($sql_update);
-                        $stmt_update->bind_param("sssi", $hari, $jam_mulai, $jam_selesai, $jadwal_id);
-
-                        if ($stmt_update->execute()) {
-                            $_SESSION['success_message'] = "Jadwal berhasil diperbarui!";
-                            $stmt_update->close();
+                    // Cari sesi yang sudah ada dengan hari dan jam yang sama
+                    $sql_cek_sesi = "SELECT id, kapasitas_maks, kapasitas_terisi, status 
+                                   FROM sesi_mengajar_guru 
+                                   WHERE guru_id = ? 
+                                   AND hari = ? 
+                                   AND jam_mulai = ? 
+                                   AND jam_selesai = ?";
+                    $stmt_cek_sesi = $conn->prepare($sql_cek_sesi);
+                    $stmt_cek_sesi->bind_param("isss", $guru_id, $hari, $jam_mulai, $jam_selesai);
+                    $stmt_cek_sesi->execute();
+                    $result_cek_sesi = $stmt_cek_sesi->get_result();
+                    
+                    if ($result_cek_sesi->num_rows > 0) {
+                        // Gunakan sesi yang sudah ada
+                        $new_sesi_data = $result_cek_sesi->fetch_assoc();
+                        $stmt_cek_sesi->close();
+                        
+                        if ($new_sesi_data['kapasitas_terisi'] >= $new_sesi_data['kapasitas_maks']) {
+                            $_SESSION['error_message'] = "Kapasitas sesi mengajar sudah penuh!";
+                        } else if ($new_sesi_data['status'] != 'tersedia') {
+                            $_SESSION['error_message'] = "Sesi mengajar tidak tersedia!";
+                        } else if ($new_sesi_data['id'] == $old_sesi_id) {
+                            // Sesi tidak berubah, tidak perlu update
+                            $_SESSION['success_message'] = "Tidak ada perubahan pada jadwal.";
                             header("Location: jadwalSiswa.php");
                             exit();
                         } else {
-                            $_SESSION['error_message'] = "Gagal memperbarui jadwal! Error: " . $stmt_update->error;
-                            $stmt_update->close();
+                            // Update jadwal dengan sesi yang baru
+                            $sql_update = "UPDATE jadwal_belajar 
+                                          SET sesi_guru_id = ?, updated_at = NOW()
+                                          WHERE id = ?";
+                            $stmt_update = $conn->prepare($sql_update);
+                            $stmt_update->bind_param("ii", $new_sesi_data['id'], $jadwal_id);
+
+                            if ($stmt_update->execute()) {
+                                // Update kapasitas: kurangi dari sesi lama, tambah ke sesi baru
+                                
+                                // Kurangi kapasitas sesi lama
+                                $sql_update_old = "UPDATE sesi_mengajar_guru 
+                                                  SET kapasitas_terisi = GREATEST(0, kapasitas_terisi - 1) 
+                                                  WHERE id = ?";
+                                $stmt_update_old = $conn->prepare($sql_update_old);
+                                $stmt_update_old->bind_param("i", $old_sesi_id);
+                                $stmt_update_old->execute();
+                                $stmt_update_old->close();
+                                
+                                // Tambah kapasitas sesi baru
+                                $sql_update_new = "UPDATE sesi_mengajar_guru 
+                                                  SET kapasitas_terisi = kapasitas_terisi + 1 
+                                                  WHERE id = ?";
+                                $stmt_update_new = $conn->prepare($sql_update_new);
+                                $stmt_update_new->bind_param("i", $new_sesi_data['id']);
+                                $stmt_update_new->execute();
+                                $stmt_update_new->close();
+                                
+                                $_SESSION['success_message'] = "Jadwal berhasil diperbarui!";
+                                $stmt_update->close();
+                                header("Location: jadwalSiswa.php");
+                                exit();
+                            } else {
+                                $_SESSION['error_message'] = "Gagal memperbarui jadwal! Error: " . $stmt_update->error;
+                                $stmt_update->close();
+                            }
+                        }
+                    } else {
+                        $stmt_cek_sesi->close();
+                        
+                        // Buat sesi baru (handle error trigger dengan try-catch)
+                        try {
+                            $kapasitas_maks = 5; // Sesuai data di tabel guru
+                            $sql_buat_sesi = "INSERT INTO sesi_mengajar_guru 
+                                             (guru_id, hari, jam_mulai, jam_selesai, kapasitas_maks, kapasitas_terisi, status) 
+                                             VALUES (?, ?, ?, ?, ?, 0, 'tersedia')";
+                            
+                            $stmt_buat = $conn->prepare($sql_buat_sesi);
+                            $stmt_buat->bind_param("isssi", $guru_id, $hari, $jam_mulai, $jam_selesai, $kapasitas_maks);
+                            
+                            if ($stmt_buat->execute()) {
+                                $new_sesi_id = $stmt_buat->insert_id;
+                                $stmt_buat->close();
+                                
+                                // Update jadwal dengan sesi yang baru
+                                $sql_update = "UPDATE jadwal_belajar 
+                                              SET sesi_guru_id = ?, updated_at = NOW()
+                                              WHERE id = ?";
+                                $stmt_update = $conn->prepare($sql_update);
+                                $stmt_update->bind_param("ii", $new_sesi_id, $jadwal_id);
+
+                                if ($stmt_update->execute()) {
+                                    // Update kapasitas: kurangi dari sesi lama, tambah ke sesi baru
+                                    
+                                    // Kurangi kapasitas sesi lama
+                                    $sql_update_old = "UPDATE sesi_mengajar_guru 
+                                                      SET kapasitas_terisi = GREATEST(0, kapasitas_terisi - 1) 
+                                                      WHERE id = ?";
+                                    $stmt_update_old = $conn->prepare($sql_update_old);
+                                    $stmt_update_old->bind_param("i", $old_sesi_id);
+                                    $stmt_update_old->execute();
+                                    $stmt_update_old->close();
+                                    
+                                    // Tambah kapasitas sesi baru
+                                    $sql_update_new = "UPDATE sesi_mengajar_guru 
+                                                      SET kapasitas_terisi = kapasitas_terisi + 1 
+                                                      WHERE id = ?";
+                                    $stmt_update_new = $conn->prepare($sql_update_new);
+                                    $stmt_update_new->bind_param("i", $new_sesi_id);
+                                    $stmt_update_new->execute();
+                                    $stmt_update_new->close();
+                                    
+                                    $_SESSION['success_message'] = "Jadwal berhasil diperbarui!";
+                                    $stmt_update->close();
+                                    header("Location: jadwalSiswa.php");
+                                    exit();
+                                } else {
+                                    $_SESSION['error_message'] = "Gagal memperbarui jadwal! Error: " . $stmt_update->error;
+                                    $stmt_update->close();
+                                }
+                            } else {
+                                $_SESSION['error_message'] = "Gagal membuat sesi mengajar! Error: " . $stmt_buat->error;
+                                $stmt_buat->close();
+                            }
+                        } catch (Exception $e) {
+                            // Jika trigger mencegah pembuatan sesi karena konflik waktu
+                            $_SESSION['error_message'] = "Anda sudah memiliki sesi mengajar dengan waktu yang bertabrakan!";
                         }
                     }
                 }
@@ -544,7 +747,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['hapus_jadwal'])) {
     if ($jadwal_id) {
         try {
             // Cek apakah jadwal ini milik guru ini (melalui siswa_pelajaran)
-            $sql_cek_akses = "SELECT jb.id 
+            $sql_cek_akses = "SELECT jb.id, jb.sesi_guru_id, sp.guru_id
                             FROM jadwal_belajar jb
                             JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
                             WHERE jb.id = ? AND sp.guru_id = ?";
@@ -558,6 +761,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['hapus_jadwal'])) {
                 header("Location: jadwalSiswa.php");
                 exit();
             }
+            
+            $akses_data = $result_cek_akses->fetch_assoc();
+            $sesi_guru_id = $akses_data['sesi_guru_id'];
             $stmt_cek_akses->close();
 
             // Hard delete
@@ -570,6 +776,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['hapus_jadwal'])) {
                 $stmt_hapus->close();
 
                 if ($affected_rows > 0) {
+                    // Update kapasitas terisi di sesi mengajar
+                    $sql_update_kapasitas = "UPDATE sesi_mengajar_guru 
+                                            SET kapasitas_terisi = GREATEST(0, kapasitas_terisi - 1) 
+                                            WHERE id = ?";
+                    $stmt_update_kap = $conn->prepare($sql_update_kapasitas);
+                    $stmt_update_kap->bind_param("i", $sesi_guru_id);
+                    $stmt_update_kap->execute();
+                    $stmt_update_kap->close();
+                    
                     $_SESSION['success_message'] = "Jadwal berhasil dihapus!";
                 } else {
                     $_SESSION['error_message'] = "Jadwal tidak ditemukan!";
@@ -599,7 +814,6 @@ foreach ($jadwal_siswa as $jadwal) {
     }
     $jadwal_by_hari[$hari]++;
 }
-
 
 // TAMBAHKAN DEBUG INFO (opsional)
 error_log("=== DEBUG INFO JADWAL SISWA ===");
@@ -1359,6 +1573,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran_guru' && isset($_GET
                                         <th>Hari</th>
                                         <th>Jam Mulai</th>
                                         <th>Jam Selesai</th>
+                                        <th>Kapasitas</th>
                                         <th>Aksi</th>
                                     </tr>
                                 </thead>
@@ -1404,6 +1619,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran_guru' && isset($_GET
                                             </td>
                                             <td class="font-medium"><?php echo $jadwal['jam_mulai_format']; ?></td>
                                             <td class="font-medium"><?php echo $jadwal['jam_selesai_format']; ?></td>
+                                            <td>
+                                                <span class="text-sm">
+                                                    <?php echo $jadwal['kapasitas_terisi']; ?>/<?php echo $jadwal['kapasitas_maks']; ?>
+                                                </span>
+                                            </td>
                                             <td>
                                                 <div class="flex space-x-2">
                                                     <button onclick="openEditModal(

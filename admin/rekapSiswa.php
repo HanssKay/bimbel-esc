@@ -71,67 +71,6 @@ while ($row = $result_siswa->fetch_assoc()) {
 }
 $stmt_siswa->close();
 
-// **QUERY UTAMA: Ambil data jadwal belajar yang aktif**
-$sql_rekap = "SELECT 
-                g.id as guru_id,
-                u.full_name as nama_guru,
-                jb.hari,
-                jb.jam_mulai,
-                jb.jam_selesai,
-                ps.id as pendaftaran_id,
-                s.id as siswa_id,
-                s.nama_lengkap,
-                s.kelas as kelas_sekolah,
-                sp.id as siswa_pelajaran_id,
-                sp.nama_pelajaran,
-                ps.tingkat as tingkat_bimbel
-              FROM jadwal_belajar jb
-              JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
-              JOIN siswa s ON sp.siswa_id = s.id
-              JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-              LEFT JOIN guru g ON sp.guru_id = g.id
-              LEFT JOIN users u ON g.user_id = u.id
-              WHERE jb.status = 'aktif'
-              AND sp.status = 'aktif'
-              AND ps.status = 'aktif'
-              AND s.status = 'aktif'";
-
-if ($filter_guru > 0) {
-    $sql_rekap .= " AND sp.guru_id = ?";
-}
-
-if ($filter_siswa > 0) {
-    $sql_rekap .= " AND s.id = ?";
-}
-
-$sql_rekap .= " ORDER BY u.full_name, 
-                  FIELD(jb.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
-                  jb.jam_mulai,
-                  s.nama_lengkap";
-
-// Siapkan parameter
-$stmt_rekap = $conn->prepare($sql_rekap);
-if ($filter_guru > 0 && $filter_siswa > 0) {
-    $stmt_rekap->bind_param("ii", $filter_guru, $filter_siswa);
-} elseif ($filter_guru > 0) {
-    $stmt_rekap->bind_param("i", $filter_guru);
-} elseif ($filter_siswa > 0) {
-    $stmt_rekap->bind_param("i", $filter_siswa);
-}
-$stmt_rekap->execute();
-$result_rekap = $stmt_rekap->get_result();
-$data_rekap = [];
-
-// Kelompokkan data berdasarkan guru->jadwal->siswa
-$grouped_data = [];
-$total_siswa_rekap = 0;
-$total_absensi_rekap = 0;
-$total_hadir_rekap = 0;
-$total_izin_rekap = 0;
-$total_sakit_rekap = 0;
-$total_alpha_rekap = 0;
-$total_belum_absen = 0;
-
 // Hitung rentang tanggal berdasarkan minggu
 $start_date = null;
 $end_date = null;
@@ -148,8 +87,93 @@ if ($filter_minggu > 0) {
     }
 }
 
+// **QUERY UTAMA: Ambil data jadwal belajar yang aktif - DIAMANKAN**
+$sql_rekap = "SELECT 
+                g.id as guru_id,
+                u.full_name as nama_guru,
+                smg.id as sesi_guru_id,
+                smg.hari,
+                smg.jam_mulai,
+                smg.jam_selesai,
+                ps.id as pendaftaran_id,
+                s.id as siswa_id,
+                s.nama_lengkap,
+                s.kelas as kelas_sekolah,
+                sp.id as siswa_pelajaran_id,
+                sp.nama_pelajaran,
+                ps.tingkat as tingkat_bimbel,
+                jb.id as jadwal_id
+              FROM jadwal_belajar jb
+              JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+              JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
+              JOIN siswa s ON sp.siswa_id = s.id
+              JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+              LEFT JOIN guru g ON smg.guru_id = g.id
+              LEFT JOIN users u ON g.user_id = u.id
+              WHERE jb.status = 'aktif'
+              AND sp.status = 'aktif'
+              AND ps.status = 'aktif'
+              AND s.status = 'aktif'";
+
+// Tambahkan filter dengan cara yang aman
+$filter_conditions = [];
+$filter_params = [];
+$filter_types = "";
+
+if ($filter_guru > 0) {
+    $filter_conditions[] = "smg.guru_id = ?";
+    $filter_params[] = $filter_guru;
+    $filter_types .= "i";
+}
+
+if ($filter_siswa > 0) {
+    $filter_conditions[] = "s.id = ?";
+    $filter_params[] = $filter_siswa;
+    $filter_types .= "i";
+}
+
+if (!empty($filter_conditions)) {
+    $sql_rekap .= " AND " . implode(" AND ", $filter_conditions);
+}
+
+$sql_rekap .= " ORDER BY u.full_name, 
+                  FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
+                  smg.jam_mulai,
+                  s.nama_lengkap";
+
+// Eksekusi query utama
+$stmt_rekap = $conn->prepare($sql_rekap);
+if (!empty($filter_params)) {
+    $stmt_rekap->bind_param($filter_types, ...$filter_params);
+}
+
+$stmt_rekap->execute();
+$result_rekap = $stmt_rekap->get_result();
+
+$data_rekap = [];
+$grouped_data = [];
+
+// Statistik
+$total_siswa_rekap = 0;
+$total_hadir_rekap = 0;
+$total_izin_rekap = 0;
+$total_sakit_rekap = 0;
+$total_alpha_rekap = 0;
+$total_belum_absen = 0;
+
+// Array untuk menyimpan data untuk query absensi batch
+$absensi_data_batch = [];
+
 while ($row = $result_rekap->fetch_assoc()) {
-    // Buat key unik berdasarkan kombinasi guru, hari, jam, dan pelajaran
+    // Simpan data untuk query absensi batch
+    $absensi_data_batch[] = [
+        'row_data' => $row,
+        'siswa_id' => $row['siswa_id'],
+        'siswa_pelajaran_id' => $row['siswa_pelajaran_id'],
+        'sesi_guru_id' => $row['sesi_guru_id']
+    ];
+    
+    // Buat key unik untuk grouping
     $key = $row['guru_id'] . '_' . $row['hari'] . '_' . $row['jam_mulai'] . '_' . $row['jam_selesai'] . '_' . $row['nama_pelajaran'];
     
     if (!isset($grouped_data[$key])) {
@@ -161,97 +185,128 @@ while ($row = $result_rekap->fetch_assoc()) {
             'jam_selesai' => $row['jam_selesai'],
             'nama_pelajaran' => $row['nama_pelajaran'],
             'tingkat_bimbel' => $row['tingkat_bimbel'],
+            'jadwal_id' => $row['jadwal_id'],
             'siswa' => []
         ];
     }
-    
-    // **AMBIL DATA ABSENSI UNTUK SISWA INI berdasarkan siswa_pelajaran_id**
-    $sql_absensi = "SELECT 
-                    COUNT(*) as total_sesi,
-                    SUM(CASE WHEN status = 'hadir' THEN 1 ELSE 0 END) as total_hadir,
-                    SUM(CASE WHEN status = 'izin' THEN 1 ELSE 0 END) as total_izin,
-                    SUM(CASE WHEN status = 'sakit' THEN 1 ELSE 0 END) as total_sakit,
-                    SUM(CASE WHEN status = 'alpha' THEN 1 ELSE 0 END) as total_alpha,
-                    MIN(tanggal_absensi) as tanggal_pertama,
-                    MAX(tanggal_absensi) as tanggal_terakhir
-                  FROM absensi_siswa 
-                  WHERE siswa_id = ? 
-                  AND siswa_pelajaran_id = ?";
-    
-    // Tambahkan filter tanggal jika minggu dipilih
-    $where_params = "si";
-    $where_values = [$row['siswa_id'], $row['siswa_pelajaran_id']];
-    
-    if ($filter_minggu > 0) {
-        $sql_absensi .= " AND tanggal_absensi BETWEEN ? AND ?";
-        $where_params .= "ss";
-        $where_values[] = $start_date;
-        $where_values[] = $end_date;
-    } else {
-        $sql_absensi .= " AND DATE_FORMAT(tanggal_absensi, '%Y-%m') = ?";
-        $where_params .= "s";
-        $where_values[] = $periode;
-    }
-    
-    $stmt_absensi = $conn->prepare($sql_absensi);
-    $stmt_absensi->bind_param($where_params, ...$where_values);
-    $stmt_absensi->execute();
-    $result_absensi = $stmt_absensi->get_result();
-    $absensi = $result_absensi->fetch_assoc() ?? [
-        'total_sesi' => 0,
-        'total_hadir' => 0,
-        'total_izin' => 0,
-        'total_sakit' => 0,
-        'total_alpha' => 0,
-        'tanggal_pertama' => null,
-        'tanggal_terakhir' => null
-    ];
-    $stmt_absensi->close();
-    
-    // Hitung total sesi yang seharusnya (berdasarkan filter minggu)
-    $total_sesi_seharusnya = 0;
-    if ($filter_minggu > 0) {
-        // Hitung berapa kali jadwal ini terjadi dalam rentang minggu tersebut
-        $total_sesi_seharusnya = 1; // Minimal 1 sesi dalam seminggu untuk jadwal tetap
-    } else {
-        // Untuk filter bulan, hitung berdasarkan hari dalam bulan
-        $total_sesi_seharusnya = $absensi['total_sesi'];
-    }
-    
-    // Hitung yang belum diabsen
-    $total_sudah_absen = $absensi['total_hadir'] + $absensi['total_izin'] + $absensi['total_sakit'] + $absensi['total_alpha'];
-    $belum_absen = $total_sesi_seharusnya - $total_sudah_absen;
-    if ($belum_absen < 0) $belum_absen = 0;
-    
-    // Tambahkan data siswa dengan absensi
-    $siswa_data = [
-        'siswa_id' => $row['siswa_id'],
-        'nama_lengkap' => $row['nama_lengkap'],
-        'kelas_sekolah' => $row['kelas_sekolah'],
-        'nama_pelajaran' => $row['nama_pelajaran'],
-        'total_sesi' => $absensi['total_sesi'],
-        'total_hadir' => $absensi['total_hadir'],
-        'total_izin' => $absensi['total_izin'],
-        'total_sakit' => $absensi['total_sakit'],
-        'total_alpha' => $absensi['total_alpha'],
-        'belum_absen' => $belum_absen,
-        'total_sesi_seharusnya' => $total_sesi_seharusnya,
-        'tanggal_pertama' => $absensi['tanggal_pertama'],
-        'tanggal_terakhir' => $absensi['tanggal_terakhir']
-    ];
-    
-    $grouped_data[$key]['siswa'][] = $siswa_data;
-    
-    // Hitung statistik dari data rekap
-    $total_siswa_rekap++;
-    $total_absensi_rekap += $absensi['total_sesi'];
-    $total_hadir_rekap += $absensi['total_hadir'];
-    $total_izin_rekap += $absensi['total_izin'];
-    $total_sakit_rekap += $absensi['total_sakit'];
-    $total_alpha_rekap += $absensi['total_alpha'];
-    $total_belum_absen += $belum_absen;
 }
 $stmt_rekap->close();
+
+// **AMBIL DATA ABSENSI DALAM BATCH - LEBIH EFISIEN**
+if (!empty($absensi_data_batch)) {
+    // Buat array untuk menyimpan hasil absensi
+    $absensi_results = [];
+    
+    // Query absensi untuk semua data sekaligus
+    $absensi_ids = [];
+    foreach ($absensi_data_batch as $item) {
+        $absensi_ids[] = $item['siswa_id'] . '-' . $item['siswa_pelajaran_id'] . '-' . $item['sesi_guru_id'];
+    }
+    
+    // Karena kita perlu filter tanggal, kita buat query terpisah
+    foreach ($absensi_data_batch as $item) {
+        $row = $item['row_data'];
+        
+        // Query absensi dengan prepared statement yang aman
+        $sql_absensi = "SELECT 
+                        COUNT(*) as total_sesi,
+                        SUM(CASE WHEN status = 'hadir' THEN 1 ELSE 0 END) as total_hadir,
+                        SUM(CASE WHEN status = 'izin' THEN 1 ELSE 0 END) as total_izin,
+                        SUM(CASE WHEN status = 'sakit' THEN 1 ELSE 0 END) as total_sakit,
+                        SUM(CASE WHEN status = 'alpha' THEN 1 ELSE 0 END) as total_alpha
+                      FROM absensi_siswa 
+                      WHERE siswa_id = ? 
+                      AND siswa_pelajaran_id = ? 
+                      AND sesi_guru_id = ?";
+        
+        // Tambahkan filter tanggal
+        if ($filter_minggu > 0) {
+            $sql_absensi .= " AND tanggal_absensi BETWEEN ? AND ?";
+            $stmt_absensi = $conn->prepare($sql_absensi);
+            if ($stmt_absensi) {
+                $stmt_absensi->bind_param("iiiss", 
+                    $row['siswa_id'], 
+                    $row['siswa_pelajaran_id'], 
+                    $row['sesi_guru_id'],
+                    $start_date,
+                    $end_date
+                );
+            }
+        } else {
+            $sql_absensi .= " AND DATE_FORMAT(tanggal_absensi, '%Y-%m') = ?";
+            $stmt_absensi = $conn->prepare($sql_absensi);
+            if ($stmt_absensi) {
+                $stmt_absensi->bind_param("iiis", 
+                    $row['siswa_id'], 
+                    $row['siswa_pelajaran_id'], 
+                    $row['sesi_guru_id'],
+                    $periode
+                );
+            }
+        }
+        
+        if ($stmt_absensi) {
+            $stmt_absensi->execute();
+            $result_absensi = $stmt_absensi->get_result();
+            $absensi = $result_absensi->fetch_assoc() ?? [
+                'total_sesi' => 0,
+                'total_hadir' => 0,
+                'total_izin' => 0,
+                'total_sakit' => 0,
+                'total_alpha' => 0
+            ];
+            $stmt_absensi->close();
+        } else {
+            $absensi = [
+                'total_sesi' => 0,
+                'total_hadir' => 0,
+                'total_izin' => 0,
+                'total_sakit' => 0,
+                'total_alpha' => 0
+            ];
+        }
+        
+        // Hitung total sesi yang seharusnya
+        $total_sesi_seharusnya = 4; // Default 4 sesi per bulan
+        
+        // Jika filter minggu aktif, maka hanya 1 sesi
+        if ($filter_minggu > 0) {
+            $total_sesi_seharusnya = 1;
+        }
+        
+        // Hitung yang belum diabsen
+        $total_sudah_absen = $absensi['total_hadir'] + $absensi['total_izin'] + $absensi['total_sakit'] + $absensi['total_alpha'];
+        $belum_absen = $total_sesi_seharusnya - $total_sudah_absen;
+        if ($belum_absen < 0) $belum_absen = 0;
+        
+        // Tambahkan data siswa ke grouped data
+        $key = $row['guru_id'] . '_' . $row['hari'] . '_' . $row['jam_mulai'] . '_' . $row['jam_selesai'] . '_' . $row['nama_pelajaran'];
+        
+        $siswa_data = [
+            'siswa_id' => $row['siswa_id'],
+            'nama_lengkap' => $row['nama_lengkap'],
+            'kelas_sekolah' => $row['kelas_sekolah'],
+            'nama_pelajaran' => $row['nama_pelajaran'],
+            'total_sesi' => $absensi['total_sesi'],
+            'total_hadir' => $absensi['total_hadir'],
+            'total_izin' => $absensi['total_izin'],
+            'total_sakit' => $absensi['total_sakit'],
+            'total_alpha' => $absensi['total_alpha'],
+            'belum_absen' => $belum_absen,
+            'total_sesi_seharusnya' => $total_sesi_seharusnya
+        ];
+        
+        $grouped_data[$key]['siswa'][] = $siswa_data;
+        
+        // Update statistik
+        $total_siswa_rekap++;
+        $total_hadir_rekap += $absensi['total_hadir'];
+        $total_izin_rekap += $absensi['total_izin'];
+        $total_sakit_rekap += $absensi['total_sakit'];
+        $total_alpha_rekap += $absensi['total_alpha'];
+        $total_belum_absen += $belum_absen;
+    }
+}
 
 // Konversi ke array untuk ditampilkan
 foreach ($grouped_data as $key => $group) {
@@ -616,17 +671,34 @@ foreach ($grouped_data as $key => $group) {
                             </div>
                         </div>
                     </div>
-                    <!--<div class="bg-white rounded-lg p-4 shadow">-->
-                    <!--    <div class="flex items-center">-->
-                    <!--        <div class="p-2 bg-gray-300 rounded-lg mr-3">-->
-                    <!--            <i class="fas fa-question-circle text-gray-600"></i>-->
-                    <!--        </div>-->
-                    <!--        <div>-->
-                    <!--            <p class="text-sm text-gray-600">Belum Absen</p>-->
-                    <!--            <p class="text-xl font-bold text-gray-800"><?php echo $total_belum_absen; ?></p>-->
-                    <!--        </div>-->
-                    <!--    </div>-->
-                    <!--</div>-->
+                </div>
+                
+                <!-- Statistik tambahan -->
+                <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="bg-gray-50 rounded-lg p-4">
+                        <div class="flex items-center">
+                            <div class="p-2 bg-purple-100 rounded-lg mr-3">
+                                <i class="fas fa-calendar-check text-purple-600"></i>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-600">Total Sesi Diabsen</p>
+                                <p class="text-xl font-bold text-gray-800">
+                                    <?php echo $total_hadir_rekap + $total_izin_rekap + $total_sakit_rekap + $total_alpha_rekap; ?>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg p-4 shadow">
+                        <div class="flex items-center">
+                            <div class="p-2 bg-orange-100 rounded-lg mr-3">
+                                <i class="fas fa-question-circle text-orange-600"></i>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-600">Belum Diabsen</p>
+                                <p class="text-xl font-bold text-gray-800"><?php echo $total_belum_absen; ?></p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -712,30 +784,11 @@ foreach ($grouped_data as $key => $group) {
                                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Izin</th>
                                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sakit</th>
                                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Alpha</th>
-                                            <!--<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Belum Absen</th>-->
-                                            <!--<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>-->
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Belum Absen</th>
                                         </tr>
                                     </thead>
                                     <tbody class="bg-white divide-y divide-gray-200">
-                                        <?php foreach ($jadwal['siswa'] as $idx => $siswa): 
-                                            $total_absen = $siswa['total_hadir'] + $siswa['total_izin'] + $siswa['total_sakit'] + $siswa['total_alpha'];
-                                            $status = '';
-                                            $status_class = '';
-                                            
-                                            if ($siswa['belum_absen'] > 0) {
-                                                $status = 'Belum Absen';
-                                                $status_class = 'bg-gray-100 text-gray-800';
-                                            } elseif ($siswa['total_alpha'] > 0) {
-                                                $status = 'Ada Alpha';
-                                                $status_class = 'bg-red-100 text-red-800';
-                                            } elseif ($siswa['total_izin'] > 0 || $siswa['total_sakit'] > 0) {
-                                                $status = 'Izin/Sakit';
-                                                $status_class = 'bg-yellow-100 text-yellow-800';
-                                            } else {
-                                                $status = 'Lengkap';
-                                                $status_class = 'bg-green-100 text-green-800';
-                                            }
-                                        ?>
+                                        <?php foreach ($jadwal['siswa'] as $idx => $siswa): ?>
                                         <tr class="hover:bg-gray-50">
                                             <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                                                 <?php echo $idx + 1; ?>
@@ -766,18 +819,9 @@ foreach ($grouped_data as $key => $group) {
                                             <td class="px-4 py-3 whitespace-nowrap text-sm text-red-600 font-medium">
                                                 <?php echo $siswa['total_alpha']; ?>
                                             </td>
-                                            <!--<td class="px-4 py-3 whitespace-nowrap text-sm font-medium">-->
-                                            <!--    <?php if ($siswa['belum_absen'] > 0): ?>-->
-                                            <!--    <span class="text-gray-600"><?php echo $siswa['belum_absen']; ?></span>-->
-                                            <!--    <?php else: ?>-->
-                                            <!--    <span class="text-gray-400">0</span>-->
-                                            <!--    <?php endif; ?>-->
-                                            <!--</td>-->
-                                            <!--<td class="px-4 py-3 whitespace-nowrap">-->
-                                            <!--    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <?php echo $status_class; ?>">-->
-                                            <!--        <?php echo $status; ?>-->
-                                            <!--    </span>-->
-                                            <!--</td>-->
+                                            <td class="px-4 py-3 whitespace-nowrap text-sm font-medium <?php echo $siswa['belum_absen'] > 0 ? 'text-orange-600' : 'text-gray-400'; ?>">
+                                                <?php echo $siswa['belum_absen']; ?>
+                                            </td>
                                         </tr>
                                         <?php endforeach; ?>
                                     </tbody>

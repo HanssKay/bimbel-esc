@@ -46,10 +46,12 @@ if (isset($_SESSION['error_message'])) {
 }
 
 // Fungsi untuk cek hak akses guru ke siswa
+// Fungsi untuk cek hak akses guru ke siswa
 function guruBolehAksesSiswa($conn, $guru_id, $siswa_id)
 {
     try {
-        $sql = "SELECT 1 FROM siswa_pelajaran sp 
+        $sql = "SELECT 1 
+                FROM siswa_pelajaran sp 
                 INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
                 WHERE sp.siswa_id = ? 
                 AND sp.guru_id = ? 
@@ -77,55 +79,183 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
 
     if (guruBolehAksesSiswa($conn, $guru_id, $siswa_id)) {
         try {
-            $sql = "SELECT 
+            // QUERY 1: Ambil data dasar siswa
+            $sql_main = "SELECT 
                         s.*,
-                        -- Ambil semua orangtua (many-to-many)
-                        GROUP_CONCAT(DISTINCT CONCAT(o.nama_ortu, ' (', o.hubungan_dengan_siswa, ')') SEPARATOR ', ') as semua_ortu,
-                        GROUP_CONCAT(DISTINCT o.no_hp SEPARATOR ', ') as semua_no_hp_ortu,
-                        GROUP_CONCAT(DISTINCT o.email SEPARATOR ', ') as semua_email_ortu,
-                        GROUP_CONCAT(DISTINCT CONCAT(o.pekerjaan, ' di ', o.perusahaan) SEPARATOR '; ') as semua_pekerjaan,
-                        GROUP_CONCAT(DISTINCT o.hubungan_dengan_siswa SEPARATOR ', ') as semua_hubungan,
-                        -- Ambil orangtua pertama untuk kompatibilitas
-                        (SELECT o2.nama_ortu FROM siswa_orangtua so2 INNER JOIN orangtua o2 ON so2.orangtua_id = o2.id WHERE so2.siswa_id = s.id ORDER BY o2.id ASC LIMIT 1) as nama_ortu,
-                        (SELECT o2.no_hp FROM siswa_orangtua so2 INNER JOIN orangtua o2 ON so2.orangtua_id = o2.id WHERE so2.siswa_id = s.id ORDER BY o2.id ASC LIMIT 1) as no_hp_ortu,
-                        (SELECT o2.email FROM siswa_orangtua so2 INNER JOIN orangtua o2 ON so2.orangtua_id = o2.id WHERE so2.siswa_id = s.id ORDER BY o2.id ASC LIMIT 1) as email_ortu,
-                        (SELECT o2.pekerjaan FROM siswa_orangtua so2 INNER JOIN orangtua o2 ON so2.orangtua_id = o2.id WHERE so2.siswa_id = s.id ORDER BY o2.id ASC LIMIT 1) as pekerjaan,
-                        (SELECT o2.perusahaan FROM siswa_orangtua so2 INNER JOIN orangtua o2 ON so2.orangtua_id = o2.id WHERE so2.siswa_id = s.id ORDER BY o2.id ASC LIMIT 1) as perusahaan,
-                        (SELECT o2.hubungan_dengan_siswa FROM siswa_orangtua so2 INNER JOIN orangtua o2 ON so2.orangtua_id = o2.id WHERE so2.siswa_id = s.id ORDER BY o2.id ASC LIMIT 1) as hubungan_dengan_siswa,
                         ps.tingkat,
                         ps.jenis_kelas,
-                        ps.tanggal_mulai,
-                        GROUP_CONCAT(DISTINCT CONCAT(sp.nama_pelajaran, ' (', ps.tingkat, ' - ', ps.jenis_kelas, ')') SEPARATOR ', ') as program_bimbel,
-                        GROUP_CONCAT(DISTINCT CONCAT(jb.hari, ' ', TIME_FORMAT(jb.jam_mulai, '%H:%i'), '-', TIME_FORMAT(jb.jam_selesai, '%H:%i'), ' (', sp.nama_pelajaran, ')') ORDER BY FIELD(jb.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'), jb.jam_mulai SEPARATOR ', ') as jadwal_belajar,
-                        COUNT(DISTINCT sp.id) as total_program,
-                        COUNT(DISTINCT jb.id) as total_jadwal
+                        ps.tanggal_mulai
                     FROM siswa s
                     INNER JOIN siswa_pelajaran sp ON s.id = sp.siswa_id
                     INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                    LEFT JOIN siswa_orangtua so ON s.id = so.siswa_id
-                    LEFT JOIN orangtua o ON so.orangtua_id = o.id
-                    LEFT JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id AND jb.status = 'aktif'
                     WHERE s.id = ? 
                     AND sp.guru_id = ? 
                     AND sp.status = 'aktif'
                     AND ps.status = 'aktif'
-                    GROUP BY s.id";
+                    LIMIT 1";
 
-            // NONAKTIFKAN ONLY_FULL_GROUP_BY untuk query detail
-            $conn->query("SET SESSION sql_mode = ''");
-
-            $stmt = $conn->prepare($sql);
+            $stmt = $conn->prepare($sql_main);
+            if ($stmt === false) {
+                throw new Exception("Prepare failed for main query: " . $conn->error);
+            }
             $stmt->bind_param("ii", $siswa_id, $guru_id);
             $stmt->execute();
             $result = $stmt->get_result();
-
+            
             if ($row = $result->fetch_assoc()) {
                 $siswa_detail = $row;
+                
+                // QUERY 2: Hitung total program
+                $sql_total_program = "SELECT COUNT(DISTINCT sp.id) as total_program
+                                     FROM siswa_pelajaran sp
+                                     WHERE sp.siswa_id = ?
+                                     AND sp.guru_id = ?
+                                     AND sp.status = 'aktif'";
+                
+                $stmt2 = $conn->prepare($sql_total_program);
+                $stmt2->bind_param("ii", $siswa_id, $guru_id);
+                $stmt2->execute();
+                $result2 = $stmt2->get_result();
+                if ($row2 = $result2->fetch_assoc()) {
+                    $siswa_detail['total_program'] = $row2['total_program'];
+                }
+                $stmt2->close();
+                
+                // QUERY 3: Hitung total jadwal
+                $sql_total_jadwal = "SELECT COUNT(DISTINCT jb.id) as total_jadwal
+                                    FROM jadwal_belajar jb
+                                    INNER JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
+                                    WHERE sp.siswa_id = ?
+                                    AND sp.guru_id = ?
+                                    AND jb.status = 'aktif'
+                                    AND sp.status = 'aktif'";
+                
+                $stmt3 = $conn->prepare($sql_total_jadwal);
+                $stmt3->bind_param("ii", $siswa_id, $guru_id);
+                $stmt3->execute();
+                $result3 = $stmt3->get_result();
+                if ($row3 = $result3->fetch_assoc()) {
+                    $siswa_detail['total_jadwal'] = $row3['total_jadwal'];
+                }
+                $stmt3->close();
+                
+                // QUERY 4: Ambil data orangtua (bisa lebih dari satu)
+                $sql_ortu = "SELECT 
+                            o.id,
+                            o.nama_ortu,
+                            o.no_hp as no_hp_ortu,
+                            o.email as email_ortu,
+                            o.pekerjaan,
+                            o.perusahaan,
+                            o.hubungan_dengan_siswa
+                        FROM siswa_orangtua so
+                        INNER JOIN orangtua o ON so.orangtua_id = o.id
+                        WHERE so.siswa_id = ?";
+                
+                $stmt4 = $conn->prepare($sql_ortu);
+                if ($stmt4 === false) {
+                    error_log("Prepare orangtua failed: " . $conn->error);
+                } else {
+                    $stmt4->bind_param("i", $siswa_id);
+                    $stmt4->execute();
+                    $ortu_result = $stmt4->get_result();
+                    $orangtua_data = [];
+                    while ($ortu_row = $ortu_result->fetch_assoc()) {
+                        $orangtua_data[] = $ortu_row;
+                    }
+                    $siswa_detail['orangtua'] = $orangtua_data;
+                    $stmt4->close();
+                }
+                
+                // QUERY 5: Ambil saudara kandung (anak lain dari orangtua yang sama)
+                if (!empty($orangtua_data)) {
+                    $orangtua_ids = array_column($orangtua_data, 'id');
+                    $placeholders = implode(',', array_fill(0, count($orangtua_ids), '?'));
+                    
+                    $sql_saudara = "SELECT DISTINCT s2.nama_lengkap
+                                    FROM siswa s2
+                                    INNER JOIN siswa_orangtua so2 ON s2.id = so2.siswa_id
+                                    WHERE so2.orangtua_id IN ($placeholders)
+                                    AND s2.id != ?
+                                    ORDER BY s2.nama_lengkap";
+                    
+                    $stmt5 = $conn->prepare($sql_saudara);
+                    if ($stmt5) {
+                        // Bind parameters
+                        $bind_types = str_repeat('i', count($orangtua_ids)) . 'i';
+                        $bind_params = array_merge($orangtua_ids, [$siswa_id]);
+                        
+                        // Bind parameters secara manual
+                        $stmt5->bind_param($bind_types, ...$bind_params);
+                        $stmt5->execute();
+                        $saudara_result = $stmt5->get_result();
+                        $saudara_list = [];
+                        while ($saudara_row = $saudara_result->fetch_assoc()) {
+                            $saudara_list[] = $saudara_row['nama_lengkap'];
+                        }
+                        $siswa_detail['saudara_kandung'] = implode(', ', $saudara_list);
+                        $stmt5->close();
+                    }
+                }
+                
+                // QUERY 6: Ambil program bimbel
+                $sql_program = "SELECT DISTINCT sp.nama_pelajaran
+                               FROM siswa_pelajaran sp
+                               INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                               WHERE sp.siswa_id = ?
+                               AND sp.guru_id = ?
+                               AND sp.status = 'aktif'
+                               AND ps.status = 'aktif'";
+                
+                $stmt6 = $conn->prepare($sql_program);
+                $stmt6->bind_param("ii", $siswa_id, $guru_id);
+                $stmt6->execute();
+                $program_result = $stmt6->get_result();
+                $program_list = [];
+                while ($program_row = $program_result->fetch_assoc()) {
+                    $program_list[] = $program_row['nama_pelajaran'] . ' (' . $siswa_detail['tingkat'] . ' - ' . $siswa_detail['jenis_kelas'] . ')';
+                }
+                $siswa_detail['program_bimbel'] = implode(', ', $program_list);
+                $stmt6->close();
+                
+                // QUERY 7: Ambil jadwal belajar
+                $sql_jadwal = "SELECT DISTINCT 
+                              smg.hari,
+                              TIME_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai,
+                              TIME_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai,
+                              sp.nama_pelajaran
+                              FROM jadwal_belajar jb
+                              INNER JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
+                              INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                              WHERE sp.siswa_id = ?
+                              AND sp.guru_id = ?
+                              AND jb.status = 'aktif'
+                              AND sp.status = 'aktif'
+                              ORDER BY FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'), 
+                                       smg.jam_mulai";
+                
+                $stmt7 = $conn->prepare($sql_jadwal);
+                $stmt7->bind_param("ii", $siswa_id, $guru_id);
+                $stmt7->execute();
+                $jadwal_result = $stmt7->get_result();
+                $jadwal_list = [];
+                while ($jadwal_row = $jadwal_result->fetch_assoc()) {
+                    $jadwal_list[] = $jadwal_row['hari'] . ' ' . 
+                                    $jadwal_row['jam_mulai'] . '-' . 
+                                    $jadwal_row['jam_selesai'] . ' (' . 
+                                    $jadwal_row['nama_pelajaran'] . ')';
+                }
+                $siswa_detail['jadwal_belajar'] = implode(', ', $jadwal_list);
+                $stmt7->close();
             }
             $stmt->close();
+            
         } catch (Exception $e) {
             error_log("Error fetching detail siswa: " . $e->getMessage());
+            $_SESSION['error_message'] = "Gagal mengambil data siswa: " . $e->getMessage();
         }
+    } else {
+        $_SESSION['error_message'] = "Anda tidak memiliki akses untuk melihat siswa ini";
     }
 }
 
@@ -226,13 +356,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_siswa'])) {
     }
 }
 
-// AMBIL DATA SISWA YANG DIAJAR - FIXED (HANYA PELAJARAN GURU INI)
+// AMBIL DATA SISWA YANG DIAJAR - DIOPTIMALKAN UNTUK STRUKTUR DATABASE
 $siswa_data = [];
 if ($guru_id > 0) {
     try {
-        // NONAKTIFKAN ONLY_FULL_GROUP_BY sementara
-        $conn->query("SET SESSION sql_mode = ''");
-        
+        // Query dasar yang lebih sederhana
         $sql = "SELECT 
                     s.id,
                     s.nama_lengkap,
@@ -243,96 +371,109 @@ if ($guru_id > 0) {
                     s.tempat_lahir,
                     s.tanggal_lahir,
                     s.agama,
-                    -- Ambil data orangtua dari relasi many-to-many
-                    COALESCE(
-                        GROUP_CONCAT(DISTINCT o.nama_ortu ORDER BY o.nama_ortu SEPARATOR ', '),
-                        '-'
-                    ) as nama_ortu,
-                    COALESCE(
-                        GROUP_CONCAT(DISTINCT o.no_hp ORDER BY o.nama_ortu SEPARATOR ', '),
-                        '-'
-                    ) as no_hp_ortu,
                     ps.tingkat,
                     ps.jenis_kelas,
                     ps.tanggal_mulai,
-                    -- HANYA ambil pelajaran yang diajar oleh guru ini
-                    GROUP_CONCAT(
-                        DISTINCT CASE 
-                            WHEN sp.guru_id = ? THEN sp.nama_pelajaran
-                            ELSE NULL
-                        END
-                        ORDER BY sp.nama_pelajaran 
-                        SEPARATOR ', '
-                    ) as program_bimbel_diajar,
-                    -- Semua pelajaran untuk referensi (opsional)
-                    GROUP_CONCAT(
-                        DISTINCT sp.nama_pelajaran 
-                        ORDER BY sp.nama_pelajaran 
-                        SEPARATOR ', '
-                    ) as semua_program_bimbel
+                    -- Ambil pelajaran yang diajar oleh guru ini
+                    (SELECT GROUP_CONCAT(DISTINCT sp2.nama_pelajaran ORDER BY sp2.nama_pelajaran SEPARATOR ', ')
+                     FROM siswa_pelajaran sp2 
+                     WHERE sp2.siswa_id = s.id 
+                     AND sp2.guru_id = ?
+                     AND sp2.status = 'aktif') as program_bimbel_diajar
                 FROM siswa_pelajaran sp
                 INNER JOIN siswa s ON sp.siswa_id = s.id
                 INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                LEFT JOIN siswa_orangtua so ON s.id = so.siswa_id
-                LEFT JOIN orangtua o ON so.orangtua_id = o.id
-                WHERE EXISTS (
-                    SELECT 1 
-                    FROM siswa_pelajaran sp2 
-                    WHERE sp2.siswa_id = s.id 
-                    AND sp2.guru_id = ?
-                    AND sp2.status = 'aktif'
-                )
-                AND ps.status = 'aktif'
+                WHERE sp.guru_id = ?
                 AND sp.status = 'aktif'
+                AND ps.status = 'aktif'
                 AND s.status = 'aktif'";
         
-        $params = [$guru_id, $guru_id];
-        $param_types = "ii";
-        
-        if (!empty($filter_tingkat)) {
-            $sql .= " AND ps.tingkat = ?";
-            $params[] = $filter_tingkat;
-            $param_types .= "s";
-        }
-        
-        if (!empty($search)) {
-            $sql .= " AND (s.nama_lengkap LIKE ? OR s.sekolah_asal LIKE ? OR o.nama_ortu LIKE ?)";
-            $search_param = "%" . $search . "%";
-            $params[] = $search_param;
-            $params[] = $search_param;
-            $params[] = $search_param;
-            $param_types .= "sss";
-        }
-        
-        $sql .= " GROUP BY s.id
-                  ORDER BY s.nama_lengkap";
+        // Debug: Tampilkan query untuk testing
+        // echo "SQL Query: " . $sql;
         
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param($param_types, ...$params);
+        
+        // Cek jika prepare berhasil
+        if ($stmt === false) {
+            throw new Exception("Prepare failed: " . $conn->error);
+        }
+        
+        $stmt->bind_param("ii", $guru_id, $guru_id);
         $stmt->execute();
         $result = $stmt->get_result();
         
+        // Jika query sukses tapi tidak ada data, tetap proses
+        $siswa_data_temp = [];
         while ($row = $result->fetch_assoc()) {
-            // Format untuk tampilan - gunakan hanya pelajaran yang diajar
-            if (!empty(trim($row['program_bimbel_diajar']))) {
-                $row['program_bimbel'] = $row['program_bimbel_diajar'] . ' (' . $row['tingkat'] . ' - ' . $row['jenis_kelas'] . ')';
-            } else {
-                // Jika tidak ada pelajaran yang diajar guru ini, tampilkan semua dengan tanda *
-                $row['program_bimbel'] = $row['semua_program_bimbel'] . ' (' . $row['tingkat'] . ' - ' . $row['jenis_kelas'] . ')*';
+            $siswa_data_temp[] = $row;
+        }
+        $stmt->close();
+        
+        // Sekarang ambil data orangtua untuk setiap siswa
+        foreach ($siswa_data_temp as $row) {
+            // Ambil data orangtua untuk setiap siswa
+            $sql_ortu = "SELECT 
+                        o.nama_ortu,
+                        o.no_hp as no_hp_ortu
+                    FROM siswa_orangtua so
+                    INNER JOIN orangtua o ON so.orangtua_id = o.id
+                    WHERE so.siswa_id = ?
+                    LIMIT 1";
+            
+            $stmt_ortu = $conn->prepare($sql_ortu);
+            if ($stmt_ortu) {
+                $stmt_ortu->bind_param("i", $row['id']);
+                $stmt_ortu->execute();
+                $ortu_result = $stmt_ortu->get_result();
+                
+                if ($ortu_row = $ortu_result->fetch_assoc()) {
+                    $row['nama_ortu'] = $ortu_row['nama_ortu'];
+                    $row['no_hp_ortu'] = $ortu_row['no_hp_ortu'];
+                } else {
+                    $row['nama_ortu'] = null;
+                    $row['no_hp_ortu'] = null;
+                }
+                $stmt_ortu->close();
             }
             
-            // Format no HP orangtua jika ada multiple
-            if ($row['no_hp_ortu'] != '-' && strpos($row['no_hp_ortu'], ',') !== false) {
-                $row['no_hp_ortu'] = substr($row['no_hp_ortu'], 0, strpos($row['no_hp_ortu'], ',')) . '...';
+            // Format program bimbel
+            if (!empty(trim($row['program_bimbel_diajar'] ?? ''))) {
+                $row['program_bimbel'] = $row['program_bimbel_diajar'] . ' (' . $row['tingkat'] . ' - ' . $row['jenis_kelas'] . ')';
+            } else {
+                // Cek jika ada pelajaran lain yang bukan dari guru ini
+                $sql_other = "SELECT GROUP_CONCAT(DISTINCT sp3.nama_pelajaran ORDER BY sp3.nama_pelajaran SEPARATOR ', ') as other_programs
+                             FROM siswa_pelajaran sp3
+                             INNER JOIN pendaftaran_siswa ps3 ON sp3.pendaftaran_id = ps3.id
+                             WHERE sp3.siswa_id = ?
+                             AND sp3.status = 'aktif'
+                             AND ps3.status = 'aktif'
+                             AND (sp3.guru_id IS NULL OR sp3.guru_id != ?)";
+                
+                $stmt_other = $conn->prepare($sql_other);
+                if ($stmt_other) {
+                    $stmt_other->bind_param("ii", $row['id'], $guru_id);
+                    $stmt_other->execute();
+                    $other_result = $stmt_other->get_result();
+                    
+                    if ($other_row = $other_result->fetch_assoc()) {
+                        if (!empty(trim($other_row['other_programs'] ?? ''))) {
+                            $row['program_bimbel'] = $other_row['other_programs'] . ' (' . $row['tingkat'] . ' - ' . $row['jenis_kelas'] . ')*';
+                        } else {
+                            $row['program_bimbel'] = 'Belum ada program bimbel';
+                        }
+                    } else {
+                        $row['program_bimbel'] = 'Belum ada program bimbel';
+                    }
+                    $stmt_other->close();
+                }
             }
             
             $siswa_data[] = $row;
         }
         
-        $stmt->close();
-        
     } catch (Exception $e) {
         error_log("Error fetching siswa: " . $e->getMessage());
+        $error_message = "Terjadi kesalahan saat mengambil data siswa: " . $e->getMessage();
     }
 }
 ?>
@@ -790,10 +931,12 @@ if ($guru_id > 0) {
                                             <?php if (!empty($siswa['nama_ortu'])): ?>
                                                 <div>
                                                     <div class="font-medium text-gray-900">
-                                                        <?php echo htmlspecialchars($siswa['nama_ortu']); ?></div>
+                                                        <?php echo htmlspecialchars($siswa['nama_ortu']); ?>
+                                                    </div>
                                                     <?php if (!empty($siswa['no_hp_ortu'])): ?>
                                                         <div class="text-xs text-gray-500">
-                                                            <?php echo htmlspecialchars($siswa['no_hp_ortu']); ?></div>
+                                                            <?php echo htmlspecialchars($siswa['no_hp_ortu']); ?>
+                                                        </div>
                                                     <?php endif; ?>
                                                 </div>
                                             <?php else: ?>
@@ -1005,86 +1148,66 @@ if ($guru_id > 0) {
                         </div>
 
                         <!-- Data Orang Tua -->
-                        <?php if (!empty($siswa_detail['semua_ortu']) || !empty($siswa_detail['nama_ortu'])): ?>
+                        <?php if (!empty($siswa_detail['orangtua'])): ?>
                             <div class="bg-yellow-50 p-4 rounded-lg">
                                 <h3 class="font-bold text-lg text-yellow-800 mb-4 flex items-center">
                                     <i class="fas fa-user-friends mr-2"></i> Data Orang Tua/Wali
                                 </h3>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <span class="block font-semibold text-gray-700">Nama</span>
-                                        <span class="text-gray-600">
-                                            <?php
-                                            if (!empty($siswa_detail['semua_ortu'])) {
-                                                echo htmlspecialchars($siswa_detail['semua_ortu']);
-                                            } else {
-                                                echo htmlspecialchars($siswa_detail['nama_ortu']);
-                                            }
-                                            ?>
-                                        </span>
-                                    </div>
-                                    <div>
-                                        <span class="block font-semibold text-gray-700">Hubungan</span>
-                                        <span class="text-gray-600">
-                                            <?php
-                                            if (!empty($siswa_detail['semua_hubungan'])) {
-                                                echo htmlspecialchars($siswa_detail['semua_hubungan']);
-                                            } elseif (!empty($siswa_detail['hubungan_dengan_siswa'])) {
-                                                echo $siswa_detail['hubungan_dengan_siswa'] == 'ayah' ? 'Ayah' :
-                                                    ($siswa_detail['hubungan_dengan_siswa'] == 'ibu' ? 'Ibu' : 'Wali');
-                                            } else {
-                                                echo '-';
-                                            }
-                                            ?>
-                                        </span>
-                                    </div>
-                                    <div>
-                                        <span class="block font-semibold text-gray-700">No. HP</span>
-                                        <span class="text-gray-600">
-                                            <?php
-                                            if (!empty($siswa_detail['semua_no_hp_ortu'])) {
-                                                echo htmlspecialchars($siswa_detail['semua_no_hp_ortu']);
-                                            } elseif (!empty($siswa_detail['no_hp_ortu'])) {
-                                                echo htmlspecialchars($siswa_detail['no_hp_ortu']);
-                                            } else {
-                                                echo '-';
-                                            }
-                                            ?>
-                                        </span>
-                                    </div>
-                                    <div>
-                                        <span class="block font-semibold text-gray-700">Email</span>
-                                        <span class="text-gray-600">
-                                            <?php
-                                            if (!empty($siswa_detail['semua_email_ortu'])) {
-                                                echo htmlspecialchars($siswa_detail['semua_email_ortu']);
-                                            } elseif (!empty($siswa_detail['email_ortu'])) {
-                                                echo htmlspecialchars($siswa_detail['email_ortu']);
-                                            } else {
-                                                echo '-';
-                                            }
-                                            ?>
-                                        </span>
-                                    </div>
-                                    <?php if (!empty($siswa_detail['semua_pekerjaan'])): ?>
-                                        <div class="md:col-span-2">
-                                            <span class="block font-semibold text-gray-700">Pekerjaan</span>
-                                            <span
-                                                class="text-gray-600"><?= htmlspecialchars($siswa_detail['semua_pekerjaan']) ?></span>
+
+                                <?php foreach ($siswa_detail['orangtua'] as $index => $ortu): ?>
+                                    <div
+                                        class="mb-4 pb-4 <?php echo $index < count($siswa_detail['orangtua']) - 1 ? 'border-b border-yellow-200' : ''; ?>">
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <span class="block font-semibold text-gray-700">Nama</span>
+                                                <span class="text-gray-600"><?= htmlspecialchars($ortu['nama_ortu']) ?></span>
+                                            </div>
+                                            <div>
+                                                <span class="block font-semibold text-gray-700">Hubungan</span>
+                                                <span class="text-gray-600">
+                                                    <?php
+                                                    $hubungan = $ortu['hubungan_dengan_siswa'] ?? '';
+                                                    echo $hubungan == 'ayah' ? 'Ayah' :
+                                                        ($hubungan == 'ibu' ? 'Ibu' :
+                                                            ($hubungan == 'wali' ? 'Wali' : '-'));
+                                                    ?>
+                                                </span>
+                                            </div>
+                                            <div>
+                                                <span class="block font-semibold text-gray-700">No. HP</span>
+                                                <span class="text-gray-600">
+                                                    <?= htmlspecialchars($ortu['no_hp_ortu'] ?? '-') ?>
+                                                </span>
+                                            </div>
+                                            <div>
+                                                <span class="block font-semibold text-gray-700">Email</span>
+                                                <span class="text-gray-600">
+                                                    <?= htmlspecialchars($ortu['email_ortu'] ?? '-') ?>
+                                                </span>
+                                            </div>
+                                            <?php if (!empty($ortu['pekerjaan'])): ?>
+                                                <div>
+                                                    <span class="block font-semibold text-gray-700">Pekerjaan</span>
+                                                    <span class="text-gray-600"><?= htmlspecialchars($ortu['pekerjaan']) ?></span>
+                                                </div>
+                                            <?php endif; ?>
+                                            <?php if (!empty($ortu['perusahaan'])): ?>
+                                                <div>
+                                                    <span class="block font-semibold text-gray-700">Perusahaan</span>
+                                                    <span class="text-gray-600"><?= htmlspecialchars($ortu['perusahaan']) ?></span>
+                                                </div>
+                                            <?php endif; ?>
                                         </div>
-                                    <?php elseif (!empty($siswa_detail['pekerjaan'])): ?>
-                                        <div>
-                                            <span class="block font-semibold text-gray-700">Pekerjaan</span>
-                                            <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['pekerjaan']) ?></span>
-                                        </div>
-                                    <?php endif; ?>
-                                    <?php if (!empty($siswa_detail['perusahaan'])): ?>
-                                        <div>
-                                            <span class="block font-semibold text-gray-700">Perusahaan</span>
-                                            <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['perusahaan']) ?></span>
-                                        </div>
-                                    <?php endif; ?>
-                                </div>
+                                    </div>
+                                <?php endforeach; ?>
+
+                                <!-- Tampilkan saudara kandung jika ada -->
+                                <?php if (!empty($siswa_detail['saudara_kandung'])): ?>
+                                    <div class="mt-4 pt-4 border-t border-yellow-200">
+                                        <span class="block font-semibold text-gray-700">Saudara Kandung di Bimbel</span>
+                                        <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['saudara_kandung']) ?></span>
+                                    </div>
+                                <?php endif; ?>
                             </div>
                         <?php endif; ?>
                     </div>
@@ -1105,113 +1228,145 @@ if ($guru_id > 0) {
     </div>
 
     <!-- MODAL EDIT SISWA -->
-    <!--<div id="editModal" class="modal">-->
-    <!--    <div class="modal-content modal-sm">-->
-    <!--        <div class="modal-header yellow">-->
-    <!--            <h2 class="text-xl font-bold"><i class="fas fa-edit mr-2"></i> Edit Data Siswa</h2>-->
-    <!--            <span class="close" onclick="closeModal('editModal')">&times;</span>-->
-    <!--        </div>-->
-    <!--        <?php if ($siswa_edit): ?>-->
-        <!--            <form method="POST" action="dataSiswa.php">-->
-        <!--                <input type="hidden" name="siswa_id" value="<?= $siswa_edit['id'] ?>">-->
-        <!--                <input type="hidden" name="update_siswa" value="1">-->
+    <div id="editModal" class="modal">
+        <div class="modal-content modal-sm">
+            <div class="modal-header yellow">
+                <h2 class="text-xl font-bold"><i class="fas fa-edit mr-2"></i> Edit Data Siswa</h2>
+                <span class="close" onclick="closeModal('editModal')">&times;</span>
+            </div>
+            <?php if ($siswa_edit): ?>
+                <form method="POST" action="dataSiswa.php">
+                    <input type="hidden" name="siswa_id" value="<?= $siswa_edit['id'] ?>">
+                    <input type="hidden" name="update_siswa" value="1">
 
-        <!--                <div class="modal-body">-->
-        <!--                    <div class="space-y-4">-->
-        <!--                        <div class="form-group">-->
-        <!--                            <label class="form-label">Nama Lengkap *</label>-->
-        <!--                            <input type="text" name="nama_lengkap" value="<?= htmlspecialchars($siswa_edit['nama_lengkap']) ?>" class="form-input" required>-->
-        <!--                        </div>-->
+                    <div class="modal-body">
+                        <div class="space-y-4">
+                            <div class="form-group">
+                                <label class="form-label">Nama Lengkap *</label>
+                                <input type="text" name="nama_lengkap"
+                                    value="<?= htmlspecialchars($siswa_edit['nama_lengkap']) ?>" class="form-input"
+                                    required>
+                            </div>
 
-        <!--                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">-->
-        <!--                            <div class="form-group">-->
-        <!--                                <label class="form-label">Tempat Lahir</label>-->
-        <!--                                <input type="text" name="tempat_lahir" value="<?= htmlspecialchars($siswa_edit['tempat_lahir']) ?>" class="form-input">-->
-        <!--                            </div>-->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="form-group">
+                                    <label class="form-label">Tempat Lahir</label>
+                                    <input type="text" name="tempat_lahir"
+                                        value="<?= htmlspecialchars($siswa_edit['tempat_lahir']) ?>" class="form-input">
+                                </div>
 
-        <!--                            <div class="form-group">-->
-        <!--                                <label class="form-label">Tanggal Lahir</label>-->
-        <!--                                <input type="date" name="tanggal_lahir" value="<?= htmlspecialchars($siswa_edit['tanggal_lahir']) ?>" class="form-input">-->
-        <!--                            </div>-->
+                                <div class="form-group">
+                                    <label class="form-label">Tanggal Lahir</label>
+                                    <input type="date" name="tanggal_lahir"
+                                        value="<?= htmlspecialchars($siswa_edit['tanggal_lahir']) ?>" class="form-input">
+                                </div>
 
-        <!--                            <div class="form-group">-->
-        <!--                                <label class="form-label">Jenis Kelamin</label>-->
-        <!--                                <select name="jenis_kelamin" class="form-input">-->
-        <!--                                    <option value="L" <?= $siswa_edit['jenis_kelamin'] == 'L' ? 'selected' : '' ?>>Laki-laki</option>-->
-        <!--                                    <option value="P" <?= $siswa_edit['jenis_kelamin'] == 'P' ? 'selected' : '' ?>>Perempuan</option>-->
-        <!--                                </select>-->
-        <!--                            </div>-->
+                                <div class="form-group">
+                                    <label class="form-label">Jenis Kelamin</label>
+                                    <select name="jenis_kelamin" class="form-input">
+                                        <option value="L" <?= $siswa_edit['jenis_kelamin'] == 'L' ? 'selected' : '' ?>>
+                                            Laki-laki</option>
+                                        <option value="P" <?= $siswa_edit['jenis_kelamin'] == 'P' ? 'selected' : '' ?>>
+                                            Perempuan</option>
+                                    </select>
+                                </div>
 
-        <!--                            <div class="form-group">-->
-        <!--                                <label class="form-label">Agama</label>-->
-        <!--                                <select name="agama" class="form-input">-->
-        <!--                                    <option value="">Pilih Agama</option>-->
-        <!--                                    <option value="Islam" <?= $siswa_edit['agama'] == 'Islam' ? 'selected' : '' ?>>Islam</option>-->
-        <!--                                    <option value="Kristen" <?= $siswa_edit['agama'] == 'Kristen' ? 'selected' : '' ?>>Kristen</option>-->
-        <!--                                    <option value="Katolik" <?= $siswa_edit['agama'] == 'Katolik' ? 'selected' : '' ?>>Katolik</option>-->
-        <!--                                    <option value="Hindu" <?= $siswa_edit['agama'] == 'Hindu' ? 'selected' : '' ?>>Hindu</option>-->
-        <!--                                    <option value="Buddha" <?= $siswa_edit['agama'] == 'Buddha' ? 'selected' : '' ?>>Buddha</option>-->
-        <!--                                    <option value="Konghucu" <?= $siswa_edit['agama'] == 'Konghucu' ? 'selected' : '' ?>>Konghucu</option>-->
-        <!--                                </select>-->
-        <!--                            </div>-->
+                                <div class="form-group">
+                                    <label class="form-label">Agama</label>
+                                    <select name="agama" class="form-input">
+                                        <option value="">Pilih Agama</option>
+                                        <option value="Islam" <?= $siswa_edit['agama'] == 'Islam' ? 'selected' : '' ?>>Islam
+                                        </option>
+                                        <option value="Kristen" <?= $siswa_edit['agama'] == 'Kristen' ? 'selected' : '' ?>>
+                                            Kristen</option>
+                                        <option value="Katolik" <?= $siswa_edit['agama'] == 'Katolik' ? 'selected' : '' ?>>
+                                            Katolik</option>
+                                        <option value="Hindu" <?= $siswa_edit['agama'] == 'Hindu' ? 'selected' : '' ?>>Hindu
+                                        </option>
+                                        <option value="Buddha" <?= $siswa_edit['agama'] == 'Buddha' ? 'selected' : '' ?>>Buddha
+                                        </option>
+                                        <option value="Konghucu" <?= $siswa_edit['agama'] == 'Konghucu' ? 'selected' : '' ?>>
+                                            Konghucu</option>
+                                    </select>
+                                </div>
 
-        <!--                            <div class="form-group">-->
-        <!--                                <label class="form-label">Kelas Sekolah</label>-->
-        <!--                                <select name="kelas" class="form-input">-->
-        <!--                                    <option value="">Pilih Kelas</option>-->
-        <!--                                    <option value="Paud" <?= $siswa_edit['kelas'] == 'Paud' ? 'selected' : '' ?>>Paud</option>-->
-        <!--                                    <option value="TK" <?= $siswa_edit['kelas'] == 'TK' ? 'selected' : '' ?>>TK</option>-->
-        <!--                                    <option value="1 SD" <?= $siswa_edit['kelas'] == '1 SD' ? 'selected' : '' ?>>1 SD</option>-->
-        <!--                                    <option value="2 SD" <?= $siswa_edit['kelas'] == '2 SD' ? 'selected' : '' ?>>2 SD</option>-->
-        <!--                                    <option value="3 SD" <?= $siswa_edit['kelas'] == '3 SD' ? 'selected' : '' ?>>3 SD</option>-->
-        <!--                                    <option value="4 SD" <?= $siswa_edit['kelas'] == '4 SD' ? 'selected' : '' ?>>4 SD</option>-->
-        <!--                                    <option value="5 SD" <?= $siswa_edit['kelas'] == '5 SD' ? 'selected' : '' ?>>5 SD</option>-->
-        <!--                                    <option value="6 SD" <?= $siswa_edit['kelas'] == '6 SD' ? 'selected' : '' ?>>6 SD</option>-->
-        <!--                                    <option value="7 SMP" <?= $siswa_edit['kelas'] == '7 SMP' ? 'selected' : '' ?>>7 SMP</option>-->
-        <!--                                    <option value="8 SMP" <?= $siswa_edit['kelas'] == '8 SMP' ? 'selected' : '' ?>>8 SMP</option>-->
-        <!--                                    <option value="9 SMP" <?= $siswa_edit['kelas'] == '9 SMP' ? 'selected' : '' ?>>9 SMP</option>-->
-        <!--                                    <option value="10 SMA" <?= $siswa_edit['kelas'] == '10 SMA' ? 'selected' : '' ?>>10 SMA</option>-->
-        <!--                                    <option value="11 SMA" <?= $siswa_edit['kelas'] == '11 SMA' ? 'selected' : '' ?>>11 SMA</option>-->
-        <!--                                    <option value="12 SMA" <?= $siswa_edit['kelas'] == '12 SMA' ? 'selected' : '' ?>>12 SMA</option>-->
-        <!--                                    <option value="Alumni" <?= $siswa_edit['kelas'] == 'Alumni' ? 'selected' : '' ?>>Alumni</option>-->
-        <!--                                    <option value="Umum" <?= $siswa_edit['kelas'] == 'Umum' ? 'selected' : '' ?>>Umum</option>-->
-        <!--                                </select>-->
-        <!--                            </div>-->
-        <!--                        </div>-->
+                                <div class="form-group">
+                                    <label class="form-label">Kelas Sekolah</label>
+                                    <select name="kelas" class="form-input">
+                                        <option value="">Pilih Kelas</option>
+                                        <option value="Paud" <?= $siswa_edit['kelas'] == 'Paud' ? 'selected' : '' ?>>Paud
+                                        </option>
+                                        <option value="TK" <?= $siswa_edit['kelas'] == 'TK' ? 'selected' : '' ?>>TK</option>
+                                        <option value="1 SD" <?= $siswa_edit['kelas'] == '1 SD' ? 'selected' : '' ?>>1 SD
+                                        </option>
+                                        <option value="2 SD" <?= $siswa_edit['kelas'] == '2 SD' ? 'selected' : '' ?>>2 SD
+                                        </option>
+                                        <option value="3 SD" <?= $siswa_edit['kelas'] == '3 SD' ? 'selected' : '' ?>>3 SD
+                                        </option>
+                                        <option value="4 SD" <?= $siswa_edit['kelas'] == '4 SD' ? 'selected' : '' ?>>4 SD
+                                        </option>
+                                        <option value="5 SD" <?= $siswa_edit['kelas'] == '5 SD' ? 'selected' : '' ?>>5 SD
+                                        </option>
+                                        <option value="6 SD" <?= $siswa_edit['kelas'] == '6 SD' ? 'selected' : '' ?>>6 SD
+                                        </option>
+                                        <option value="7 SMP" <?= $siswa_edit['kelas'] == '7 SMP' ? 'selected' : '' ?>>7 SMP
+                                        </option>
+                                        <option value="8 SMP" <?= $siswa_edit['kelas'] == '8 SMP' ? 'selected' : '' ?>>8 SMP
+                                        </option>
+                                        <option value="9 SMP" <?= $siswa_edit['kelas'] == '9 SMP' ? 'selected' : '' ?>>9 SMP
+                                        </option>
+                                        <option value="10 SMA" <?= $siswa_edit['kelas'] == '10 SMA' ? 'selected' : '' ?>>10 SMA
+                                        </option>
+                                        <option value="11 SMA" <?= $siswa_edit['kelas'] == '11 SMA' ? 'selected' : '' ?>>11 SMA
+                                        </option>
+                                        <option value="12 SMA" <?= $siswa_edit['kelas'] == '12 SMA' ? 'selected' : '' ?>>12 SMA
+                                        </option>
+                                        <option value="Alumni" <?= $siswa_edit['kelas'] == 'Alumni' ? 'selected' : '' ?>>Alumni
+                                        </option>
+                                        <option value="Umum" <?= $siswa_edit['kelas'] == 'Umum' ? 'selected' : '' ?>>Umum
+                                        </option>
+                                    </select>
+                                </div>
+                            </div>
 
-        <!--                        <div class="form-group">-->
-        <!--                            <label class="form-label">Alamat</label>-->
-        <!--                            <textarea name="alamat" class="form-input" rows="3"><?= htmlspecialchars($siswa_edit['alamat']) ?></textarea>-->
-        <!--                        </div>-->
+                            <div class="form-group">
+                                <label class="form-label">Alamat</label>
+                                <textarea name="alamat" class="form-input"
+                                    rows="3"><?= htmlspecialchars($siswa_edit['alamat']) ?></textarea>
+                            </div>
 
-        <!--                        <div class="form-group">-->
-        <!--                            <label class="form-label">Sekolah Asal</label>-->
-        <!--                            <input type="text" name="sekolah_asal" value="<?= htmlspecialchars($siswa_edit['sekolah_asal']) ?>" class="form-input">-->
-        <!--                        </div>-->
-        <!--                    </div>-->
-        <!--                </div>-->
-        <!--                <div class="modal-footer">-->
-        <!--                    <button type="button" onclick="closeModal('editModal')" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 mr-2">-->
-        <!--                        Batal-->
-        <!--                    </button>-->
-        <!--                    <button type="submit" class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 flex items-center">-->
-        <!--                        <i class="fas fa-save mr-2"></i> Simpan Perubahan-->
-        <!--                    </button>-->
-        <!--                </div>-->
-        <!--            </form>-->
-        <!--        <?php else: ?>-->
-        <!--            <div class="modal-body">-->
-        <!--                <div class="text-center py-8 text-red-600">-->
-        <!--                    <i class="fas fa-exclamation-triangle text-2xl"></i>-->
-        <!--                    <p class="mt-2">Data siswa tidak ditemukan</p>-->
-        <!--                    <button onclick="closeModal('editModal')" class="mt-4 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">-->
-        <!--                        Tutup-->
-        <!--                    </button>-->
-        <!--                </div>-->
-        <!--            </div>-->
-        <!--        <?php endif; ?>-->
-    <!--    </div>-->
-    <!--</div>-->
+                            <div class="form-group">
+                                <label class="form-label">Sekolah Asal</label>
+                                <input type="text" name="sekolah_asal"
+                                    value="<?= htmlspecialchars($siswa_edit['sekolah_asal']) ?>" class="form-input">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" onclick="closeModal('editModal')"
+                            class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 mr-2">
+                            Batal
+                        </button>
+                        <button type="submit"
+                            class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 flex items-center">
+                            <i class="fas fa-save mr-2"></i> Simpan Perubahan
+                        </button>
+                    </div>
+                </form>
+            <?php else: ?>
+                <div class="modal-body">
+                    <div class="text-center py-8 text-red-600">
+                        <i class="fas fa-exclamation-triangle text-2xl"></i>
+                        <p class="mt-2">Data siswa tidak ditemukan</p>
+                        <button onclick="closeModal('editModal')"
+                            class="mt-4 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+                            Tutup
+                        </button>
+                    </div>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
 
     <script>
         // Mobile Menu Toggle

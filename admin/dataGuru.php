@@ -44,6 +44,7 @@ $filter_status = isset($_GET['filter_status']) ? $_GET['filter_status'] : '';
 if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['id'])) {
     $guru_id = intval($_GET['id']);
 
+    // Query untuk data guru
     $sql = "SELECT g.*, u.username, u.email, u.full_name, u.phone, u.address, u.is_active, 
                    u.created_at as user_created_at
             FROM guru g
@@ -51,6 +52,13 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['id']))
             WHERE g.id = ?";
 
     $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        error_log("Error preparing guru query: " . $conn->error);
+        $_SESSION['error_message'] = "❌ Error dalam query database!";
+        header('Location: dataGuru.php');
+        exit();
+    }
+    
     $stmt->bind_param("i", $guru_id);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -65,15 +73,20 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['id']))
                       ORDER BY s.nama_lengkap";
 
         $siswa_stmt = $conn->prepare($siswa_sql);
-        $siswa_stmt->bind_param("i", $guru_id);
-        $siswa_stmt->execute();
-        $siswa_result = $siswa_stmt->get_result();
+        if ($siswa_stmt) {
+            $siswa_stmt->bind_param("i", $guru_id);
+            $siswa_stmt->execute();
+            $siswa_result = $siswa_stmt->get_result();
 
-        $siswa_mengajar = [];
-        while ($siswa_row = $siswa_result->fetch_assoc()) {
-            $siswa_mengajar[] = $siswa_row;
+            $siswa_mengajar = [];
+            while ($siswa_row = $siswa_result->fetch_assoc()) {
+                $siswa_mengajar[] = $siswa_row;
+            }
+            $siswa_stmt->close();
+        } else {
+            error_log("Error preparing siswa query: " . $conn->error);
+            $siswa_mengajar = [];
         }
-        $siswa_stmt->close();
 
         // Ambil data penilaian yang diberikan
         $penilaian_sql = "SELECT ps.*, s.nama_lengkap as nama_siswa, sp.nama_pelajaran
@@ -84,35 +97,59 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['id']))
                          ORDER BY ps.tanggal_penilaian DESC LIMIT 5";
 
         $penilaian_stmt = $conn->prepare($penilaian_sql);
-        $penilaian_stmt->bind_param("i", $guru_id);
-        $penilaian_stmt->execute();
-        $penilaian_result = $penilaian_stmt->get_result();
+        if ($penilaian_stmt) {
+            $penilaian_stmt->bind_param("i", $guru_id);
+            $penilaian_stmt->execute();
+            $penilaian_result = $penilaian_stmt->get_result();
 
-        $penilaian_diberikan = [];
-        while ($penilaian_row = $penilaian_result->fetch_assoc()) {
-            $penilaian_diberikan[] = $penilaian_row;
+            $penilaian_diberikan = [];
+            while ($penilaian_row = $penilaian_result->fetch_assoc()) {
+                $penilaian_diberikan[] = $penilaian_row;
+            }
+            $penilaian_stmt->close();
+        } else {
+            error_log("Error preparing penilaian query: " . $conn->error);
+            $penilaian_diberikan = [];
         }
-        $penilaian_stmt->close();
 
-        // Ambil data jadwal mengajar
-        $jadwal_sql = "SELECT jb.*, s.nama_lengkap, sp.nama_pelajaran, ps.tingkat
+        // Ambil data jadwal mengajar - PERBAIKAN BESAR DI SINI
+        $jadwal_sql = "SELECT 
+                        jb.id as jadwal_id,
+                        smg.hari,
+                        smg.jam_mulai,
+                        smg.jam_selesai,
+                        s.nama_lengkap,
+                        sp.nama_pelajaran,
+                        ps.tingkat,
+                        DATE_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai_format,
+                        DATE_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai_format
                       FROM jadwal_belajar jb
                       JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
                       JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
                       JOIN siswa s ON sp.siswa_id = s.id
-                      WHERE sp.guru_id = ? AND jb.status = 'aktif'
-                      ORDER BY FIELD(jb.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'), jb.jam_mulai";
+                      JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                      WHERE sp.guru_id = ? 
+                        AND jb.status = 'aktif'
+                        AND smg.guru_id = ?
+                      ORDER BY 
+                        FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
+                        smg.jam_mulai";
 
         $jadwal_stmt = $conn->prepare($jadwal_sql);
-        $jadwal_stmt->bind_param("i", $guru_id);
-        $jadwal_stmt->execute();
-        $jadwal_result = $jadwal_stmt->get_result();
+        if ($jadwal_stmt) {
+            $jadwal_stmt->bind_param("ii", $guru_id, $guru_id);
+            $jadwal_stmt->execute();
+            $jadwal_result = $jadwal_stmt->get_result();
 
-        $jadwal_mengajar = [];
-        while ($jadwal_row = $jadwal_result->fetch_assoc()) {
-            $jadwal_mengajar[] = $jadwal_row;
+            $jadwal_mengajar = [];
+            while ($jadwal_row = $jadwal_result->fetch_assoc()) {
+                $jadwal_mengajar[] = $jadwal_row;
+            }
+            $jadwal_stmt->close();
+        } else {
+            error_log("Error preparing jadwal query: " . $conn->error);
+            $jadwal_mengajar = [];
         }
-        $jadwal_stmt->close();
 
         $row['siswa_mengajar'] = $siswa_mengajar;
         $row['penilaian_diberikan'] = $penilaian_diberikan;

@@ -28,7 +28,7 @@ $email = '';
 $nama_ortu = '';
 $no_hp = '';
 
-// Ambil data orangtua berdasarkan user_id dari session
+// Ambil data orangtua berdasarkan user_id dari session - AMAN dengan prepared statement
 try {
     $sql_orangtua = "SELECT o.*, u.email 
                      FROM orangtua o 
@@ -40,16 +40,14 @@ try {
     $result_orangtua = $stmt_orangtua->get_result();
     
     if ($row_orangtua = $result_orangtua->fetch_assoc()) {
-        $orangtua_id = $row_orangtua['id']; // Pastikan menggunakan ID orangtua dari database
+        $orangtua_id = $row_orangtua['id'];
         $orangtua_data = $row_orangtua;
         $nama_ortu = $row_orangtua['nama_ortu'] ?? $full_name;
         $email = $row_orangtua['email'] ?? '';
         $no_hp = $row_orangtua['no_hp'] ?? '';
         
-        // Update session dengan orangtua_id yang benar
         $_SESSION['role_id'] = $orangtua_id;
     } else {
-        // Jika tidak ditemukan data orangtua
         die("Data orangtua tidak ditemukan untuk user ini");
     }
     
@@ -66,8 +64,7 @@ if ($orangtua_id == 0) {
 // AMBIL DATA ANAK-ANAK (SISWA) DARI ORANGTUA INI
 $anak_orangtua = [];
 
-// Query untuk mengambil semua anak dari orangtua ini
-// Melalui dua jalur: 1. kolom orangtua_id langsung, 2. tabel siswa_orangtua (many-to-many)
+// Query untuk mengambil semua anak dari orangtua ini - AMAN dengan prepared statement
 $sql_anak = "
     SELECT DISTINCT s.id, s.nama_lengkap, s.kelas as kelas_sekolah
     FROM siswa s
@@ -103,73 +100,96 @@ if (empty($anak_orangtua)) {
 } else {
     // AMBIL ID SEMUA ANAK
     $anak_ids = array_column($anak_orangtua, 'id');
-    $anak_ids_str = implode(',', $anak_ids);
     
     // FILTER HARI
     $filter_hari = isset($_GET['hari']) && $_GET['hari'] !== '' ? $_GET['hari'] : '';
-    $filter_anak = isset($_GET['anak_id']) && $_GET['anak_id'] !== '' ? $_GET['anak_id'] : '';
+    $filter_anak = isset($_GET['anak_id']) && $_GET['anak_id'] !== '' ? (int)$_GET['anak_id'] : 0;
     
     // QUERY JADWAL ANAK - SESUAIKAN DENGAN STRUKTUR DATABASE
     $jadwal_anak = [];
-    $where_conditions = ["ps.siswa_id IN ($anak_ids_str)", "ps.status = 'aktif'", "sp.status = 'aktif'", "jb.status = 'aktif'"];
-    $filter_params = [];
     
-    if ($filter_hari !== '') {
-        $where_conditions[] = "jb.hari = ?";
-        $filter_params[] = $filter_hari;
-    }
-    
-    if ($filter_anak !== '') {
-        $where_conditions[] = "ps.siswa_id = ?";
-        $filter_params[] = $filter_anak;
-    }
-    
-    $where_clause = implode(" AND ", $where_conditions);
-    
-    $sql_jadwal_anak = "
-        SELECT 
-            jb.*,
-            s.id as siswa_id,
-            s.nama_lengkap,
-            s.kelas as kelas_sekolah,
-            ps.tingkat as tingkat_bimbel,
-            sp.nama_pelajaran,
-            sp.id as siswa_pelajaran_id,
-            g.id as guru_id,
-            g.bidang_keahlian,
-            u.full_name as nama_guru,
-            DATE_FORMAT(jb.jam_mulai, '%H:%i') as jam_mulai_format,
-            DATE_FORMAT(jb.jam_selesai, '%H:%i') as jam_selesai_format
-        FROM jadwal_belajar jb
-        JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
-        JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-        JOIN siswa s ON ps.siswa_id = s.id
-        LEFT JOIN guru g ON sp.guru_id = g.id
-        LEFT JOIN users u ON g.user_id = u.id
-        WHERE {$where_clause}
-        ORDER BY 
-            FIELD(jb.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
-            jb.jam_mulai,
-            s.nama_lengkap
-    ";
-    
-    try {
-        $stmt = $conn->prepare($sql_jadwal_anak);
+    // Gunakan IN clause dengan prepared statement yang aman
+    if (!empty($anak_ids)) {
+        $placeholders = implode(',', array_fill(0, count($anak_ids), '?'));
         
-        if ($filter_params) {
-            $types = str_repeat('s', count($filter_params));
-            $stmt->bind_param($types, ...$filter_params);
+        // Query utama dengan JOIN yang sesuai struktur database
+        $sql_jadwal_anak = "
+            SELECT 
+                jb.id as jadwal_id,
+                smg.hari,
+                smg.jam_mulai,
+                smg.jam_selesai,
+                TIME_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai_format,
+                TIME_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai_format,
+                s.id as siswa_id,
+                s.nama_lengkap,
+                s.kelas as kelas_sekolah,
+                ps.tingkat as tingkat_bimbel,
+                ps.jenis_kelas,
+                sp.nama_pelajaran,
+                sp.id as siswa_pelajaran_id,
+                g.id as guru_id,
+                g.bidang_keahlian,
+                u.full_name as nama_guru,
+                smg.kapasitas_maks,
+                smg.kapasitas_terisi,
+                smg.status as status_sesi
+            FROM jadwal_belajar jb
+            JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+            JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
+            JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+            JOIN siswa s ON ps.siswa_id = s.id
+            LEFT JOIN guru g ON smg.guru_id = g.id
+            LEFT JOIN users u ON g.user_id = u.id
+            WHERE jb.status = 'aktif'
+            AND smg.status = 'tersedia'
+            AND ps.status = 'aktif'
+            AND sp.status = 'aktif'
+            AND s.status = 'aktif'
+            AND s.id IN ($placeholders)
+        ";
+        
+        // Tambahkan kondisi filter
+        $where_conditions = [];
+        $params = array_merge([], $anak_ids); // Start with student IDs
+        $types = str_repeat('i', count($anak_ids)); // Types for student IDs
+        
+        if ($filter_hari !== '') {
+            $sql_jadwal_anak .= " AND smg.hari = ?";
+            $params[] = $filter_hari;
+            $types .= 's';
         }
         
-        $stmt->execute();
-        $result = $stmt->get_result();
-        
-        while ($row = $result->fetch_assoc()) {
-            $jadwal_anak[] = $row;
+        if ($filter_anak > 0) {
+            $sql_jadwal_anak .= " AND s.id = ?";
+            $params[] = $filter_anak;
+            $types .= 'i';
         }
-        $stmt->close();
-    } catch (Exception $e) {
-        error_log("Error fetching jadwal anak: " . $e->getMessage());
+        
+        // Tambahkan ORDER BY
+        $sql_jadwal_anak .= " ORDER BY 
+            FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
+            smg.jam_mulai,
+            s.nama_lengkap";
+        
+        try {
+            $stmt = $conn->prepare($sql_jadwal_anak);
+            
+            // Bind parameters dinamis
+            if ($params) {
+                $stmt->bind_param($types, ...$params);
+            }
+            
+            $stmt->execute();
+            $result = $stmt->get_result();
+            
+            while ($row = $result->fetch_assoc()) {
+                $jadwal_anak[] = $row;
+            }
+            $stmt->close();
+        } catch (Exception $e) {
+            error_log("Error fetching jadwal anak: " . $e->getMessage());
+        }
     }
     
     // HITUNG STATISTIK
@@ -193,6 +213,14 @@ if (empty($anak_orangtua)) {
         }
         $jadwal_by_hari[$hari]++;
     }
+}
+
+// Fungsi untuk menghitung durasi
+function hitungDurasi($jam_mulai, $jam_selesai) {
+    $start = strtotime($jam_mulai);
+    $end = strtotime($jam_selesai);
+    $durasi = ($end - $start) / 3600; // dalam jam
+    return number_format($durasi, 1);
 }
 ?>
 
@@ -326,6 +354,16 @@ if (empty($anak_orangtua)) {
             color: #0369a1;
         }
 
+        .badge-excellent {
+            background-color: #fce7f3;
+            color: #9d174d;
+        }
+
+        .badge-champion {
+            background-color: #f0f9ff;
+            color: #0c4a6e;
+        }
+
         /* Responsive */
         @media (min-width: 768px) {
             .desktop-sidebar {
@@ -367,36 +405,19 @@ if (empty($anak_orangtua)) {
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
         }
 
-        /* Timeline styles */
-        .timeline-item {
-            position: relative;
-            padding-left: 30px;
-            margin-bottom: 20px;
-        }
-
-        .timeline-item:before {
-            content: '';
-            position: absolute;
-            left: 0;
-            top: 5px;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background-color: #3b82f6;
-        }
-
-        .timeline-item:after {
-            content: '';
-            position: absolute;
-            left: 5px;
-            top: 20px;
-            width: 2px;
-            height: calc(100% + 5px);
+        /* Kapasitas progress bar */
+        .capacity-bar {
+            height: 8px;
             background-color: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 4px;
         }
 
-        .timeline-item:last-child:after {
-            display: none;
+        .capacity-fill {
+            height: 100%;
+            background-color: #10b981;
+            transition: width 0.3s ease;
         }
     </style>
 </head>
@@ -511,7 +532,7 @@ if (empty($anak_orangtua)) {
                     </span>
                     <span class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-green-100 text-green-800">
                         <i class="fas fa-child mr-2"></i>
-                        <?php echo count($anak_orangtua); ?> Anak
+                        <?php echo $total_anak; ?> Anak
                     </span>
                 </div>
             </div>
@@ -552,7 +573,7 @@ if (empty($anak_orangtua)) {
                         </div>
                         <div>
                             <p class="text-gray-600 text-sm md:text-base">Total Anak</p>
-                            <h3 class="text-2xl font-bold text-gray-800"><?php echo count($anak_orangtua); ?></h3>
+                            <h3 class="text-2xl font-bold text-gray-800"><?php echo $total_anak; ?></h3>
                         </div>
                     </div>
                 </div>
@@ -581,9 +602,8 @@ if (empty($anak_orangtua)) {
                             <h3 class="text-2xl font-bold text-gray-800">
                                 <?php 
                                 if ($total_jadwal > 0) {
-                                    // Filter hanya guru yang memiliki data (tidak NULL)
                                     $guru_ids = array_filter(array_column($jadwal_anak, 'guru_id'), function($value) {
-                                        return !is_null($value);
+                                        return !is_null($value) && $value > 0;
                                     });
                                     echo count(array_unique($guru_ids));
                                 } else {
@@ -597,45 +617,45 @@ if (empty($anak_orangtua)) {
             </div>
             
             <!-- Filter -->
-                <div class="bg-white overflow-hidden shadow rounded-lg p-5 mb-5">
-                    <form method="GET" action="" class="flex flex-col space-y-2">
-                        <label class="text-sm font-medium text-gray-900">
-                            Filter Jadwal
-                        </label>
-                        <div class="space-y-2">
-                            <select name="anak_id" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <option value="">Semua Anak</option>
-                                <?php foreach ($anak_orangtua as $anak): ?>
-                                <option value="<?php echo $anak['id']; ?>" <?php echo $filter_anak == $anak['id'] ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($anak['nama_lengkap']); ?> (<?php echo $anak['kelas_sekolah']; ?>)
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
-                            
-                            <select name="hari" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <option value="">Semua Hari</option>
-                                <option value="Senin" <?php echo $filter_hari == 'Senin' ? 'selected' : ''; ?>>Senin</option>
-                                <option value="Selasa" <?php echo $filter_hari == 'Selasa' ? 'selected' : ''; ?>>Selasa</option>
-                                <option value="Rabu" <?php echo $filter_hari == 'Rabu' ? 'selected' : ''; ?>>Rabu</option>
-                                <option value="Kamis" <?php echo $filter_hari == 'Kamis' ? 'selected' : ''; ?>>Kamis</option>
-                                <option value="Jumat" <?php echo $filter_hari == 'Jumat' ? 'selected' : ''; ?>>Jumat</option>
-                                <option value="Sabtu" <?php echo $filter_hari == 'Sabtu' ? 'selected' : ''; ?>>Sabtu</option>
-                                <option value="Minggu" <?php echo $filter_hari == 'Minggu' ? 'selected' : ''; ?>>Minggu</option>
-                            </select>
-                        </div>
+            <div class="bg-white overflow-hidden shadow rounded-lg p-5 mb-5">
+                <form method="GET" action="" class="flex flex-col space-y-2">
+                    <label class="text-sm font-medium text-gray-900">
+                        Filter Jadwal
+                    </label>
+                    <div class="space-y-2">
+                        <select name="anak_id" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="">Semua Anak</option>
+                            <?php foreach ($anak_orangtua as $anak): ?>
+                            <option value="<?php echo $anak['id']; ?>" <?php echo $filter_anak == $anak['id'] ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars($anak['nama_lengkap']); ?> (<?php echo $anak['kelas_sekolah']; ?>)
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
                         
-                        <div class="flex space-x-2 pt-2">
-                            <button type="submit" class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                                <i class="fas fa-filter mr-2"></i> Terapkan Filter
-                            </button>
-                            <?php if ($filter_hari || $filter_anak): ?>
-                            <a href="jadwalAnak.php" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
-                                Reset
-                            </a>
-                            <?php endif; ?>
-                        </div>
-                    </form>
-                </div>
+                        <select name="hari" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="">Semua Hari</option>
+                            <option value="Senin" <?php echo $filter_hari == 'Senin' ? 'selected' : ''; ?>>Senin</option>
+                            <option value="Selasa" <?php echo $filter_hari == 'Selasa' ? 'selected' : ''; ?>>Selasa</option>
+                            <option value="Rabu" <?php echo $filter_hari == 'Rabu' ? 'selected' : ''; ?>>Rabu</option>
+                            <option value="Kamis" <?php echo $filter_hari == 'Kamis' ? 'selected' : ''; ?>>Kamis</option>
+                            <option value="Jumat" <?php echo $filter_hari == 'Jumat' ? 'selected' : ''; ?>>Jumat</option>
+                            <option value="Sabtu" <?php echo $filter_hari == 'Sabtu' ? 'selected' : ''; ?>>Sabtu</option>
+                            <option value="Minggu" <?php echo $filter_hari == 'Minggu' ? 'selected' : ''; ?>>Minggu</option>
+                        </select>
+                    </div>
+                    
+                    <div class="flex space-x-2 pt-2">
+                        <button type="submit" class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                            <i class="fas fa-filter mr-2"></i> Terapkan Filter
+                        </button>
+                        <?php if ($filter_hari || $filter_anak): ?>
+                        <a href="jadwalAnak.php" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+                            Reset
+                        </a>
+                        <?php endif; ?>
+                    </div>
+                </form>
+            </div>
 
             <?php if (empty($anak_orangtua)): ?>
             <!-- Jika belum ada anak terdaftar -->
@@ -663,7 +683,7 @@ if (empty($anak_orangtua)) {
                         <i class="fas fa-calendar-times mr-2"></i> Daftar Anak
                     </h3>
                     <p class="mt-1 text-sm text-gray-500">
-                        Anda memiliki <?php echo count($anak_orangtua); ?> anak yang terdaftar
+                        Anda memiliki <?php echo $total_anak; ?> anak yang terdaftar
                     </p>
                 </div>
                 
@@ -720,7 +740,7 @@ if (empty($anak_orangtua)) {
                         <i class="fas fa-users mr-2"></i> Daftar Anak
                     </h3>
                     <p class="mt-1 text-sm text-gray-500">
-                        <?php echo count($anak_orangtua); ?> anak terdaftar, <?php echo $total_anak_with_jadwal; ?> memiliki jadwal
+                        <?php echo $total_anak; ?> anak terdaftar, <?php echo $total_anak_with_jadwal; ?> memiliki jadwal
                     </p>
                 </div>
                 
@@ -797,7 +817,7 @@ if (empty($anak_orangtua)) {
                         <span class="text-sm font-normal text-gray-500 ml-2">
                             (Filter: 
                             <?php 
-                            if ($filter_anak) {
+                            if ($filter_anak > 0) {
                                 foreach ($anak_orangtua as $anak) {
                                     if ($anak['id'] == $filter_anak) {
                                         echo htmlspecialchars($anak['nama_lengkap']);
@@ -809,7 +829,7 @@ if (empty($anak_orangtua)) {
                             }
                             
                             if ($filter_hari) {
-                                echo ' | ' . $filter_hari;
+                                echo ' | ' . htmlspecialchars($filter_hari);
                             }
                             ?>
                             )
@@ -829,20 +849,20 @@ if (empty($anak_orangtua)) {
                                     <th>Nama Anak</th>
                                     <th>Kelas Sekolah</th>
                                     <th>Tingkat Bimbel</th>
+                                    <th>Jenis Kelas</th>
                                     <th>Mata Pelajaran</th>
                                     <th>Hari</th>
                                     <th>Jam</th>
                                     <th>Durasi</th>
                                     <th>Guru</th>
-                                    <th>Bidang Keahlian</th>
+                                    <th>Kapasitas</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php $no = 1; ?>
                                 <?php foreach ($jadwal_anak as $jadwal): 
-                                    $jam_mulai = strtotime($jadwal['jam_mulai']);
-                                    $jam_selesai = strtotime($jadwal['jam_selesai']);
-                                    $durasi = ($jam_selesai - $jam_mulai) / 3600; // dalam jam
+                                    $durasi = hitungDurasi($jadwal['jam_mulai'], $jadwal['jam_selesai']);
+                                    $kapasitas_persen = ($jadwal['kapasitas_terisi'] / $jadwal['kapasitas_maks']) * 100;
                                 ?>
                                 <tr>
                                     <td><?php echo $no++; ?></td>
@@ -856,14 +876,20 @@ if (empty($anak_orangtua)) {
                                         <?php 
                                         $badge_class = '';
                                         switch($jadwal['tingkat_bimbel']) {
-                                            case 'SD': $badge_class = 'badge-warning'; break;
+                                            case 'TK': $badge_class = 'badge-warning'; break;
+                                            case 'SD': $badge_class = 'badge-info'; break;
                                             case 'SMP': $badge_class = 'badge-success'; break;
-                                            case 'SMA': $badge_class = 'badge-info'; break;
+                                            case 'SMA': $badge_class = 'badge-primary'; break;
                                             default: $badge_class = 'badge-primary';
                                         }
                                         ?>
                                         <span class="badge <?php echo $badge_class; ?>">
                                             <?php echo $jadwal['tingkat_bimbel']; ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="badge <?php echo $jadwal['jenis_kelas'] == 'Excellent' ? 'badge-excellent' : 'badge-champion'; ?>">
+                                            <?php echo $jadwal['jenis_kelas']; ?>
                                         </span>
                                     </td>
                                     <td>
@@ -879,7 +905,7 @@ if (empty($anak_orangtua)) {
                                     </td>
                                     <td>
                                         <span class="badge badge-info">
-                                            <?php echo number_format($durasi, 1); ?> jam
+                                            <?php echo $durasi; ?> jam
                                         </span>
                                     </td>
                                     <td>
@@ -890,7 +916,12 @@ if (empty($anak_orangtua)) {
                                         <?php endif; ?>
                                     </td>
                                     <td>
-                                        <?php echo !empty($jadwal['bidang_keahlian']) ? $jadwal['bidang_keahlian'] : '-'; ?>
+                                        <div class="text-sm">
+                                            <span class="font-medium"><?php echo $jadwal['kapasitas_terisi']; ?>/<?php echo $jadwal['kapasitas_maks']; ?></span>
+                                            <div class="capacity-bar">
+                                                <div class="capacity-fill" style="width: <?php echo min($kapasitas_persen, 100); ?>%"></div>
+                                            </div>
+                                        </div>
                                     </td>
                                 </tr>
                                 <?php endforeach; ?>
@@ -899,8 +930,6 @@ if (empty($anak_orangtua)) {
                     </div>
                 </div>
             </div>
-
-            
             
             <?php endif; ?>
         </div>
@@ -923,7 +952,7 @@ if (empty($anak_orangtua)) {
                             </span>
                             <span class="inline-flex items-center text-sm text-gray-500">
                                 <i class="fas fa-users mr-1"></i>
-                                <?php echo count($anak_orangtua); ?> Anak
+                                <?php echo $total_anak; ?> Anak
                             </span>
                         </div>
                     </div>

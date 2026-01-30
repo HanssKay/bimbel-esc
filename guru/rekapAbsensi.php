@@ -68,28 +68,21 @@ $hari_options = [];
 $jam_options = [];
 $mapel_options = [];
 
-// **QUERY UTAMA untuk mendapatkan semua siswa dan mata pelajaran yang diajar oleh guru ini**
+// **QUERY untuk mendapatkan semua siswa dan mata pelajaran - DIUBAH**
 $sql_jadwal = "SELECT DISTINCT 
                 s.id as siswa_id,
                 s.nama_lengkap,
                 s.kelas as kelas_sekolah,
                 sp.id as siswa_pelajaran_id,
-                sp.nama_pelajaran,
-                jb.hari,
-                jb.jam_mulai,
-                jb.jam_selesai
+                sp.nama_pelajaran
               FROM siswa_pelajaran sp
               JOIN siswa s ON sp.siswa_id = s.id
               JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-              LEFT JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id AND jb.status = 'aktif'
               WHERE sp.guru_id = ? 
               AND ps.status = 'aktif'
               AND sp.status = 'aktif'
               AND s.status = 'aktif'
-              ORDER BY 
-                s.nama_lengkap ASC,
-                FIELD(jb.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
-                jb.jam_mulai";
+              ORDER BY s.nama_lengkap ASC";
 
 $stmt_jadwal = $conn->prepare($sql_jadwal);
 $stmt_jadwal->bind_param("i", $guru_id);
@@ -97,7 +90,7 @@ $stmt_jadwal->execute();
 $result_jadwal = $stmt_jadwal->get_result();
 
 while ($row = $result_jadwal->fetch_assoc()) {
-    // Koleksi opsi siswa - gunakan siswa_id sebagai key untuk menghindari duplikat
+    // Koleksi opsi siswa
     if (!isset($siswa_options[$row['siswa_id']])) {
         $siswa_options[$row['siswa_id']] = [
             'id' => $row['siswa_id'],
@@ -110,7 +103,26 @@ while ($row = $result_jadwal->fetch_assoc()) {
     if (!empty($row['nama_pelajaran']) && !in_array($row['nama_pelajaran'], $mapel_options)) {
         $mapel_options[] = $row['nama_pelajaran'];
     }
-    
+}
+$stmt_jadwal->close();
+
+// **QUERY untuk mendapatkan hari dan jam yang tersedia - TAMBAHAN**
+$sql_hari_jam = "SELECT DISTINCT 
+                  smg.hari,
+                  smg.jam_mulai,
+                  smg.jam_selesai
+                FROM sesi_mengajar_guru smg
+                WHERE smg.guru_id = ?
+                AND smg.status = 'tersedia'
+                ORDER BY FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
+                         smg.jam_mulai";
+
+$stmt_hari_jam = $conn->prepare($sql_hari_jam);
+$stmt_hari_jam->bind_param("i", $guru_id);
+$stmt_hari_jam->execute();
+$result_hari_jam = $stmt_hari_jam->get_result();
+
+while ($row = $result_hari_jam->fetch_assoc()) {
     // Koleksi opsi hari
     if (!empty($row['hari']) && !in_array($row['hari'], $hari_options)) {
         $hari_options[] = $row['hari'];
@@ -127,9 +139,9 @@ while ($row = $result_jadwal->fetch_assoc()) {
         }
     }
 }
-$stmt_jadwal->close();
+$stmt_hari_jam->close();
 
-// **QUERY UTAMA UNTUK DATA REKAP - Mengikuti pola dari admin**
+// **QUERY UTAMA UNTUK DATA REKAP - DIUBAH**
 $sql_rekap = "SELECT 
                 s.id as siswa_id,
                 s.nama_lengkap,
@@ -138,17 +150,19 @@ $sql_rekap = "SELECT
                 sp.nama_pelajaran,
                 ps.tingkat as tingkat_bimbel,
                 ps.id as pendaftaran_id,
-                jb.hari,
-                jb.jam_mulai,
-                jb.jam_selesai
+                smg.hari,
+                smg.jam_mulai,
+                smg.jam_selesai
               FROM siswa_pelajaran sp
               JOIN siswa s ON sp.siswa_id = s.id
               JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-              LEFT JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id AND jb.status = 'aktif'
+              LEFT JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id 
+              LEFT JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
               WHERE sp.guru_id = ?
               AND ps.status = 'aktif'
               AND sp.status = 'aktif'
-              AND s.status = 'aktif'";
+              AND s.status = 'aktif'
+              AND (jb.status = 'aktif' OR jb.status IS NULL)";
 
 // Tambahkan filter
 $params = [$guru_id];
@@ -167,14 +181,14 @@ if (!empty($filter_mapel)) {
 }
 
 if (!empty($filter_hari)) {
-    $sql_rekap .= " AND jb.hari = ?";
+    $sql_rekap .= " AND smg.hari = ?";
     $params[] = $filter_hari;
     $param_types .= "s";
 }
 
 if (!empty($filter_jam)) {
     list($jam_mulai, $jam_selesai) = explode('_', $filter_jam);
-    $sql_rekap .= " AND jb.jam_mulai = ? AND jb.jam_selesai = ?";
+    $sql_rekap .= " AND smg.jam_mulai = ? AND smg.jam_selesai = ?";
     $params[] = $jam_mulai;
     $params[] = $jam_selesai;
     $param_types .= "ss";
@@ -190,8 +204,8 @@ if ($params) {
 $stmt_rekap->execute();
 $result_rekap = $stmt_rekap->get_result();
 
-$data_rekap = [];
 $grouped_data = []; // Untuk mengelompokkan data per siswa
+$all_siswa_pelajaran_ids = []; // Untuk menyimpan semua siswa_pelajaran_id
 
 // Statistik total
 $total_siswa_rekap = 0;
@@ -203,6 +217,8 @@ $total_alpha_rekap = 0;
 $total_belum_absen = 0;
 
 while ($row = $result_rekap->fetch_assoc()) {
+    $all_siswa_pelajaran_ids[] = $row['siswa_pelajaran_id'];
+    
     // **AMBIL DATA ABSENSI UNTUK SISWA INI berdasarkan siswa_pelajaran_id**
     $sql_absensi = "SELECT 
                     COUNT(*) as total_sesi,
@@ -236,19 +252,37 @@ while ($row = $result_rekap->fetch_assoc()) {
     $stmt_absensi->close();
     
     // **HITUNG TOTAL SESI YANG SEHARUSNYA berdasarkan jadwal**
-    $sql_total_sesi = "SELECT COUNT(DISTINCT DATE(jb.jam_mulai)) as total_sesi_jadwal
-                      FROM jadwal_belajar jb
-                      WHERE jb.siswa_pelajaran_id = ?
-                      AND jb.status = 'aktif'
-                      AND DATE(jb.jam_mulai) BETWEEN ? AND ?";
+    // Pertama, cek apakah ada jadwal di sesi_mengajar_guru untuk siswa ini
+    $total_sesi_jadwal = 0;
     
-    $stmt_sesi = $conn->prepare($sql_total_sesi);
-    $stmt_sesi->bind_param("iss", $row['siswa_pelajaran_id'], $tanggal_awal, $tanggal_akhir);
-    $stmt_sesi->execute();
-    $result_sesi = $stmt_sesi->get_result();
-    $total_sesi_row = $result_sesi->fetch_assoc();
-    $total_sesi_jadwal = $total_sesi_row ? $total_sesi_row['total_sesi_jadwal'] : 0;
-    $stmt_sesi->close();
+    if (!empty($row['hari']) && !empty($row['jam_mulai'])) {
+        // Jika ada jadwal di sesi_mengajar_guru, hitung berapa sesi dalam periode
+        $start_date = new DateTime($tanggal_awal);
+        $end_date = new DateTime($tanggal_akhir);
+        
+        $hari_map = [
+            'Sunday' => 'Minggu',
+            'Monday' => 'Senin',
+            'Tuesday' => 'Selasa',
+            'Wednesday' => 'Rabu',
+            'Thursday' => 'Kamis',
+            'Friday' => 'Jumat',
+            'Saturday' => 'Sabtu'
+        ];
+        
+        $interval = new DateInterval('P1D');
+        $date_range = new DatePeriod($start_date, $interval, $end_date->modify('+1 day'));
+        
+        foreach ($date_range as $date) {
+            $english_day = $date->format('l');
+            if ($hari_map[$english_day] == $row['hari']) {
+                $total_sesi_jadwal++;
+            }
+        }
+    } else {
+        // Jika tidak ada jadwal spesifik, anggap 4 sesi per bulan (1 per minggu)
+        $total_sesi_jadwal = ($filter_minggu > 0) ? 1 : 4;
+    }
     
     // Hitung yang belum diabsen
     $total_sudah_absen = $absensi['total_hadir'] + $absensi['total_izin'] + $absensi['total_sakit'] + $absensi['total_alpha'];
@@ -291,7 +325,6 @@ while ($row = $result_rekap->fetch_assoc()) {
     }
     
     // Update statistik
-    $total_siswa_rekap = count($grouped_data);
     $total_hadir_rekap += $absensi['total_hadir'];
     $total_izin_rekap += $absensi['total_izin'];
     $total_sakit_rekap += $absensi['total_sakit'];
@@ -300,28 +333,12 @@ while ($row = $result_rekap->fetch_assoc()) {
 }
 $stmt_rekap->close();
 
-// Konversi grouped_data ke array untuk ditampilkan
-$final_rekap_siswa = array_values($grouped_data);
+$total_siswa_rekap = count($grouped_data);
 
-// **QUERY untuk statistik total yang lebih akurat**
+// **QUERY untuk statistik total yang lebih akurat - DIUBAH**
 $sql_stats_total = "SELECT 
                     COUNT(DISTINCT s.id) as total_siswa,
-                    COUNT(DISTINCT sp.id) as total_mata_pelajaran,
-                    (
-                        SELECT COUNT(DISTINCT DATE(jb.jam_mulai))
-                        FROM jadwal_belajar jb
-                        JOIN siswa_pelajaran sp2 ON jb.siswa_pelajaran_id = sp2.id
-                        WHERE sp2.guru_id = ?
-                        AND jb.status = 'aktif'
-                        AND DATE(jb.jam_mulai) BETWEEN ? AND ?
-                    ) as total_sesi_seharusnya,
-                    (
-                        SELECT COUNT(DISTINCT a.id)
-                        FROM absensi_siswa a
-                        JOIN siswa_pelajaran sp3 ON a.siswa_pelajaran_id = sp3.id
-                        WHERE sp3.guru_id = ?
-                        AND a.tanggal_absensi BETWEEN ? AND ?
-                    ) as total_absensi_aktual
+                    COUNT(DISTINCT sp.id) as total_mata_pelajaran
                   FROM siswa_pelajaran sp
                   JOIN siswa s ON sp.siswa_id = s.id
                   JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
@@ -331,27 +348,62 @@ $sql_stats_total = "SELECT
                   AND s.status = 'aktif'";
 
 $stmt_stats = $conn->prepare($sql_stats_total);
-$stmt_stats->bind_param("ississi", 
-    $guru_id, $tanggal_awal, $tanggal_akhir,
-    $guru_id, $tanggal_awal, $tanggal_akhir,
-    $guru_id
-);
+$stmt_stats->bind_param("i", $guru_id);
 $stmt_stats->execute();
 $result_stats = $stmt_stats->get_result();
 $stats_total = $result_stats->fetch_assoc() ?? [
     'total_siswa' => 0,
-    'total_mata_pelajaran' => 0,
-    'total_sesi_seharusnya' => 0,
-    'total_absensi_aktual' => 0
+    'total_mata_pelajaran' => 0
 ];
 $stmt_stats->close();
 
-// Hitung statistik tambahan dari data yang sudah dikumpulkan
+// Hitung total sesi seharusnya berdasarkan filter
+if (count($all_siswa_pelajaran_ids) > 0) {
+    // Hitung total sesi berdasarkan filter minggu
+    if ($filter_minggu > 0) {
+        $total_sesi_seharusnya = count($all_siswa_pelajaran_ids) * 1; // 1 sesi per minggu
+    } else {
+        // Default 4 sesi per bulan per mata pelajaran
+        $total_sesi_seharusnya = count($all_siswa_pelajaran_ids) * 4;
+    }
+    
+    $stats_total['total_sesi_seharusnya'] = $total_sesi_seharusnya;
+} else {
+    $stats_total['total_sesi_seharusnya'] = 0;
+}
+
+// Hitung total absensi aktual - CARA SEDERHANA
+$stats_total['total_absensi_aktual'] = 0;
+if (count($all_siswa_pelajaran_ids) > 0) {
+    // Cara sederhana tanpa binding dinamis
+    $ids_string = implode(',', array_map('intval', $all_siswa_pelajaran_ids));
+    $sql_absensi_simple = "SELECT COUNT(*) as total_absensi_aktual
+                          FROM absensi_siswa 
+                          WHERE guru_id = $guru_id
+                          AND siswa_pelajaran_id IN ($ids_string)
+                          AND tanggal_absensi BETWEEN '$tanggal_awal' AND '$tanggal_akhir'";
+    
+    $result_simple = $conn->query($sql_absensi_simple);
+    if ($result_simple) {
+        $row_simple = $result_simple->fetch_assoc();
+        $stats_total['total_absensi_aktual'] = $row_simple ? $row_simple['total_absensi_aktual'] : 0;
+    }
+}
+
+// Perbaiki perhitungan total sudah absen
+$total_sudah_absen = $total_hadir_rekap + $total_izin_rekap + $total_sakit_rekap + $total_alpha_rekap;
+
+// Hitung belum absen berdasarkan sesi seharusnya dan sudah absen
+$stats_total['belum_absen'] = $stats_total['total_sesi_seharusnya'] - $total_sudah_absen;
+if ($stats_total['belum_absen'] < 0) {
+    $stats_total['belum_absen'] = 0;
+}
+
+// Tambahkan statistik dari perhitungan sebelumnya
 $stats_total['total_hadir'] = $total_hadir_rekap;
 $stats_total['total_izin'] = $total_izin_rekap;
 $stats_total['total_sakit'] = $total_sakit_rekap;
 $stats_total['total_alpha'] = $total_alpha_rekap;
-$stats_total['belum_absen'] = $total_belum_absen;
 
 // Tampilkan label periode
 if ($filter_minggu > 0) {
@@ -360,6 +412,9 @@ if ($filter_minggu > 0) {
 } else {
     $periode_label = date('F Y', strtotime($periode . '-01'));
 }
+
+// Konversi grouped_data ke array untuk ditampilkan
+$final_rekap_siswa = array_values($grouped_data);
 ?>
 
 <!DOCTYPE html>
@@ -372,7 +427,6 @@ if ($filter_minggu > 0) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <style>
-        /* CSS tetap sama seperti sebelumnya */
         .status-hadir { background-color: #d1fae5; color: #065f46; }
         .status-izin { background-color: #fef3c7; color: #92400e; }
         .status-sakit { background-color: #dbeafe; color: #1e40af; }
@@ -733,10 +787,6 @@ if ($filter_minggu > 0) {
                                 <p class="text-xl font-bold text-gray-800"><?php echo $stats_total['total_hadir']; ?></p>
                             </div>
                         </div>
-                        <!--<div class="mt-2 progress-bar">-->
-                        <!--    <div class="progress-fill bg-green-500" -->
-                        <!--         style="width: <?php echo $stats_total['total_sesi_seharusnya'] > 0 ? ($stats_total['total_hadir'] / $stats_total['total_sesi_seharusnya']) * 100 : 0; ?>%"></div>-->
-                        <!--</div>-->
                     </div>
                     <div class="bg-white rounded-lg p-4 shadow">
                         <div class="flex items-center md:mt-5">
@@ -748,10 +798,6 @@ if ($filter_minggu > 0) {
                                 <p class="text-xl font-bold text-gray-800"><?php echo $stats_total['total_izin']; ?></p>
                             </div>
                         </div>
-                        <!--<div class="mt-2 progress-bar">-->
-                        <!--    <div class="progress-fill bg-yellow-500" -->
-                        <!--         style="width: <?php echo $stats_total['total_sesi_seharusnya'] > 0 ? ($stats_total['total_izin'] / $stats_total['total_sesi_seharusnya']) * 100 : 0; ?>%"></div>-->
-                        <!--</div>-->
                     </div>
                     <div class="bg-white rounded-lg p-4 shadow">
                         <div class="flex items-center md:mt-5">
@@ -763,10 +809,6 @@ if ($filter_minggu > 0) {
                                 <p class="text-xl font-bold text-gray-800"><?php echo $stats_total['total_sakit']; ?></p>
                             </div>
                         </div>
-                        <!--<div class="mt-2 progress-bar">-->
-                        <!--    <div class="progress-fill bg-blue-500" -->
-                        <!--         style="width: <?php echo $stats_total['total_sesi_seharusnya'] > 0 ? ($stats_total['total_sakit'] / $stats_total['total_sesi_seharusnya']) * 100 : 0; ?>%"></div>-->
-                        <!--</div>-->
                     </div>
                     <div class="bg-white rounded-lg p-4 shadow">
                         <div class="flex mt-3 items-center md:mt-5">
@@ -778,10 +820,6 @@ if ($filter_minggu > 0) {
                                 <p class="text-xl font-bold text-gray-800"><?php echo $stats_total['total_alpha']; ?></p>
                             </div>
                         </div>
-                        <!--<div class="mt-2 progress-bar">-->
-                        <!--    <div class="progress-fill bg-red-500" -->
-                        <!--         style="width: <?php echo $stats_total['total_sesi_seharusnya'] > 0 ? ($stats_total['total_alpha'] / $stats_total['total_sesi_seharusnya']) * 100 : 0; ?>%"></div>-->
-                        <!--</div>-->
                     </div>
                 </div>
                 
@@ -859,7 +897,6 @@ if ($filter_minggu > 0) {
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Izin</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sakit</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Alpha</th>
-                                    <!--<th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Belum Absen</th>-->
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
@@ -902,17 +939,6 @@ if ($filter_minggu > 0) {
                                     <td class="px-6 py-4 whitespace-nowrap text-sm text-red-600 font-medium">
                                         <?php echo $siswa['total_alpha']; ?>
                                     </td>
-                                    <!--<td class="px-6 py-4 whitespace-nowrap">-->
-                                    <!--    <?php if ($siswa['belum_absen'] > 0): ?>-->
-                                    <!--    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">-->
-                                    <!--        <?php echo $siswa['belum_absen']; ?> sesi-->
-                                    <!--    </span>-->
-                                    <!--    <?php else: ?>-->
-                                    <!--    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">-->
-                                    <!--        Sudah lengkap-->
-                                    <!--    </span>-->
-                                    <!--    <?php endif; ?>-->
-                                    <!--</td>-->
                                 </tr>
                                 <?php endforeach; ?>
                             </tbody>

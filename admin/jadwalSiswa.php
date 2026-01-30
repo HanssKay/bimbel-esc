@@ -7,7 +7,7 @@ require_once '../includes/config.php';
 require_once '../includes/menu_functions.php';
 
 // CEK LOGIN & ROLE
-if (!isset($_SESSION['user_id'])) {
+if (!isset($_SESSION['user_id']) || !is_numeric($_SESSION['user_id'])) {
     header('Location: ../index.php');
     exit();
 }
@@ -17,25 +17,85 @@ if ($_SESSION['user_role'] != 'admin') {
     exit();
 }
 
-$admin_id = $_SESSION['user_id'];
-$full_name = $_SESSION['full_name'] ?? 'Administrator';
+$admin_id = (int) $_SESSION['user_id'];
+$full_name = htmlspecialchars($_SESSION['full_name'] ?? 'Administrator', ENT_QUOTES, 'UTF-8');
 $currentPage = basename($_SERVER['PHP_SELF']);
 
-// FILTER PARAMETER
-$filter_hari = $_GET['hari'] ?? '';
-$filter_tingkat = $_GET['tingkat'] ?? '';
-$filter_siswa = $_GET['siswa_id'] ?? '';
-$filter_guru = $_GET['guru_id'] ?? '';
-$filter_mata_pelajaran = $_GET['mata_pelajaran'] ?? '';
+// FUNGSI HELPER UNTUK DATABASE
+function executeQuery($conn, $sql, $params = [], $types = "")
+{
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        throw new Exception("Query preparation failed: " . $conn->error);
+    }
 
-// QUERY JADWAL SISWA - Versi sederhana
+    if (!empty($params)) {
+        if (strlen($types) !== count($params)) {
+            throw new Exception("Parameter count mismatch. Types: {$types}, Params: " . count($params));
+        }
+        $stmt->bind_param($types, ...$params);
+    }
+
+    if (!$stmt->execute()) {
+        throw new Exception("Query execution failed: " . $stmt->error);
+    }
+
+    return $stmt;
+}
+
+// FUNGSI UPDATE KAPASITAS DAN STATUS SESI (Mengganti trigger)
+function updateKapasitasDanStatusSesi($conn, $sesi_id)
+{
+    try {
+        // Ambil data kapasitas saat ini
+        $sql_get = "SELECT kapasitas_terisi, kapasitas_maks FROM sesi_mengajar_guru WHERE id = ?";
+        $stmt_get = executeQuery($conn, $sql_get, [$sesi_id], "i");
+        $result = $stmt_get->get_result();
+
+        if ($result->num_rows === 0) {
+            $stmt_get->close();
+            return false;
+        }
+
+        $data = $result->fetch_assoc();
+        $stmt_get->close();
+
+        // Tentukan status baru
+        $status_baru = ($data['kapasitas_terisi'] >= $data['kapasitas_maks']) ? 'penuh' : 'tersedia';
+
+        // Update status
+        $sql_update = "UPDATE sesi_mengajar_guru SET status = ?, updated_at = NOW() WHERE id = ?";
+        $stmt_update = executeQuery($conn, $sql_update, [$status_baru, $sesi_id], "si");
+        $stmt_update->close();
+
+        return true;
+
+    } catch (Exception $e) {
+        error_log("Error updateKapasitasDanStatusSesi: " . $e->getMessage());
+        return false;
+    }
+}
+
+// FILTER PARAMETER DENGAN VALIDASI
+$filter_hari = isset($_GET['hari']) && in_array($_GET['hari'], ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'])
+    ? $_GET['hari']
+    : '';
+
+$filter_tingkat = isset($_GET['tingkat']) && in_array($_GET['tingkat'], ['TK', 'SD', 'SMP', 'SMA', 'Alumni', 'Umum'])
+    ? $_GET['tingkat']
+    : '';
+
+$filter_siswa = isset($_GET['siswa_id']) && is_numeric($_GET['siswa_id']) ? (int) $_GET['siswa_id'] : 0;
+$filter_guru = isset($_GET['guru_id']) && is_numeric($_GET['guru_id']) ? (int) $_GET['guru_id'] : 0;
+
+// QUERY JADWAL SISWA
 $jadwal_siswa = [];
 $where_conditions = ["jb.status = 'aktif'", "ps.status = 'aktif'", "sp.status = 'aktif'"];
 $filter_params = [];
 $types = "";
 
 if ($filter_hari !== '') {
-    $where_conditions[] = "jb.hari = ?";
+    $where_conditions[] = "smg.hari = ?";
     $filter_params[] = $filter_hari;
     $types .= "s";
 }
@@ -46,35 +106,41 @@ if ($filter_tingkat !== '') {
     $types .= "s";
 }
 
-if ($filter_siswa !== '') {
+if ($filter_siswa > 0) {
     $where_conditions[] = "ps.siswa_id = ?";
     $filter_params[] = $filter_siswa;
     $types .= "i";
 }
 
-if ($filter_guru !== '') {
-    $where_conditions[] = "sp.guru_id = ?";
+if ($filter_guru > 0) {
+    $where_conditions[] = "smg.guru_id = ?";
     $filter_params[] = $filter_guru;
     $types .= "i";
 }
 
 $where_clause = !empty($where_conditions) ? "WHERE " . implode(" AND ", $where_conditions) : "";
 
-// Query sederhana - hanya ambil data orang tua dari siswa tersebut
 $sql_jadwal = "
     SELECT 
-        jb.*,
+        jb.id as jadwal_id,
+        jb.created_at,
+        jb.updated_at,
+        smg.id as sesi_id,
+        smg.hari,
+        smg.jam_mulai,
+        smg.jam_selesai,
+        smg.kapasitas_maks,
+        smg.kapasitas_terisi,
+        smg.status as status_sesi,
         ps.id as pendaftaran_id,
         ps.jenis_kelas,
         ps.tingkat,
-        ps.status as status_pendaftaran,
         s.id as siswa_id,
         s.nama_lengkap as nama_siswa,
         s.kelas as kelas_sekolah,
         s.sekolah_asal,
         sp.id as siswa_pelajaran_id,
         sp.nama_pelajaran,
-        sp.status as status_pelajaran,
         g.id as guru_id,
         u.full_name as nama_guru,
         g.bidang_keahlian,
@@ -82,35 +148,27 @@ $sql_jadwal = "
         o.nama_ortu,
         o.no_hp as hp_ortu,
         o.hubungan_dengan_siswa,
-        o.email as email_ortu,
-        o.pekerjaan,
-        o.perusahaan,
-        DATE_FORMAT(jb.jam_mulai, '%H:%i') as jam_mulai_format,
-        DATE_FORMAT(jb.jam_selesai, '%H:%i') as jam_selesai_format,
-        TIMESTAMPDIFF(MINUTE, jb.jam_mulai, jb.jam_selesai) as durasi_menit
+        DATE_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai_format,
+        DATE_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai_format,
+        TIMESTAMPDIFF(MINUTE, smg.jam_mulai, smg.jam_selesai) as durasi_menit
     FROM jadwal_belajar jb
-    JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
-    JOIN pendaftaran_siswa ps ON jb.pendaftaran_id = ps.id
-    JOIN siswa s ON ps.siswa_id = s.id
-    LEFT JOIN guru g ON sp.guru_id = g.id
+    INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+    INNER JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
+    INNER JOIN pendaftaran_siswa ps ON jb.pendaftaran_id = ps.id
+    INNER JOIN siswa s ON ps.siswa_id = s.id
+    LEFT JOIN guru g ON smg.guru_id = g.id
     LEFT JOIN users u ON g.user_id = u.id
     LEFT JOIN siswa_orangtua so ON s.id = so.siswa_id
     LEFT JOIN orangtua o ON so.orangtua_id = o.id
     $where_clause
     ORDER BY 
-        FIELD(jb.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
-        jb.jam_mulai,
+        FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
+        smg.jam_mulai,
         s.nama_lengkap
 ";
 
 try {
-    $stmt = $conn->prepare($sql_jadwal);
-
-    if (!empty($filter_params)) {
-        $stmt->bind_param($types, ...$filter_params);
-    }
-
-    $stmt->execute();
+    $stmt = executeQuery($conn, $sql_jadwal, $filter_params, $types);
     $result = $stmt->get_result();
 
     while ($row = $result->fetch_assoc()) {
@@ -119,390 +177,433 @@ try {
     $stmt->close();
 } catch (Exception $e) {
     error_log("Error fetching jadwal siswa: " . $e->getMessage());
+    $jadwal_siswa = [];
 }
 
 // AMBIL DATA UNTUK FILTER DROPDOWN
-
-// Daftar siswa aktif
 $siswa_list = [];
-$sql_siswa = "SELECT id, nama_lengkap, kelas FROM siswa WHERE status = 'aktif' ORDER BY nama_lengkap";
-$result_siswa = $conn->query($sql_siswa);
-while ($row = $result_siswa->fetch_assoc()) {
-    $siswa_list[] = $row;
-}
-
-// Daftar guru aktif
 $guru_list = [];
-$sql_guru = "SELECT g.id, u.full_name, g.bidang_keahlian FROM guru g 
-            JOIN users u ON g.user_id = u.id 
-            WHERE g.status = 'aktif' 
-            ORDER BY u.full_name";
-$result_guru = $conn->query($sql_guru);
-while ($row = $result_guru->fetch_assoc()) {
-    $guru_list[] = $row;
+
+try {
+    // Daftar siswa aktif
+    $sql_siswa = "SELECT id, nama_lengkap, kelas FROM siswa WHERE status = 'aktif' ORDER BY nama_lengkap";
+    $result_siswa = $conn->query($sql_siswa);
+    if ($result_siswa) {
+        while ($row = $result_siswa->fetch_assoc()) {
+            $siswa_list[] = $row;
+        }
+    }
+
+    // Daftar guru aktif
+    $sql_guru = "SELECT g.id, u.full_name, g.bidang_keahlian 
+                FROM guru g 
+                INNER JOIN users u ON g.user_id = u.id 
+                WHERE g.status = 'aktif' 
+                ORDER BY u.full_name";
+    $result_guru = $conn->query($sql_guru);
+    if ($result_guru) {
+        while ($row = $result_guru->fetch_assoc()) {
+            $guru_list[] = $row;
+        }
+    }
+} catch (Exception $e) {
+    error_log("Error fetching filter data: " . $e->getMessage());
 }
 
-// HITUNG STATISTIK sederhana
+// HITUNG STATISTIK
 $total_jadwal = count($jadwal_siswa);
 $total_siswa = count(array_unique(array_column($jadwal_siswa, 'siswa_id')));
 $total_guru = count(array_unique(array_column($jadwal_siswa, 'guru_id')));
 
-// Hitung total orang tua yang memiliki data
-$total_orangtua_terdata = 0;
-$orangtua_seen = [];
+// HITUNG DISTRIBUSI PER HARI
+$jadwal_by_hari = [
+    'Senin' => 0,
+    'Selasa' => 0,
+    'Rabu' => 0,
+    'Kamis' => 0,
+    'Jumat' => 0,
+    'Sabtu' => 0,
+    'Minggu' => 0
+];
+
+// HITUNG DISTRIBUSI PER TINGKAT
+$jadwal_by_tingkat = [
+    'TK' => 0,
+    'SD' => 0,
+    'SMP' => 0,
+    'SMA' => 0,
+    'Alumni' => 0,
+    'Umum' => 0
+];
+
+// Hitung distribusi berdasarkan data jadwal siswa
 foreach ($jadwal_siswa as $jadwal) {
-    if (!empty($jadwal['nama_ortu']) && !in_array($jadwal['nama_ortu'], $orangtua_seen)) {
-        $orangtua_seen[] = $jadwal['nama_ortu'];
-        $total_orangtua_terdata++;
+    if (isset($jadwal['hari']) && array_key_exists($jadwal['hari'], $jadwal_by_hari)) {
+        $jadwal_by_hari[$jadwal['hari']]++;
+    }
+    
+    if (isset($jadwal['tingkat']) && array_key_exists($jadwal['tingkat'], $jadwal_by_tingkat)) {
+        $jadwal_by_tingkat[$jadwal['tingkat']]++;
     }
 }
 
-// Group by hari untuk statistik - tetap sama
-$jadwal_by_hari = [];
-$jadwal_by_tingkat = [];
-$jadwal_by_pelajaran = [];
-
-foreach ($jadwal_siswa as $jadwal) {
-    $hari = $jadwal['hari'];
-    $tingkat = $jadwal['tingkat'];
-    $pelajaran = $jadwal['nama_pelajaran'] ?? 'Tidak diketahui';
-
-    if (!isset($jadwal_by_hari[$hari])) {
-        $jadwal_by_hari[$hari] = 0;
-    }
-    $jadwal_by_hari[$hari]++;
-
-    if (!isset($jadwal_by_tingkat[$tingkat])) {
-        $jadwal_by_tingkat[$tingkat] = 0;
-    }
-    $jadwal_by_tingkat[$tingkat]++;
-
-    if (!isset($jadwal_by_pelajaran[$pelajaran])) {
-        $jadwal_by_pelajaran[$pelajaran] = 0;
-    }
-    $jadwal_by_pelajaran[$pelajaran]++;
-}
-
-// FUNGSI UNTUK MENDAPATKAN MATA PELAJARAN SISWA YANG BELUM ADA JADWAL
-function getMataPelajaranTanpaJadwal($conn, $siswa_id, $guru_id = null)
+// FUNGSI UNTUK MENCARI ATAU MEMBUAT SESI GURU
+function cariAtauBuatSesiGuru($conn, $guru_id, $hari, $jam_mulai, $jam_selesai)
 {
-    $mata_pelajaran = [];
-
-    // Query untuk mendapatkan semua mata pelajaran aktif siswa
-    $sql = "SELECT sp.id, sp.nama_pelajaran, ps.tingkat
-            FROM siswa_pelajaran sp
-            JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-            WHERE ps.siswa_id = ? 
-            AND sp.status = 'aktif'
-            AND ps.status = 'aktif'";
-
-    $params = [$siswa_id];
-    $types = "i";
-
-    // Jika guru_id diberikan, filter berdasarkan guru yang dipilih
-    if ($guru_id) {
-        $sql .= " AND (sp.guru_id IS NULL OR sp.guru_id = ?)";
-        $params[] = $guru_id;
-        $types .= "i";
+    if (!is_numeric($guru_id) || $guru_id <= 0) {
+        return ['success' => false, 'error' => 'Guru ID tidak valid'];
     }
 
-    $sql .= " ORDER BY sp.nama_pelajaran";
-
-    $stmt = $conn->prepare($sql);
-    if ($guru_id) {
-        $stmt->bind_param($types, $siswa_id, $guru_id);
-    } else {
-        $stmt->bind_param($types, $siswa_id);
+    if (!in_array($hari, ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'])) {
+        return ['success' => false, 'error' => 'Hari tidak valid'];
     }
 
-    $stmt->execute();
-    $result = $stmt->get_result();
+    try {
+        // Cek apakah sudah ada sesi
+        $sql_cek = "SELECT id, kapasitas_maks, kapasitas_terisi 
+                    FROM sesi_mengajar_guru 
+                    WHERE guru_id = ? 
+                    AND hari = ? 
+                    AND jam_mulai = ? 
+                    AND jam_selesai = ?
+                    AND status != 'tidak_aktif'";
 
-    while ($row = $result->fetch_assoc()) {
-        $pelajaran_id = $row['id'];
-        $nama_pelajaran = $row['nama_pelajaran'];
-        $tingkat = $row['tingkat'];
-
-        // Cek apakah mata pelajaran ini sudah memiliki jadwal aktif
-        $sql_cek_jadwal = "SELECT COUNT(*) as jumlah_jadwal 
-                          FROM jadwal_belajar jb
-                          WHERE jb.siswa_pelajaran_id = ? 
-                          AND jb.status = 'aktif'";
-
-        $stmt_cek = $conn->prepare($sql_cek_jadwal);
-        $stmt_cek->bind_param("i", $pelajaran_id);
-        $stmt_cek->execute();
+        $stmt_cek = executeQuery($conn, $sql_cek, [$guru_id, $hari, $jam_mulai, $jam_selesai], "isss");
         $result_cek = $stmt_cek->get_result();
-        $row_cek = $result_cek->fetch_assoc();
-        $stmt_cek->close();
 
-        // Jika belum ada jadwal, tambahkan ke daftar
-        if ($row_cek['jumlah_jadwal'] == 0) {
-            $mata_pelajaran[] = [
-                'id' => $pelajaran_id,
-                'nama_pelajaran' => $nama_pelajaran,
-                'tingkat' => $tingkat
+        if ($result_cek->num_rows > 0) {
+            $sesi_data = $result_cek->fetch_assoc();
+            $stmt_cek->close();
+            return [
+                'success' => true,
+                'sesi_id' => $sesi_data['id'],
+                'kapasitas_maks' => $sesi_data['kapasitas_maks'],
+                'kapasitas_terisi' => $sesi_data['kapasitas_terisi'],
+                'is_new' => false
             ];
         }
-    }
-    $stmt->close();
+        $stmt_cek->close();
 
-    return $mata_pelajaran;
+        // Ambil kapasitas default dari guru
+        $sql_guru = "SELECT kapasitas_per_sesi FROM guru WHERE id = ?";
+        $stmt_guru = executeQuery($conn, $sql_guru, [$guru_id], "i");
+        $result_guru = $stmt_guru->get_result();
+
+        $kapasitas_default = 10;
+        if ($result_guru->num_rows > 0) {
+            $guru_data = $result_guru->fetch_assoc();
+            $kapasitas_default = $guru_data['kapasitas_per_sesi'] ?: 10;
+        }
+        $stmt_guru->close();
+
+        // Buat sesi baru (trigger cegah_konflik_sesi_guru akan validasi konflik)
+        $sql_insert = "INSERT INTO sesi_mengajar_guru 
+                      (guru_id, hari, jam_mulai, jam_selesai, kapasitas_maks, kapasitas_terisi, status, created_at) 
+                      VALUES (?, ?, ?, ?, ?, 0, 'tersedia', NOW())";
+
+        $stmt_insert = executeQuery($conn, $sql_insert, [$guru_id, $hari, $jam_mulai, $jam_selesai, $kapasitas_default], "isssi");
+        $sesi_id = $stmt_insert->insert_id;
+        $stmt_insert->close();
+
+        return [
+            'success' => true,
+            'sesi_id' => $sesi_id,
+            'kapasitas_maks' => $kapasitas_default,
+            'kapasitas_terisi' => 0,
+            'is_new' => true
+        ];
+
+    } catch (Exception $e) {
+        return ['success' => false, 'error' => $e->getMessage()];
+    }
 }
 
-// PROSES TAMBAH JADWAL (Admin bisa tambah untuk siapa saja)
+// PROSES TAMBAH JADWAL
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tambah_jadwal'])) {
-    $siswa_pelajaran_id = $_POST['siswa_pelajaran_id'] ?? '';
-    $guru_id = $_POST['guru_id'] ?? '';
-    $hari = $_POST['hari'] ?? '';
-    $jam_mulai = $_POST['jam_mulai'] ?? '';
-    $jam_selesai = $_POST['jam_selesai'] ?? '';
+    // Validasi input
+    $siswa_pelajaran_id = isset($_POST['siswa_pelajaran_id']) && is_numeric($_POST['siswa_pelajaran_id'])
+        ? (int) $_POST['siswa_pelajaran_id']
+        : 0;
 
-    if ($siswa_pelajaran_id && $hari && $jam_mulai && $jam_selesai) {
+    $guru_id = isset($_POST['guru_id']) && is_numeric($_POST['guru_id'])
+        ? (int) $_POST['guru_id']
+        : 0;
+
+    $hari = isset($_POST['hari']) && in_array($_POST['hari'], ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'])
+        ? $_POST['hari']
+        : '';
+
+    $jam_mulai = isset($_POST['jam_mulai']) ? trim($_POST['jam_mulai']) : '';
+    $jam_selesai = isset($_POST['jam_selesai']) ? trim($_POST['jam_selesai']) : '';
+
+    // Validasi
+    $errors = [];
+    if ($siswa_pelajaran_id <= 0)
+        $errors[] = "Mata pelajaran harus dipilih";
+    if ($guru_id <= 0)
+        $errors[] = "Guru harus dipilih";
+    if (empty($hari))
+        $errors[] = "Hari harus dipilih";
+    if (empty($jam_mulai))
+        $errors[] = "Jam mulai harus diisi";
+    if (empty($jam_selesai))
+        $errors[] = "Jam selesai harus diisi";
+    if ($jam_mulai && $jam_selesai && $jam_selesai <= $jam_mulai) {
+        $errors[] = "Jam selesai harus setelah jam mulai";
+    }
+
+    if (!empty($errors)) {
+        $_SESSION['error_message'] = implode(", ", $errors);
+    } else {
+        $in_transaction = false;
+
         try {
-            // Ambil data siswa dari siswa_pelajaran termasuk pendaftaran_id
-            $sql_get_data = "SELECT sp.siswa_id, sp.guru_id, sp.pendaftaran_id, ps.tingkat
+            $conn->begin_transaction();
+            $in_transaction = true;
+
+            // 1. Ambil data siswa
+            $sql_get_data = "SELECT sp.siswa_id, sp.guru_id as current_guru_id, sp.pendaftaran_id, s.nama_lengkap
                             FROM siswa_pelajaran sp
-                            JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                            WHERE sp.id = ?";
-            $stmt_get = $conn->prepare($sql_get_data);
-            $stmt_get->bind_param("i", $siswa_pelajaran_id);
-            $stmt_get->execute();
+                            INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                            INNER JOIN siswa s ON ps.siswa_id = s.id
+                            WHERE sp.id = ? AND sp.status = 'aktif' AND ps.status = 'aktif'";
+
+            $stmt_get = executeQuery($conn, $sql_get_data, [$siswa_pelajaran_id], "i");
             $result_get = $stmt_get->get_result();
 
             if ($result_get->num_rows === 0) {
-                $_SESSION['error_message'] = "Data siswa tidak ditemukan!";
-                $stmt_get->close();
-            } else {
-                $data_siswa = $result_get->fetch_assoc();
-                $stmt_get->close();
-
-                $siswa_id = $data_siswa['siswa_id'];
-                $current_guru_id = $data_siswa['guru_id'];
-                $pendaftaran_id = $data_siswa['pendaftaran_id'];
-                $tingkat = $data_siswa['tingkat'];
-
-                // Update guru jika berbeda dan guru_id dipilih
-                if ($guru_id && $current_guru_id != $guru_id) {
-                    $sql_update_guru = "UPDATE siswa_pelajaran SET guru_id = ? WHERE id = ?";
-                    $stmt_update = $conn->prepare($sql_update_guru);
-                    $stmt_update->bind_param("ii", $guru_id, $siswa_pelajaran_id);
-                    if ($stmt_update->execute()) {
-                        $current_guru_id = $guru_id; // Update variabel
-                    }
-                    $stmt_update->close();
-                } else {
-                    // Jika guru tidak dipilih di form, gunakan guru yang sudah ada
-                    $guru_id = $current_guru_id;
-                }
-
-                // Pastikan guru_id tidak null
-                if (!$guru_id) {
-                    $_SESSION['error_message'] = "Guru harus dipilih untuk mata pelajaran ini!";
-                } else {
-                    // Cek apakah siswa sudah memiliki jadwal pada hari dan jam yang sama (untuk mata pelajaran APAPUN)
-                    $sql_cek_siswa = "SELECT jb.id 
-                                     FROM jadwal_belajar jb
-                                     JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
-                                     JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                                     WHERE ps.siswa_id = ? 
-                                     AND jb.hari = ? 
-                                     AND jb.status = 'aktif'
-                                     AND jb.siswa_pelajaran_id != ?
-                                     AND (
-                                         (jb.jam_mulai < ? AND jb.jam_selesai > ?) OR
-                                         (? BETWEEN jb.jam_mulai AND jb.jam_selesai)
-                                     )";
-                    $stmt_cek = $conn->prepare($sql_cek_siswa);
-                    $stmt_cek->bind_param(
-                        "isisss",
-                        $siswa_id,
-                        $hari,
-                        $siswa_pelajaran_id,
-                        $jam_selesai,
-                        $jam_mulai,
-                        $jam_mulai
-                    );
-                    $stmt_cek->execute();
-                    $result_cek = $stmt_cek->get_result();
-
-                    if ($result_cek->num_rows > 0) {
-                        $_SESSION['error_message'] = "Siswa sudah memiliki jadwal pada hari dan jam yang sama!";
-                        $stmt_cek->close();
-                    } else {
-                        $stmt_cek->close();
-
-                        // Cek apakah guru sudah memiliki jadwal dengan siswa lain pada waktu yang sama
-                        $sql_cek_guru = "SELECT jb.id 
-                                       FROM jadwal_belajar jb
-                                       JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
-                                       WHERE sp.guru_id = ?
-                                       AND jb.hari = ? 
-                                       AND jb.status = 'aktif'
-                                       AND jb.siswa_pelajaran_id != ?
-                                       AND (
-                                           (jb.jam_mulai < ? AND jb.jam_selesai > ?) OR
-                                           (? BETWEEN jb.jam_mulai AND jb.jam_selesai)
-                                       )";
-                        $stmt_cek_guru = $conn->prepare($sql_cek_guru);
-                        $stmt_cek_guru->bind_param(
-                            "isisss",
-                            $guru_id,
-                            $hari,
-                            $siswa_pelajaran_id,
-                            $jam_selesai,
-                            $jam_mulai,
-                            $jam_mulai
-                        );
-                        $stmt_cek_guru->execute();
-                        $result_cek_guru = $stmt_cek_guru->get_result();
-
-                        if ($result_cek_guru->num_rows > 0) {
-                            $_SESSION['error_message'] = "Guru sudah memiliki jadwal dengan siswa lain pada waktu yang sama!";
-                            $stmt_cek_guru->close();
-                        } else {
-                            $stmt_cek_guru->close();
-
-                            // Tambah jadwal baru - INI YANG DIPERBAIKI
-                            $sql_tambah = "INSERT INTO jadwal_belajar 
-                                          (pendaftaran_id, siswa_pelajaran_id, hari, jam_mulai, jam_selesai, status) 
-                                          VALUES (?, ?, ?, ?, ?, 'aktif')";
-                            $stmt_tambah = $conn->prepare($sql_tambah);
-                            $stmt_tambah->bind_param("iisss", $pendaftaran_id, $siswa_pelajaran_id, $hari, $jam_mulai, $jam_selesai);
-
-                            if ($stmt_tambah->execute()) {
-                                $_SESSION['success_message'] = "Jadwal berhasil ditambahkan!";
-                                $stmt_tambah->close();
-                                header("Location: jadwalSiswa.php");
-                                exit();
-                            } else {
-                                $_SESSION['error_message'] = "Gagal menambahkan jadwal! Error: " . $stmt_tambah->error;
-                                $stmt_tambah->close();
-                            }
-                        }
-                    }
-                }
+                throw new Exception("Data siswa tidak ditemukan");
             }
+
+            $data_siswa = $result_get->fetch_assoc();
+            $stmt_get->close();
+
+            $siswa_id = (int) $data_siswa['siswa_id'];
+            $current_guru_id = (int) $data_siswa['current_guru_id'];
+            $pendaftaran_id = (int) $data_siswa['pendaftaran_id'];
+            $nama_siswa = $data_siswa['nama_lengkap'];
+
+            // 2. Update guru jika berbeda
+            if ($current_guru_id != $guru_id) {
+                $sql_update_guru = "UPDATE siswa_pelajaran SET guru_id = ?, updated_at = NOW() WHERE id = ?";
+                $stmt_update = executeQuery($conn, $sql_update_guru, [$guru_id, $siswa_pelajaran_id], "ii");
+                $stmt_update->close();
+            }
+
+            // 3. Cari atau buat sesi
+            $sesi_result = cariAtauBuatSesiGuru($conn, $guru_id, $hari, $jam_mulai, $jam_selesai);
+
+            if (!$sesi_result['success']) {
+                throw new Exception($sesi_result['error']);
+            }
+
+            $sesi_guru_id = $sesi_result['sesi_id'];
+            $kapasitas_maks = $sesi_result['kapasitas_maks'];
+            $kapasitas_terisi = $sesi_result['kapasitas_terisi'];
+
+            // 4. Cek kapasitas (trigger check_kapasitas_guru akan validasi juga)
+            if ($kapasitas_terisi >= $kapasitas_maks) {
+                throw new Exception("Kapasitas sesi sudah penuh");
+            }
+
+            // 5. Cek konflik jadwal siswa
+            $sql_cek_konflik = "SELECT COUNT(*) as jumlah 
+                               FROM jadwal_belajar jb
+                               INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                               INNER JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
+                               INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                               WHERE ps.siswa_id = ? 
+                               AND smg.hari = ? 
+                               AND jb.status = 'aktif'
+                               AND jb.siswa_pelajaran_id != ?
+                               AND (
+                                   (smg.jam_mulai < ? AND smg.jam_selesai > ?) OR
+                                   (? BETWEEN smg.jam_mulai AND smg.jam_selesai)
+                               )";
+
+            $stmt_konflik = executeQuery($conn, $sql_cek_konflik, [
+                $siswa_id,
+                $hari,
+                $siswa_pelajaran_id,
+                $jam_selesai,
+                $jam_mulai,
+                $jam_mulai
+            ], "isisss");
+
+            $result_konflik = $stmt_konflik->get_result();
+            $data_konflik = $result_konflik->fetch_assoc();
+            $stmt_konflik->close();
+
+            if ($data_konflik['jumlah'] > 0) {
+                throw new Exception("Siswa sudah memiliki jadwal lain pada waktu tersebut");
+            }
+
+            // 6. Tambah kapasitas terisi (mengganti fungsi trigger)
+            $sql_update_kapasitas = "UPDATE sesi_mengajar_guru 
+                                    SET kapasitas_terisi = kapasitas_terisi + 1 
+                                    WHERE id = ?";
+            $stmt_update_kap = executeQuery($conn, $sql_update_kapasitas, [$sesi_guru_id], "i");
+            $stmt_update_kap->close();
+
+            // 7. Update status sesi
+            updateKapasitasDanStatusSesi($conn, $sesi_guru_id);
+
+            // 8. Insert jadwal baru (trigger check_kapasitas_guru akan validasi)
+            $sql_tambah = "INSERT INTO jadwal_belajar 
+                          (pendaftaran_id, siswa_pelajaran_id, sesi_guru_id, status, created_at, updated_at) 
+                          VALUES (?, ?, ?, 'aktif', NOW(), NOW())";
+
+            $stmt_tambah = executeQuery($conn, $sql_tambah, [$pendaftaran_id, $siswa_pelajaran_id, $sesi_guru_id], "iii");
+            $stmt_tambah->close();
+
+            $conn->commit();
+
+            $_SESSION['success_message'] = "Jadwal berhasil ditambahkan!";
+            header("Location: jadwalSiswa.php");
+            exit();
+
         } catch (Exception $e) {
+            if ($in_transaction) {
+                $conn->rollback();
+            }
             $_SESSION['error_message'] = "Error: " . $e->getMessage();
         }
-    } else {
-        $_SESSION['error_message'] = "Semua field harus diisi!";
     }
 }
 
 // PROSES EDIT JADWAL
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['edit_jadwal'])) {
-    $jadwal_id = $_POST['jadwal_id'] ?? '';
-    $hari = $_POST['hari'] ?? '';
-    $jam_mulai = $_POST['jam_mulai'] ?? '';
-    $jam_selesai = $_POST['jam_selesai'] ?? '';
+    $jadwal_id = isset($_POST['jadwal_id']) && is_numeric($_POST['jadwal_id']) ? (int) $_POST['jadwal_id'] : 0;
+    $hari = isset($_POST['hari']) && in_array($_POST['hari'], ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu']) ? $_POST['hari'] : '';
+    $jam_mulai = isset($_POST['jam_mulai']) ? trim($_POST['jam_mulai']) : '';
+    $jam_selesai = isset($_POST['jam_selesai']) ? trim($_POST['jam_selesai']) : '';
 
-    if ($jadwal_id && $hari && $jam_mulai && $jam_selesai) {
+    if ($jadwal_id <= 0 || empty($hari) || empty($jam_mulai) || empty($jam_selesai)) {
+        $_SESSION['error_message'] = "Data tidak lengkap!";
+    } elseif ($jam_selesai <= $jam_mulai) {
+        $_SESSION['error_message'] = "Jam selesai harus setelah jam mulai!";
+    } else {
+        $in_transaction = false;
+
         try {
-            // Ambil data jadwal lama
-            $sql_get = "SELECT jb.siswa_pelajaran_id, sp.siswa_id, sp.guru_id, jb.pendaftaran_id
+            $conn->begin_transaction();
+            $in_transaction = true;
+
+            // 1. Ambil data jadwal lama
+            $sql_get = "SELECT jb.siswa_pelajaran_id, sp.siswa_id, smg.guru_id, 
+                               jb.sesi_guru_id as sesi_lama, s.nama_lengkap
                        FROM jadwal_belajar jb
-                       JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
+                       INNER JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
+                       INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                       INNER JOIN siswa s ON sp.siswa_id = s.id
                        WHERE jb.id = ?";
-            $stmt_get = $conn->prepare($sql_get);
-            $stmt_get->bind_param("i", $jadwal_id);
-            $stmt_get->execute();
+
+            $stmt_get = executeQuery($conn, $sql_get, [$jadwal_id], "i");
             $result_get = $stmt_get->get_result();
+
+            if ($result_get->num_rows === 0) {
+                throw new Exception("Jadwal tidak ditemukan");
+            }
+
             $old_data = $result_get->fetch_assoc();
             $stmt_get->close();
 
-            $siswa_pelajaran_id = $old_data['siswa_pelajaran_id'] ?? 0;
-            $siswa_id = $old_data['siswa_id'] ?? 0;
-            $guru_id = $old_data['guru_id'] ?? 0;
-            $pendaftaran_id = $old_data['pendaftaran_id'] ?? 0;
+            $siswa_pelajaran_id = (int) $old_data['siswa_pelajaran_id'];
+            $siswa_id = (int) $old_data['siswa_id'];
+            $guru_id = (int) $old_data['guru_id'];
+            $sesi_lama = (int) $old_data['sesi_lama'];
+            $nama_siswa = $old_data['nama_lengkap'];
 
-            if ($siswa_pelajaran_id && $siswa_id && $guru_id && $pendaftaran_id) {
-                // Cek bentrok untuk siswa
-                $sql_cek_siswa = "SELECT jb.id 
+            // 2. Cari atau buat sesi baru
+            $sesi_result = cariAtauBuatSesiGuru($conn, $guru_id, $hari, $jam_mulai, $jam_selesai);
+
+            if (!$sesi_result['success']) {
+                throw new Exception($sesi_result['error']);
+            }
+
+            $sesi_baru_id = $sesi_result['sesi_id'];
+
+            if ($sesi_baru_id == $sesi_lama) {
+                $conn->rollback();
+                $_SESSION['success_message'] = "Tidak ada perubahan pada jadwal.";
+                header("Location: jadwalSiswa.php");
+                exit();
+            }
+
+            // 3. Cek kapasitas sesi baru
+            if ($sesi_result['kapasitas_terisi'] >= $sesi_result['kapasitas_maks']) {
+                throw new Exception("Kapasitas sesi baru sudah penuh!");
+            }
+
+            // 4. Cek konflik jadwal siswa
+            $sql_cek_konflik = "SELECT COUNT(*) as jumlah 
                                FROM jadwal_belajar jb
-                               JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
-                               JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                               INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                               INNER JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
+                               INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
                                WHERE ps.siswa_id = ? 
-                               AND jb.hari = ? 
+                               AND smg.hari = ? 
                                AND jb.id != ?
                                AND jb.status = 'aktif'
                                AND (
-                                   (jb.jam_mulai < ? AND jb.jam_selesai > ?) OR
-                                   (? BETWEEN jb.jam_mulai AND jb.jam_selesai)
+                                   (smg.jam_mulai < ? AND smg.jam_selesai > ?) OR
+                                   (? BETWEEN smg.jam_mulai AND smg.jam_selesai)
                                )";
-                $stmt_cek_siswa = $conn->prepare($sql_cek_siswa);
-                $stmt_cek_siswa->bind_param(
-                    "isisss",
-                    $siswa_id,
-                    $hari,
-                    $jadwal_id,
-                    $jam_selesai,
-                    $jam_mulai,
-                    $jam_mulai
-                );
-                $stmt_cek_siswa->execute();
-                $result_cek_siswa = $stmt_cek_siswa->get_result();
 
-                if ($result_cek_siswa->num_rows > 0) {
-                    $_SESSION['error_message'] = "Siswa sudah memiliki jadwal lain pada waktu ini!";
-                    $stmt_cek_siswa->close();
-                } else {
-                    $stmt_cek_siswa->close();
+            $stmt_konflik = executeQuery($conn, $sql_cek_konflik, [
+                $siswa_id,
+                $hari,
+                $jadwal_id,
+                $jam_selesai,
+                $jam_mulai,
+                $jam_mulai
+            ], "isiiss");
 
-                    // Cek bentrok untuk guru
-                    $sql_cek_guru = "SELECT jb.id 
-                                   FROM jadwal_belajar jb
-                                   JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
-                                   WHERE sp.guru_id = ?
-                                   AND jb.hari = ? 
-                                   AND jb.id != ?
-                                   AND jb.status = 'aktif'
-                                   AND (
-                                       (jb.jam_mulai < ? AND jb.jam_selesai > ?) OR
-                                       (? BETWEEN jb.jam_mulai AND jb.jam_selesai)
-                                   )";
-                    $stmt_cek_guru = $conn->prepare($sql_cek_guru);
-                    $stmt_cek_guru->bind_param(
-                        "isisss",
-                        $guru_id,
-                        $hari,
-                        $jadwal_id,
-                        $jam_selesai,
-                        $jam_mulai,
-                        $jam_mulai
-                    );
-                    $stmt_cek_guru->execute();
-                    $result_cek_guru = $stmt_cek_guru->get_result();
+            $result_konflik = $stmt_konflik->get_result();
+            $data_konflik = $result_konflik->fetch_assoc();
+            $stmt_konflik->close();
 
-                    if ($result_cek_guru->num_rows > 0) {
-                        $_SESSION['error_message'] = "Guru sudah memiliki jadwal lain pada waktu yang sama!";
-                        $stmt_cek_guru->close();
-                    } else {
-                        $stmt_cek_guru->close();
-
-                        // Update jadwal
-                        $sql_update = "UPDATE jadwal_belajar 
-                                      SET hari = ?, jam_mulai = ?, jam_selesai = ?, updated_at = NOW()
-                                      WHERE id = ?";
-                        $stmt_update = $conn->prepare($sql_update);
-                        $stmt_update->bind_param("sssi", $hari, $jam_mulai, $jam_selesai, $jadwal_id);
-
-                        if ($stmt_update->execute()) {
-                            $_SESSION['success_message'] = "Jadwal berhasil diperbarui!";
-                            $stmt_update->close();
-                            header("Location: jadwalSiswa.php");
-                            exit();
-                        } else {
-                            $_SESSION['error_message'] = "Gagal memperbarui jadwal! Error: " . $stmt_update->error;
-                            $stmt_update->close();
-                        }
-                    }
-                }
-            } else {
-                $_SESSION['error_message'] = "Data jadwal tidak lengkap!";
+            if ($data_konflik['jumlah'] > 0) {
+                throw new Exception("Siswa sudah memiliki jadwal lain pada waktu tersebut");
             }
+
+            // 5. Update kapasitas: tambah ke sesi baru, kurangi dari sesi lama
+            // Update sesi baru
+            $sql_update_baru = "UPDATE sesi_mengajar_guru 
+                               SET kapasitas_terisi = kapasitas_terisi + 1 
+                               WHERE id = ?";
+            $stmt_baru = executeQuery($conn, $sql_update_baru, [$sesi_baru_id], "i");
+            $stmt_baru->close();
+
+            // Update sesi lama
+            $sql_update_lama = "UPDATE sesi_mengajar_guru 
+                               SET kapasitas_terisi = GREATEST(kapasitas_terisi - 1, 0) 
+                               WHERE id = ?";
+            $stmt_lama = executeQuery($conn, $sql_update_lama, [$sesi_lama], "i");
+            $stmt_lama->close();
+
+            // 6. Update status kedua sesi
+            updateKapasitasDanStatusSesi($conn, $sesi_baru_id);
+            updateKapasitasDanStatusSesi($conn, $sesi_lama);
+
+            // 7. Update jadwal
+            $sql_update = "UPDATE jadwal_belajar 
+                          SET sesi_guru_id = ?, updated_at = NOW() 
+                          WHERE id = ?";
+
+            $stmt_update = executeQuery($conn, $sql_update, [$sesi_baru_id, $jadwal_id], "ii");
+            $stmt_update->close();
+
+            $conn->commit();
+
+            $_SESSION['success_message'] = "Jadwal berhasil diperbarui!";
+            header("Location: jadwalSiswa.php");
+            exit();
+
         } catch (Exception $e) {
+            if ($in_transaction) {
+                $conn->rollback();
+            }
             $_SESSION['error_message'] = "Error: " . $e->getMessage();
         }
     }
@@ -510,52 +611,80 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['edit_jadwal'])) {
 
 // PROSES HAPUS JADWAL
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['hapus_jadwal'])) {
-    $jadwal_id = $_POST['jadwal_id'] ?? '';
+    $jadwal_id = isset($_POST['jadwal_id']) && is_numeric($_POST['jadwal_id']) ? (int) $_POST['jadwal_id'] : 0;
 
-    if ($jadwal_id) {
+    if ($jadwal_id <= 0) {
+        $_SESSION['error_message'] = "ID jadwal tidak valid!";
+    } else {
+        $in_transaction = false;
+
         try {
-            // Hard delete
-            $sql_hapus = "DELETE FROM jadwal_belajar WHERE id = ?";
-            $stmt_hapus = $conn->prepare($sql_hapus);
-            $stmt_hapus->bind_param("i", $jadwal_id);
+            $conn->begin_transaction();
+            $in_transaction = true;
 
-            if ($stmt_hapus->execute()) {
-                $affected_rows = $stmt_hapus->affected_rows;
-                $stmt_hapus->close();
+            // 1. Ambil data sesi
+            $sql_get_sesi = "SELECT sesi_guru_id FROM jadwal_belajar WHERE id = ?";
+            $stmt_get = executeQuery($conn, $sql_get_sesi, [$jadwal_id], "i");
+            $result_get = $stmt_get->get_result();
 
-                if ($affected_rows > 0) {
-                    $_SESSION['success_message'] = "Jadwal berhasil dihapus!";
-                } else {
-                    $_SESSION['error_message'] = "Jadwal tidak ditemukan!";
-                }
-                header("Location: jadwalSiswa.php");
-                exit();
-            } else {
-                $_SESSION['error_message'] = "Gagal menghapus jadwal!";
+            if ($result_get->num_rows === 0) {
+                throw new Exception("Jadwal tidak ditemukan");
             }
+
+            $data = $result_get->fetch_assoc();
+            $sesi_guru_id = (int) $data['sesi_guru_id'];
+            $stmt_get->close();
+
+            // 2. Hapus jadwal
+            $sql_hapus = "DELETE FROM jadwal_belajar WHERE id = ?";
+            $stmt_hapus = executeQuery($conn, $sql_hapus, [$jadwal_id], "i");
+            $affected_rows = $stmt_hapus->affected_rows;
             $stmt_hapus->close();
+
+            if ($affected_rows === 0) {
+                throw new Exception("Gagal menghapus jadwal");
+            }
+
+            // 3. Update kapasitas sesi (kurangi 1)
+            $sql_update_kap = "UPDATE sesi_mengajar_guru 
+                              SET kapasitas_terisi = GREATEST(kapasitas_terisi - 1, 0) 
+                              WHERE id = ?";
+            $stmt_update = executeQuery($conn, $sql_update_kap, [$sesi_guru_id], "i");
+            $stmt_update->close();
+
+            // 4. Update status sesi
+            updateKapasitasDanStatusSesi($conn, $sesi_guru_id);
+
+            $conn->commit();
+
+            $_SESSION['success_message'] = "Jadwal berhasil dihapus!";
+            header("Location: jadwalSiswa.php");
+            exit();
+
         } catch (Exception $e) {
+            if ($in_transaction) {
+                $conn->rollback();
+            }
             $_SESSION['error_message'] = "Error: " . $e->getMessage();
         }
     }
 }
 
-// AJAX: Ambil daftar siswa untuk autocomplete
-if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
-    $siswa_list_ajax = [];
+// AJAX HANDLERS
+if (isset($_GET['ajax'])) {
+    header('Content-Type: application/json');
 
-    $sql_siswa_ajax = "SELECT 
+    try {
+        switch ($_GET['ajax']) {
+            case 'get_siswa_list':
+                $siswa_list_ajax = [];
+
+                $sql = "SELECT 
                         s.id, 
                         s.nama_lengkap, 
                         s.kelas,
                         s.sekolah_asal,
-                        GROUP_CONCAT(DISTINCT CONCAT(o.hubungan_dengan_siswa, ': ', o.nama_ortu) ORDER BY 
-                            CASE o.hubungan_dengan_siswa 
-                                WHEN 'ayah' THEN 1
-                                WHEN 'ibu' THEN 2
-                                WHEN 'wali' THEN 3
-                                ELSE 4
-                            END SEPARATOR '; ') as orangtua_info
+                        GROUP_CONCAT(DISTINCT CONCAT(o.hubungan_dengan_siswa, ': ', o.nama_ortu) SEPARATOR '; ') as orangtua_info
                     FROM siswa s
                     LEFT JOIN siswa_orangtua so ON s.id = so.siswa_id
                     LEFT JOIN orangtua o ON so.orangtua_id = o.id
@@ -563,26 +692,82 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
                     GROUP BY s.id
                     ORDER BY s.nama_lengkap";
 
-    $result_siswa_ajax = $conn->query($sql_siswa_ajax);
-    while ($row = $result_siswa_ajax->fetch_assoc()) {
-        $siswa_list_ajax[] = $row;
+                $result = $conn->query($sql);
+                if ($result) {
+                    while ($row = $result->fetch_assoc()) {
+                        $siswa_list_ajax[] = $row;
+                    }
+                }
+
+                echo json_encode($siswa_list_ajax);
+                break;
+
+            case 'get_pelajaran':
+                if (!isset($_GET['siswa_id']) || !is_numeric($_GET['siswa_id'])) {
+                    echo json_encode([]);
+                    break;
+                }
+
+                $siswa_id = (int) $_GET['siswa_id'];
+                $guru_id = isset($_GET['guru_id']) && is_numeric($_GET['guru_id']) ? (int) $_GET['guru_id'] : null;
+
+                $mata_pelajaran = [];
+
+                $sql = "SELECT sp.id, sp.nama_pelajaran, ps.tingkat, sp.guru_id
+                        FROM siswa_pelajaran sp
+                        INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                        WHERE ps.siswa_id = ? 
+                        AND sp.status = 'aktif'
+                        AND ps.status = 'aktif'";
+
+                $params = [$siswa_id];
+                $types = "i";
+
+                if ($guru_id) {
+                    $sql .= " AND (sp.guru_id IS NULL OR sp.guru_id = ?)";
+                    $params[] = $guru_id;
+                    $types .= "i";
+                }
+
+                $sql .= " ORDER BY sp.nama_pelajaran";
+
+                $stmt = executeQuery($conn, $sql, $params, $types);
+                $result = $stmt->get_result();
+
+                while ($row = $result->fetch_assoc()) {
+                    $pelajaran_id = $row['id'];
+
+                    // Cek apakah sudah ada jadwal
+                    $sql_cek = "SELECT COUNT(*) as jumlah FROM jadwal_belajar WHERE siswa_pelajaran_id = ? AND status = 'aktif'";
+                    $stmt_cek = executeQuery($conn, $sql_cek, [$pelajaran_id], "i");
+                    $result_cek = $stmt_cek->get_result();
+                    $data_cek = $result_cek->fetch_assoc();
+                    $stmt_cek->close();
+
+                    if ($data_cek['jumlah'] == 0) {
+                        $mata_pelajaran[] = [
+                            'id' => $pelajaran_id,
+                            'nama_pelajaran' => $row['nama_pelajaran'],
+                            'tingkat' => $row['tingkat'],
+                            'guru_id' => $row['guru_id']
+                        ];
+                    }
+                }
+                $stmt->close();
+
+                echo json_encode($mata_pelajaran);
+                break;
+
+            default:
+                echo json_encode(['error' => 'Action not found']);
+        }
+
+        exit();
+
+    } catch (Exception $e) {
+        echo json_encode(['error' => $e->getMessage()]);
+        exit();
     }
-
-    header('Content-Type: application/json');
-    echo json_encode($siswa_list_ajax);
-    exit();
-}
-
-// AJAX: Ambil mata pelajaran berdasarkan siswa dan guru
-if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['siswa_id'])) {
-    $siswa_id = $_GET['siswa_id'];
-    $guru_id = $_GET['guru_id'] ?? null;
-
-    $mata_pelajaran = getMataPelajaranTanpaJadwal($conn, $siswa_id, $guru_id);
-
-    header('Content-Type: application/json');
-    echo json_encode($mata_pelajaran);
-    exit();
 }
 ?>
 
@@ -597,6 +782,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <style>
+        /* Semua CSS tetap sama, tidak diubah */
         .stat-card {
             transition: transform 0.3s, box-shadow 0.3s;
         }
@@ -1247,7 +1433,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
                     </div>
 
                     <div class="flex justify-end space-x-2 pt-2">
-                        <?php if ($filter_hari || $filter_tingkat || $filter_siswa || $filter_guru || $filter_mata_pelajaran): ?>
+                        <?php if ($filter_hari || $filter_tingkat || $filter_siswa || $filter_guru): ?>
                             <a href="jadwalSiswa.php"
                                 class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm flex items-center">
                                 <i class="fas fa-redo mr-2"></i> Reset
@@ -1427,21 +1613,24 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
                                             </td>
                                             <td>
                                                 <div class="flex space-x-2">
+                                                    <!-- Tombol Edit - PERBAIKI PARAMETER -->
                                                     <button onclick="openEditModal(
-                            <?php echo $jadwal['id']; ?>,
-                            '<?php echo $jadwal['hari']; ?>',
-                            '<?php echo $jadwal['jam_mulai']; ?>',
-                            '<?php echo $jadwal['jam_selesai']; ?>'
-                        )" class="px-3 py-1 bg-yellow-500 text-white rounded text-sm hover:bg-yellow-600">
+            <?php echo $jadwal['jadwal_id']; ?>,
+            '<?php echo $jadwal['hari']; ?>',
+            '<?php echo $jadwal['jam_mulai']; ?>',
+            '<?php echo $jadwal['jam_selesai']; ?>'
+        )" class="px-3 py-1 bg-yellow-500 text-white rounded text-sm hover:bg-yellow-600">
                                                         <i class="fas fa-edit mr-1"></i> Edit
                                                     </button>
+
+                                                    <!-- Tombol Hapus - PERBAIKI PARAMETER -->
                                                     <button onclick="openHapusModal(
-                            <?php echo $jadwal['id']; ?>, 
-                            '<?php echo htmlspecialchars($jadwal['nama_siswa']); ?>', 
-                            '<?php echo htmlspecialchars($jadwal['nama_guru'] ?? 'Belum ditugaskan'); ?>', 
-                            '<?php echo $jadwal['hari']; ?>', 
-                            '<?php echo $jadwal['jam_mulai_format']; ?> - <?php echo $jadwal['jam_selesai_format']; ?>'
-                        )" class="px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600">
+            <?php echo $jadwal['jadwal_id']; ?>, 
+            '<?php echo htmlspecialchars($jadwal['nama_siswa']); ?>', 
+            '<?php echo htmlspecialchars($jadwal['nama_guru'] ?? 'Belum ditugaskan'); ?>', 
+            '<?php echo $jadwal['hari']; ?>', 
+            '<?php echo $jadwal['jam_mulai_format']; ?> - <?php echo $jadwal['jam_selesai_format']; ?>'
+        )" class="px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600">
                                                         <i class="fas fa-trash mr-1"></i> Hapus
                                                     </button>
                                                 </div>
@@ -1548,7 +1737,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
         </footer>
     </div>
 
-    <!-- Modal Tambah Jadwal -->
+    <!-- Modal Tambah Jadwal - KEMBALI KE VERSI LAMA -->
     <div id="modalTambah" class="modal">
         <div class="modal-content">
             <div class="p-6">
@@ -1681,7 +1870,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
         </div>
     </div>
 
-    <!-- Modal Edit Jadwal -->
+    <!-- Modal Edit Jadwal - KEMBALI KE VERSI LAMA -->
     <div id="modalEdit" class="modal">
         <div class="modal-content">
             <div class="p-6">
@@ -2332,6 +2521,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran' && isset($_GET['sis
         $(document).ready(function () {
             // Load data siswa untuk autocomplete
             loadSiswaData();
+
+            // Inisialisasi autocomplete jika data sudah tersedia
+            if (siswaData.length > 0) {
+                initAutocomplete();
+            }
         });
     </script>
 </body>

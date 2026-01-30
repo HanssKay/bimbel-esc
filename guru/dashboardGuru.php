@@ -24,15 +24,22 @@ $currentPage = basename($_SERVER['PHP_SELF']);
 
 // Get guru_id from guru table based on user_id
 $guru_id = 0;
+$guru_detail = [];
 try {
-    $sql = "SELECT id FROM guru WHERE user_id = ?";
+    $sql = "SELECT g.id, g.bidang_keahlian, g.pendidikan_terakhir, g.pengalaman_tahun, 
+                   g.status, g.tanggal_bergabung
+            FROM guru g 
+            WHERE g.user_id = ?";
     $stmt = $conn->prepare($sql);
+    if ($stmt === false) {
+        throw new Exception("Prepare failed: " . $conn->error);
+    }
     $stmt->bind_param("i", $user_id);
     $stmt->execute();
     $result = $stmt->get_result();
     if ($result && $result->num_rows > 0) {
-        $guru_data = $result->fetch_assoc();
-        $guru_id = $guru_data['id'] ?? 0;
+        $guru_detail = $result->fetch_assoc();
+        $guru_id = $guru_detail['id'] ?? 0;
     }
     $stmt->close();
 } catch (Exception $e) {
@@ -40,130 +47,192 @@ try {
 }
 
 // Hitung statistik dengan error handling
-$statistics = [];
+$statistics = [
+    'total_siswa' => 0,
+    'total_siswa_jadwal' => 0,
+    'total_penilaian' => 0,
+    'penilaian_bulan_ini' => 0,
+    'rata_nilai' => '0.0',
+    'total_pelajaran' => 0,
+    'siswa_terbaik' => ['nama_lengkap' => '-', 'total_score' => 0, 'nama_pelajaran' => '-']
+];
+
 $penilaian_terbaru = [];
 $siswa_belum_dinilai = [];
+$jadwal_per_hari = [];
 
 try {
     if ($guru_id > 0) {
-        // TOTAL SISWA YANG DIAJAR: Siswa yang memiliki pelajaran dengan guru ini
+        // 1. TOTAL SISWA YANG DIAJAR
         $sql = "SELECT COUNT(DISTINCT sp.siswa_id) as total 
                 FROM siswa_pelajaran sp 
-                JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
                 WHERE sp.guru_id = ? 
                 AND sp.status = 'aktif' 
                 AND ps.status = 'aktif'";
+        
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("i", $guru_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $statistics['total_siswa'] = $result && $result->num_rows > 0 ? $result->fetch_assoc()['total'] ?? 0 : 0;
-        $stmt->close();
+        if ($stmt) {
+            $stmt->bind_param("i", $guru_id);
+            if ($stmt->execute()) {
+                $result = $stmt->get_result();
+                if ($result && $row = $result->fetch_assoc()) {
+                    $statistics['total_siswa'] = (int)$row['total'];
+                }
+            }
+            $stmt->close();
+        }
 
-        // SISWA DENGAN JADWAL AKTIF
-        $sql = "SELECT COUNT(DISTINCT sp.siswa_id) as total 
+        // 2. SISWA DENGAN JADWAL AKTIF (Query yang error - diperbaiki)
+        $sql = "SELECT COUNT(DISTINCT s.id) as total 
                 FROM siswa_pelajaran sp 
-                JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                LEFT JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id
+                INNER JOIN siswa s ON sp.siswa_id = s.id
+                INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                INNER JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id
+                INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
                 WHERE sp.guru_id = ? 
                 AND sp.status = 'aktif' 
                 AND ps.status = 'aktif'
-                AND jb.status = 'aktif'";
+                AND jb.status = 'aktif'
+                AND smg.guru_id = ?";
+        
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("i", $guru_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $statistics['total_siswa_jadwal'] = $result && $result->num_rows > 0 ? $result->fetch_assoc()['total'] ?? 0 : 0;
-        $stmt->close();
+        if ($stmt) {
+            $stmt->bind_param("ii", $guru_id, $guru_id);
+            if ($stmt->execute()) {
+                $result = $stmt->get_result();
+                if ($result && $row = $result->fetch_assoc()) {
+                    $statistics['total_siswa_jadwal'] = (int)$row['total'];
+                }
+            }
+            $stmt->close();
+        }
 
-        // DETAIL JADWAL PER HARI
+        // 3. DETAIL JADWAL PER HARI
         $sql = "SELECT 
-                    jb.hari,
+                    smg.hari,
                     COUNT(DISTINCT sp.siswa_id) as jumlah_siswa,
-                    GROUP_CONCAT(DISTINCT s.nama_lengkap ORDER BY s.nama_lengkap SEPARATOR ', ') as nama_siswa
+                    GROUP_CONCAT(DISTINCT s.nama_lengkap ORDER BY s.nama_lengkap SEPARATOR ', ') as nama_siswa,
+                    DATE_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai_format,
+                    DATE_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai_format,
+                    sp.nama_pelajaran
                 FROM siswa_pelajaran sp 
-                JOIN siswa s ON sp.siswa_id = s.id
-                JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                LEFT JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id AND jb.status = 'aktif'
+                INNER JOIN siswa s ON sp.siswa_id = s.id
+                INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                INNER JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id
+                INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
                 WHERE sp.guru_id = ? 
                 AND sp.status = 'aktif'
                 AND ps.status = 'aktif'
-                AND jb.id IS NOT NULL
-                GROUP BY jb.hari
-                ORDER BY FIELD(jb.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu')";
+                AND jb.status = 'aktif'
+                AND smg.guru_id = ?
+                GROUP BY smg.hari, smg.jam_mulai, smg.jam_selesai, sp.nama_pelajaran
+                ORDER BY FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
+                         smg.jam_mulai";
+        
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("i", $guru_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $jadwal_per_hari = [];
-        if ($result && $result->num_rows > 0) {
-            while ($row = $result->fetch_assoc()) {
-                $jadwal_per_hari[] = $row;
+        if ($stmt) {
+            $stmt->bind_param("ii", $guru_id, $guru_id);
+            if ($stmt->execute()) {
+                $result = $stmt->get_result();
+                if ($result) {
+                    while ($row = $result->fetch_assoc()) {
+                        $jadwal_per_hari[] = $row;
+                    }
+                }
             }
+            $stmt->close();
         }
-        $stmt->close();
 
-        // TOTAL PENILAIAN YANG DIBUAT GURU INI
+        // 4. TOTAL PENILAIAN
         $sql = "SELECT COUNT(*) as total FROM penilaian_siswa WHERE guru_id = ?";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("i", $guru_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $statistics['total_penilaian'] = $result && $result->num_rows > 0 ? $result->fetch_assoc()['total'] ?? 0 : 0;
-        $stmt->close();
+        if ($stmt) {
+            $stmt->bind_param("i", $guru_id);
+            if ($stmt->execute()) {
+                $result = $stmt->get_result();
+                if ($result && $row = $result->fetch_assoc()) {
+                    $statistics['total_penilaian'] = (int)$row['total'];
+                }
+            }
+            $stmt->close();
+        }
 
-        // PENILAIAN BULAN INI
+        // 5. PENILAIAN BULAN INI
         $current_month = date('Y-m');
         $sql = "SELECT COUNT(*) as total FROM penilaian_siswa 
                 WHERE guru_id = ? AND DATE_FORMAT(tanggal_penilaian, '%Y-%m') = ?";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("is", $guru_id, $current_month);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $statistics['penilaian_bulan_ini'] = $result && $result->num_rows > 0 ? $result->fetch_assoc()['total'] ?? 0 : 0;
-        $stmt->close();
+        if ($stmt) {
+            $stmt->bind_param("is", $guru_id, $current_month);
+            if ($stmt->execute()) {
+                $result = $stmt->get_result();
+                if ($result && $row = $result->fetch_assoc()) {
+                    $statistics['penilaian_bulan_ini'] = (int)$row['total'];
+                }
+            }
+            $stmt->close();
+        }
 
-        // RATA-RATA NILAI YANG DIBERIKAN
-        $sql = "SELECT AVG(total_score) as rata_nilai FROM penilaian_siswa WHERE guru_id = ?";
+        // 6. RATA-RATA NILAI
+        $sql = "SELECT COALESCE(AVG(total_score), 0) as rata_nilai 
+                FROM penilaian_siswa 
+                WHERE guru_id = ?";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("i", $guru_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $rata_nilai = $result && $result->num_rows > 0 ? $result->fetch_assoc()['rata_nilai'] ?? 0 : 0;
-        $statistics['rata_nilai'] = number_format($rata_nilai, 1);
-        $stmt->close();
+        if ($stmt) {
+            $stmt->bind_param("i", $guru_id);
+            if ($stmt->execute()) {
+                $result = $stmt->get_result();
+                if ($result && $row = $result->fetch_assoc()) {
+                    $statistics['rata_nilai'] = number_format((float)$row['rata_nilai'], 1);
+                }
+            }
+            $stmt->close();
+        }
 
-        // JUMLAH PELAJARAN YANG DIAMPU
+        // 7. JUMLAH PELAJARAN YANG DIAMPU
         $sql = "SELECT COUNT(DISTINCT id) as total FROM siswa_pelajaran 
                 WHERE guru_id = ? AND status = 'aktif'";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("i", $guru_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $statistics['total_pelajaran'] = $result && $result->num_rows > 0 ? $result->fetch_assoc()['total'] ?? 0 : 0;
-        $stmt->close();
+        if ($stmt) {
+            $stmt->bind_param("i", $guru_id);
+            if ($stmt->execute()) {
+                $result = $stmt->get_result();
+                if ($result && $row = $result->fetch_assoc()) {
+                    $statistics['total_pelajaran'] = (int)$row['total'];
+                }
+            }
+            $stmt->close();
+        }
 
-        // SISWA TERBAIK YANG DINILAI OLEH GURU INI
-        $sql = "SELECT s.nama_lengkap, ps.total_score 
+        // 8. SISWA TERBAIK
+        $sql = "SELECT s.nama_lengkap, ps.total_score, sp.nama_pelajaran
                 FROM penilaian_siswa ps 
-                JOIN siswa s ON ps.siswa_id = s.id 
+                INNER JOIN siswa s ON ps.siswa_id = s.id 
+                LEFT JOIN siswa_pelajaran sp ON ps.siswa_pelajaran_id = sp.id
                 WHERE ps.guru_id = ? 
                 ORDER BY ps.total_score DESC 
                 LIMIT 1";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("i", $guru_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $statistics['siswa_terbaik'] = $result && $result->num_rows > 0 ? 
-            $result->fetch_assoc() : ['nama_lengkap' => '-', 'total_score' => 0];
-        $stmt->close();
+        if ($stmt) {
+            $stmt->bind_param("i", $guru_id);
+            if ($stmt->execute()) {
+                $result = $stmt->get_result();
+                if ($result && $row = $result->fetch_assoc()) {
+                    $statistics['siswa_terbaik'] = [
+                        'nama_lengkap' => $row['nama_lengkap'] ?? '-',
+                        'total_score' => (int)($row['total_score'] ?? 0),
+                        'nama_pelajaran' => $row['nama_pelajaran'] ?? '-'
+                    ];
+                }
+            }
+            $stmt->close();
+        }
 
-        // AMBIL DATA TERBARU
-        // Penilaian terbaru
-        $sql = "SELECT ps.*, s.nama_lengkap as nama_siswa, s.kelas,
-                       sp.nama_pelajaran
+        // 9. PENILAIAN TERBARU
+        $sql = "SELECT ps.*, s.nama_lengkap as nama_siswa, s.kelas, sp.nama_pelajaran
                 FROM penilaian_siswa ps
-                JOIN siswa s ON ps.siswa_id = s.id
+                INNER JOIN siswa s ON ps.siswa_id = s.id
                 LEFT JOIN siswa_pelajaran sp ON ps.siswa_pelajaran_id = sp.id
                 WHERE ps.guru_id = ?
                 ORDER BY ps.tanggal_penilaian DESC 
@@ -172,21 +241,22 @@ try {
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("i", $guru_id);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            if ($result && $result->num_rows > 0) {
-                while ($row = $result->fetch_assoc()) {
-                    $penilaian_terbaru[] = $row;
+            if ($stmt->execute()) {
+                $result = $stmt->get_result();
+                if ($result) {
+                    while ($row = $result->fetch_assoc()) {
+                        $penilaian_terbaru[] = $row;
+                    }
                 }
             }
             $stmt->close();
         }
 
-        // SISWA YANG BELUM DINILAI BULAN INI
+        // 10. SISWA YANG BELUM DINILAI BULAN INI
         $sql = "SELECT DISTINCT sp.siswa_id as id, s.nama_lengkap, s.kelas, sp.nama_pelajaran
                 FROM siswa_pelajaran sp
-                JOIN siswa s ON sp.siswa_id = s.id
-                JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                INNER JOIN siswa s ON sp.siswa_id = s.id
+                INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
                 WHERE sp.guru_id = ? 
                 AND sp.status = 'aktif'
                 AND ps.status = 'aktif'
@@ -203,44 +273,21 @@ try {
         if ($stmt) {
             $current_month = date('Y-m');
             $stmt->bind_param("is", $guru_id, $current_month);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            if ($result && $result->num_rows > 0) {
-                while ($row = $result->fetch_assoc()) {
-                    $siswa_belum_dinilai[] = $row;
+            if ($stmt->execute()) {
+                $result = $stmt->get_result();
+                if ($result) {
+                    while ($row = $result->fetch_assoc()) {
+                        $siswa_belum_dinilai[] = $row;
+                    }
                 }
             }
             $stmt->close();
         }
-    } else {
-        // Jika tidak ada guru_id, set default values
-        $statistics = [
-            'total_siswa' => 0,
-            'total_siswa_jadwal' => 0,
-            'total_penilaian' => 0,
-            'penilaian_bulan_ini' => 0,
-            'rata_nilai' => '0.0',
-            'total_pelajaran' => 0,
-            'siswa_terbaik' => ['nama_lengkap' => '-', 'total_score' => 0]
-        ];
-        $jadwal_per_hari = [];
     }
 
 } catch (Exception $e) {
     error_log("Error in dashboardGuru.php: " . $e->getMessage());
-    // Set default values
-    $statistics = [
-        'total_siswa' => 0,
-        'total_siswa_jadwal' => 0,
-        'total_penilaian' => 0,
-        'penilaian_bulan_ini' => 0,
-        'rata_nilai' => '0.0',
-        'total_pelajaran' => 0,
-        'siswa_terbaik' => ['nama_lengkap' => '-', 'total_score' => 0]
-    ];
-    $penilaian_terbaru = [];
-    $siswa_belum_dinilai = [];
-    $jadwal_per_hari = [];
+    // Tetap gunakan default values yang sudah ditetapkan
 }
 ?>
 
@@ -263,7 +310,7 @@ try {
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
         }
         
-         /* Dropdown styles */
+        /* Dropdown styles */
         .dropdown-submenu {
             display: none;
             max-height: 500px;
@@ -365,11 +412,14 @@ try {
         <div class="p-4 bg-blue-900">
             <div class="flex items-center">
                 <div class="w-10 h-10 bg-white text-blue-800 rounded-full flex items-center justify-center">
-                    <i class="fas fa-user"></i>
+                    <i class="fas fa-chalkboard-teacher"></i>
                 </div>
                 <div class="ml-3">
                     <p class="font-medium"><?php echo htmlspecialchars($full_name); ?></p>
                     <p class="text-sm text-blue-300">Guru</p>
+                    <?php if (!empty($guru_detail['bidang_keahlian'])): ?>
+                        <p class="text-xs text-blue-200"><?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?></p>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -395,7 +445,7 @@ try {
                     <p class="text-xs text-blue-300">Guru</p>
                 </div>
                 <div class="w-8 h-8 bg-white text-blue-800 rounded-full flex items-center justify-center">
-                    <i class="fas fa-user"></i>
+                    <i class="fas fa-chalkboard-teacher"></i>
                 </div>
             </div>
         </div>
@@ -418,11 +468,14 @@ try {
             <div class="p-4 bg-blue-800">
                 <div class="flex items-center">
                     <div class="w-12 h-12 bg-white text-blue-800 rounded-full flex items-center justify-center">
-                        <i class="fas fa-user text-lg"></i>
+                        <i class="fas fa-chalkboard-teacher text-lg"></i>
                     </div>
                     <div class="ml-3">
                         <p class="font-medium"><?php echo htmlspecialchars($full_name); ?></p>
                         <p class="text-sm text-blue-300">Guru</p>
+                        <?php if (!empty($guru_detail['bidang_keahlian'])): ?>
+                            <p class="text-xs text-blue-200"><?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?></p>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -443,6 +496,11 @@ try {
                 <div>
                     <h1 class="text-2xl font-bold text-gray-800">Dashboard Guru</h1>
                     <p class="text-gray-600">Selamat datang, <?php echo htmlspecialchars($full_name); ?>!</p>
+                    <?php if (!empty($guru_detail['tanggal_bergabung'])): ?>
+                        <p class="text-sm text-gray-500 mt-1">
+                            Bergabung sejak: <?php echo date('d F Y', strtotime($guru_detail['tanggal_bergabung'])); ?>
+                        </p>
+                    <?php endif; ?>
                 </div>
                 <div class="mt-2 md:mt-0 text-right">
                     <span class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-800">
@@ -456,10 +514,23 @@ try {
         <!-- Content -->
         <div class="container mx-auto p-4 md:p-6">
             <!-- Stats Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                <!-- Total Siswa dengan Jadwal Aktif -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <!-- Total Siswa Diajar -->
+                <div class="stat-card bg-white rounded-xl p-5 shadow">
+                    <div class="flex items-center md:mt-5">
+                        <div class="p-3 bg-blue-100 rounded-lg mr-3 md:mr-4">
+                            <i class="fas fa-users text-blue-600 text-xl md:text-2xl"></i>
+                        </div>
+                        <div>
+                            <p class="text-gray-600 text-sm md:text-base">Total Siswa Diajar</p>
+                            <h3 class="text-2xl font-bold text-gray-800"><?php echo number_format($statistics['total_siswa']); ?></h3>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Siswa dengan Jadwal Aktif -->
                 <div class="stat-card bg-white p-5 rounded-xl shadow border-2 border-green-300">
-                    <div class="flex items-center">
+                    <div class="flex items-center ">
                         <div class="p-3 bg-green-100 rounded-lg mr-3 md:mr-4">
                             <i class="fas fa-calendar-check text-green-600 text-xl md:text-2xl"></i>
                         </div>
@@ -473,7 +544,7 @@ try {
 
                 <!-- Total Penilaian -->
                 <div class="stat-card bg-white p-5 rounded-xl shadow">
-                    <div class="flex items-center">
+                    <div class="flex items-center md:mt-5 ">
                         <div class="p-3 bg-green-100 rounded-lg mr-3 md:mr-4">
                             <i class="fas fa-clipboard-check text-green-600 text-xl md:text-2xl"></i>
                         </div>
@@ -483,55 +554,10 @@ try {
                         </div>
                     </div>
                 </div>
-                
-                 <!-- Rata-rata Nilai -->
-                <!--<div class="bg-white overflow-hidden shadow rounded-lg p-5">-->
-                <!--    <div class="flex items-center">-->
-                <!--        <div class="flex-shrink-0">-->
-                <!--            <div class="h-10 w-10 rounded-md bg-blue-100 flex items-center justify-center">-->
-                <!--                <i class="fas fa-chart-line text-blue-600"></i>-->
-                <!--            </div>-->
-                <!--        </div>-->
-                <!--        <div class="ml-4">-->
-                <!--            <p class="text-sm font-medium text-gray-900">-->
-                <!--                Rata-rata Nilai-->
-                <!--            </p>-->
-                <!--            <p class="text-2xl font-semibold text-gray-900">-->
-                <!--                <?php echo $statistics['rata_nilai']; ?>/50-->
-                <!--            </p>-->
-                <!--        </div>-->
-                <!--    </div>-->
-                <!--</div>-->
-
-                <!-- Total Siswa Diajar -->
-                <div class="stat-card bg-white rounded-xl p-5 shadow">
-                    <div class="flex items-center">
-                        <div class="p-3 bg-blue-100 rounded-lg mr-3 md:mr-4">
-                            <i class="fas fa-users text-blue-600 text-xl md:text-2xl"></i>
-                        </div>
-                        <div>
-                            <p class="text-gray-600 text-sm md:text-base">Total Siswa Diajar</p>
-                            <h3 class="text-2xl font-bold text-gray-800"><?php echo number_format($statistics['total_siswa']); ?></h3>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Total Pelajaran Diampu -->
-                <!--<div class="stat-card bg-white rounded-xl p-5 shadow">-->
-                <!--    <div class="flex items-center">-->
-                <!--        <div class="p-3 bg-purple-100 rounded-lg mr-3 md:mr-4">-->
-                <!--            <i class="fas fa-book text-purple-600 text-xl md:text-2xl"></i>-->
-                <!--        </div>-->
-                <!--        <div>-->
-                <!--            <p class="text-gray-600 text-sm md:text-base">Pelajaran Diampu</p>-->
-                <!--            <h3 class="text-2xl font-bold text-gray-800"><?php echo number_format($statistics['total_pelajaran']); ?></h3>-->
-                <!--        </div>-->
-                <!--    </div>-->
-                <!--</div>-->
 
                 <!-- Penilaian Bulan Ini -->
                 <div class="stat-card bg-white rounded-xl p-5 shadow">
-                    <div class="flex items-center">
+                    <div class="flex items-center  md:mt-3">
                         <div class="p-3 bg-yellow-100 rounded-lg mr-3 md:mr-4">
                             <i class="fas fa-calendar-day text-yellow-600 text-xl md:text-2xl"></i>
                         </div>
@@ -544,35 +570,9 @@ try {
                 </div>
             </div>
 
-            <!-- Jadwal Per Hari -->
-            <!--<?php if (!empty($jadwal_per_hari)): ?>-->
-            <!--<div class="mb-8">-->
-            <!--    <div class="bg-white shadow rounded-lg p-6">-->
-            <!--        <h3 class="text-lg font-medium leading-6 text-gray-900 mb-4">-->
-            <!--            <i class="fas fa-calendar-alt mr-2"></i> Jadwal Mengajar per Hari-->
-            <!--        </h3>-->
-            <!--        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">-->
-            <!--            <?php foreach ($jadwal_per_hari as $jadwal): ?>-->
-            <!--                <div class="bg-blue-50 p-4 rounded-lg">-->
-            <!--                    <div class="flex justify-between items-center mb-2">-->
-            <!--                        <h4 class="font-semibold text-blue-800"><?php echo htmlspecialchars($jadwal['hari']); ?></h4>-->
-            <!--                        <span class="bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded">-->
-            <!--                            <?php echo $jadwal['jumlah_siswa']; ?> siswa-->
-            <!--                        </span>-->
-            <!--                    </div>-->
-            <!--                    <p class="text-sm text-gray-600 truncate" title="<?php echo htmlspecialchars($jadwal['nama_siswa']); ?>">-->
-            <!--                        <i class="fas fa-user-graduate mr-1"></i>-->
-            <!--                        <?php echo htmlspecialchars($jadwal['nama_siswa']); ?>-->
-            <!--                    </p>-->
-            <!--                </div>-->
-            <!--            <?php endforeach; ?>-->
-            <!--        </div>-->
-            <!--    </div>-->
-            <!--</div>-->
-            <!--<?php endif; ?>-->
 
             <!-- Recent Data -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+            <div class="grid grid-cols-1 gap-8 mb-8">
                 <!-- Penilaian Terbaru -->
                 <div class="bg-white shadow rounded-lg">
                     <div class="px-4 py-5 sm:px-6 border-b border-gray-200">
@@ -585,7 +585,7 @@ try {
                             <ul class="divide-y divide-gray-200">
                                 <?php if (count($penilaian_terbaru) > 0): ?>
                                     <?php foreach ($penilaian_terbaru as $penilaian): ?>
-                                        <li class="py-3">
+                                        <li class="py-3 hover:bg-gray-50">
                                             <div class="flex items-center space-x-4">
                                                 <div class="flex-shrink-0">
                                                     <div class="h-10 w-10 rounded-full 
@@ -637,58 +637,6 @@ try {
                     </div>
                 </div>
 
-                <!-- Siswa Belum Dinilai -->
-                <div class="bg-white shadow rounded-lg">
-                    <div class="px-4 py-5 sm:px-6 border-b border-gray-200">
-                        <h3 class="text-lg font-medium leading-6 text-gray-900">
-                            <i class="fas fa-user-clock mr-2"></i> Perlu Dinilai (<?php echo date('F'); ?>)
-                        </h3>
-                    </div>
-                    <div class="px-4 py-2 sm:p-6">
-                        <div class="flow-root">
-                            <ul class="divide-y divide-gray-200">
-                                <?php if (count($siswa_belum_dinilai) > 0): ?>
-                                    <?php foreach ($siswa_belum_dinilai as $siswa): ?>
-                                        <li class="py-3">
-                                            <div class="flex items-center space-x-4">
-                                                <div class="flex-shrink-0">
-                                                    <div class="h-10 w-10 rounded-full bg-yellow-100 flex items-center justify-center">
-                                                        <i class="fas fa-exclamation text-yellow-600"></i>
-                                                    </div>
-                                                </div>
-                                                <div class="flex-1 min-w-0">
-                                                    <p class="text-sm font-medium text-gray-900 truncate">
-                                                        <?php echo htmlspecialchars($siswa['nama_lengkap'] ?? 'N/A'); ?>
-                                                    </p>
-                                                    <p class="text-sm text-gray-500 truncate">
-                                                        <?php echo htmlspecialchars($siswa['nama_pelajaran'] ?? 'N/A'); ?> | 
-                                                        Kelas: <?php echo htmlspecialchars($siswa['kelas'] ?? '-'); ?>
-                                                    </p>
-                                                </div>
-                                                <div class="text-right">
-                                                    <a href="inputNilai.php?siswa_id=<?php echo $siswa['id']; ?>" 
-                                                       class="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700">
-                                                        <i class="fas fa-plus mr-1"></i> Nilai
-                                                    </a>
-                                                </div>
-                                            </div>
-                                        </li>
-                                    <?php endforeach; ?>
-                                <?php else: ?>
-                                    <li class="py-4 text-center text-gray-500">
-                                        <i class="fas fa-check-circle text-2xl mb-2"></i>
-                                        <p>Semua siswa sudah dinilai bulan ini</p>
-                                    </li>
-                                <?php endif; ?>
-                            </ul>
-                        </div>
-                        <div class="mt-4 text-center">
-                            <a href="dataSiswa.php" class="inline-flex items-center text-sm text-blue-600 hover:text-blue-900">
-                                <i class="fas fa-users mr-1"></i> Lihat semua siswa
-                            </a>
-                        </div>
-                    </div>
-                </div>
             </div>
 
             <!-- Quick Actions -->
