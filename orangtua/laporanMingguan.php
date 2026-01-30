@@ -1091,8 +1091,8 @@ function getLaporanMingguan($conn, $orangtua_id, $params) {
                             <!-- Total Score -->
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4 mb-3 md:mb-4">
                                 <div class="bg-blue-50 p-2 md:p-3 rounded-lg border border-blue-200">
-                                    <div class="flex items-center md:mt-1 justify-between">
-                                        <span class="text-xs text-gray-600">Skor Total</span>
+                                    <div class="flex items-center md:mt-2 justify-between">
+                                        <span class="md:text-md text-xs md:mt-1 font-bold text-gray-600 ">Skor Total</span>
                                         <span class="text-sm md:text-lg font-bold text-blue-700">
                                             ${parseFloat(item.rata_total_score || 0).toFixed(isMobile ? 0 : 1)}/50
                                         </span>
@@ -1100,7 +1100,7 @@ function getLaporanMingguan($conn, $orangtua_id, $params) {
                                 </div>
                                 <div class="bg-green-50 p-2 md:p-3 rounded-lg border border-green-200">
                                     <div class="flex items-center justify-between">
-                                        <span class="text-xs text-gray-600">Persentase</span>
+                                        <span class="text-xs font-bold text-gray-600">Persentase</span>
                                         <span class="text-sm md:text-lg font-bold text-green-700">
                                             ${parseFloat(item.rata_persentase || 0).toFixed(1)}%
                                         </span>
