@@ -166,10 +166,10 @@ try {
         }
     }
 
-    // 4. Guru Aktif - JOIN VERSION
-    $guru_aktif = [];
+   // 4. Guru Aktif - SIMPLE VERSION
+$guru_aktif = [];
 
-    $sql = "SELECT 
+$sql = "SELECT 
         g.id,
         g.user_id,
         g.bidang_keahlian,
@@ -179,27 +179,41 @@ try {
         g.tanggal_bergabung,
         u.full_name,
         u.email,
-        COUNT(DISTINCT sp.siswa_id) as jumlah_siswa
+        0 as jumlah_siswa -- placeholder, kita update setelahnya
         FROM guru g
         INNER JOIN users u ON g.user_id = u.id
-        LEFT JOIN siswa_pelajaran sp ON g.id = sp.guru_id 
-            AND sp.status = 'aktif'
-        LEFT JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id 
-            AND ps.status = 'aktif'
         WHERE g.status = 'aktif'
-        GROUP BY g.id, g.user_id, g.bidang_keahlian, 
-                 g.pendidikan_terakhir, g.pengalaman_tahun, 
-                 g.status, g.tanggal_bergabung, 
-                 u.full_name, u.email
         ORDER BY u.full_name ASC 
         LIMIT 3";
 
-    $result = $conn->query($sql);
-    if ($result && $result->num_rows > 0) {
-        while ($row = $result->fetch_assoc()) {
-            $guru_aktif[] = $row;
+$result = $conn->query($sql);
+if ($result && $result->num_rows > 0) {
+    while ($row = $result->fetch_assoc()) {
+        // Hitung jumlah siswa untuk guru ini
+        $guru_id = $row['id'];
+        $count_sql = "SELECT COUNT(DISTINCT sp.siswa_id) as jumlah_siswa 
+                     FROM siswa_pelajaran sp
+                     INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                     WHERE sp.guru_id = ? 
+                     AND sp.status = 'aktif'
+                     AND ps.status = 'aktif'";
+        
+        $stmt = $conn->prepare($count_sql);
+        if ($stmt) {
+            $stmt->bind_param("i", $guru_id);
+            $stmt->execute();
+            $count_result = $stmt->get_result();
+            if ($count_result && $count_result->num_rows > 0) {
+                $count_row = $count_result->fetch_assoc();
+                $row['jumlah_siswa'] = $count_row['jumlah_siswa'];
+            }
+            $stmt->close();
         }
+        
+        $guru_aktif[] = $row;
     }
+}
+
     // 5. Pendaftaran Terbaru
     $pendaftaran_terbaru = [];
     $sql = "SELECT ps.*, s.nama_lengkap, s.kelas,
