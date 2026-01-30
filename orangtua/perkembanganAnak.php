@@ -36,13 +36,13 @@ try {
     error_log("Error fetching orangtua data: " . $e->getMessage());
 }
 
-// AMBIL DATA ANAK-ANAK (HANYA YANG AKTIF) - DIKOREKSI UNTUK RELASI MANY-TO-MANY
+// AMBIL DATA ANAK-ANAK (HANYA YANG AKTIF)
 $anak_data = [];
 $total_anak = 0;
 
 if ($orangtua_id > 0) {
     try {
-        // PERBAIKAN: Menggunakan tabel siswa_orangtua untuk relasi many-to-many
+        // PERBAIKAN: Query lebih sederhana untuk VPS
         $sql = "SELECT s.id, s.nama_lengkap, s.kelas, s.sekolah_asal, s.status
                 FROM siswa s 
                 INNER JOIN siswa_orangtua so ON s.id = so.siswa_id
@@ -62,13 +62,8 @@ if ($orangtua_id > 0) {
         }
     } catch (Exception $e) {
         error_log("Error fetching anak data: " . $e->getMessage());
-        echo "<!-- Debug: Orangtua ID: $orangtua_id -->";
-        echo "<!-- Debug: SQL Error: " . $e->getMessage() . " -->";
     }
 }
-
-// Debug: Tampilkan data anak yang ditemukan
-echo "<!-- Debug: Total anak ditemukan: $total_anak -->";
 
 // TENTUKAN ANAK YANG DIPILIH
 $selected_anak_id = isset($_GET['anak_id']) ? intval($_GET['anak_id']) : 0;
@@ -99,39 +94,91 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
         $stmt_anak->close();
     }
     
-    // 2. DATA TREND 6 BULAN TERAKHIR (dari penilaian_siswa)
-    $sql_trend = "SELECT 
-                    DATE_FORMAT(tanggal_penilaian, '%Y-%m') as bulan,
-                    DATE_FORMAT(tanggal_penilaian, '%M %Y') as bulan_format,
-                    COUNT(*) as jumlah_penilaian,
-                    AVG(total_score) as rata_skor,
-                    AVG(persentase) as rata_persen,
-                    MIN(total_score) as min_skor,
-                    MAX(total_score) as max_skor
-                  FROM penilaian_siswa 
-                  WHERE siswa_id = ? 
-                  GROUP BY DATE_FORMAT(tanggal_penilaian, '%Y-%m')
-                  ORDER BY bulan DESC 
-                  LIMIT 6";
+    // 2. DATA TREND 6 BULAN TERAKHIR - PERBAIKAN QUERY UNTUK VPS
+    // Ambil semua data dulu, lalu proses di PHP
+    $sql_trend_raw = "SELECT 
+                        tanggal_penilaian,
+                        total_score,
+                        persentase,
+                        willingness_learn,
+                        concentration,
+                        critical_thinking,
+                        independence,
+                        problem_solving
+                      FROM penilaian_siswa 
+                      WHERE siswa_id = ? 
+                      AND tanggal_penilaian >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+                      ORDER BY tanggal_penilaian DESC";
     
-    $stmt_trend = $conn->prepare($sql_trend);
+    $stmt_trend = $conn->prepare($sql_trend_raw);
     if ($stmt_trend) {
         $stmt_trend->bind_param("i", $selected_anak_id);
         $stmt_trend->execute();
         $result_trend = $stmt_trend->get_result();
+        
+        // Group data per bulan di PHP (lebih aman untuk VPS)
+        $raw_data_by_month = [];
         while ($row = $result_trend->fetch_assoc()) {
-            $trend_data[] = $row;
+            $bulan_key = date('Y-m', strtotime($row['tanggal_penilaian']));
+            $bulan_format = date('F Y', strtotime($row['tanggal_penilaian']));
+            
+            if (!isset($raw_data_by_month[$bulan_key])) {
+                $raw_data_by_month[$bulan_key] = [
+                    'bulan' => $bulan_key,
+                    'bulan_format' => $bulan_format,
+                    'scores' => [],
+                    'percentages' => [],
+                    'willingness' => [],
+                    'concentration' => [],
+                    'critical' => [],
+                    'independence' => [],
+                    'problem' => []
+                ];
+            }
+            
+            $raw_data_by_month[$bulan_key]['scores'][] = $row['total_score'];
+            $raw_data_by_month[$bulan_key]['percentages'][] = $row['persentase'];
+            $raw_data_by_month[$bulan_key]['willingness'][] = $row['willingness_learn'];
+            $raw_data_by_month[$bulan_key]['concentration'][] = $row['concentration'];
+            $raw_data_by_month[$bulan_key]['critical'][] = $row['critical_thinking'];
+            $raw_data_by_month[$bulan_key]['independence'][] = $row['independence'];
+            $raw_data_by_month[$bulan_key]['problem'][] = $row['problem_solving'];
         }
         $stmt_trend->close();
+        
+        // Hitung rata-rata per bulan
+        foreach ($raw_data_by_month as $month_key => $month_data) {
+            $trend_data[] = [
+                'bulan' => $month_data['bulan'],
+                'bulan_format' => $month_data['bulan_format'],
+                'jumlah_penilaian' => count($month_data['scores']),
+                'rata_skor' => count($month_data['scores']) > 0 ? 
+                    array_sum($month_data['scores']) / count($month_data['scores']) : 0,
+                'rata_persen' => count($month_data['percentages']) > 0 ? 
+                    array_sum($month_data['percentages']) / count($month_data['percentages']) : 0,
+                'min_skor' => count($month_data['scores']) > 0 ? 
+                    min($month_data['scores']) : 0,
+                'max_skor' => count($month_data['scores']) > 0 ? 
+                    max($month_data['scores']) : 0
+            ];
+        }
+        
+        // Urutkan dari terbaru ke terlama (DESC)
+        usort($trend_data, function($a, $b) {
+            return strtotime($b['bulan']) - strtotime($a['bulan']);
+        });
+        
+        // Batasi 6 bulan terakhir
+        $trend_data = array_slice($trend_data, 0, 6);
     }
     
-    // 3. DATA RATA-RATA INDIKATOR (UNTUK RADAR CHART) - 5 INDIKATOR
+    // 3. DATA RATA-RATA INDIKATOR (UNTUK RADAR CHART) - QUERY LEBIH SEDERHANA
     $sql_radar = "SELECT 
-                    AVG(willingness_learn) as w_learn,
-                    AVG(concentration) as concentration,
-                    AVG(critical_thinking) as c_thinking,
-                    AVG(independence) as independence,
-                    AVG(problem_solving) as p_solving
+                    AVG(COALESCE(willingness_learn, 0)) as w_learn,
+                    AVG(COALESCE(concentration, 0)) as concentration,
+                    AVG(COALESCE(critical_thinking, 0)) as c_thinking,
+                    AVG(COALESCE(independence, 0)) as independence,
+                    AVG(COALESCE(problem_solving, 0)) as p_solving
                   FROM penilaian_siswa 
                   WHERE siswa_id = ?";
     
@@ -141,7 +188,14 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
         $stmt_radar->execute();
         $result_radar = $stmt_radar->get_result();
         if ($row_radar = $result_radar->fetch_assoc()) {
-            $radar_data = $row_radar;
+            // Pastikan tidak ada null values
+            $radar_data = [
+                'w_learn' => floatval($row_radar['w_learn'] ?? 0),
+                'concentration' => floatval($row_radar['concentration'] ?? 0),
+                'c_thinking' => floatval($row_radar['c_thinking'] ?? 0),
+                'independence' => floatval($row_radar['independence'] ?? 0),
+                'p_solving' => floatval($row_radar['p_solving'] ?? 0)
+            ];
         }
         $stmt_radar->close();
     }
@@ -156,10 +210,11 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
             $last_month = end($trend_data_reverse);
             
             $score_change = $last_month['rata_skor'] - $first_month['rata_skor'];
-            $percent_change = ($score_change / max(1, $first_month['rata_skor'])) * 100;
+            $percent_change = $first_month['rata_skor'] > 0 ? 
+                ($score_change / $first_month['rata_skor']) * 100 : 0;
             
-            // Tentukan trend (sesuai dengan maksimal total_score = 50)
-            if ($score_change > 3) { // 3 poin untuk max 50 (6% improvement)
+            // Tentukan trend
+            if ($score_change > 3) {
                 $trend_icon = '↗';
                 $trend_text = 'Meningkat signifikan';
                 $trend_color = 'text-green-600';
@@ -186,7 +241,7 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
             ];
         }
         
-        // Cari area terkuat dan terlemah dari radar data (5 indikator)
+        // Cari area terkuat dan terlemah dari radar data
         if (!empty($radar_data)) {
             $indicators = [
                 'w_learn' => 'Kemauan Belajar',
@@ -196,21 +251,8 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
                 'p_solving' => 'Pemecahan Masalah'
             ];
             
-            // Konversi nilai NULL menjadi 0
-            foreach ($radar_data as $key => $value) {
-                if ($value === null) {
-                    $radar_data[$key] = 0;
-                }
-            }
-            
-            // Cari 2 terbaik dan 2 terlemah (karena ada 5 indikator)
-            $sorted_data = [];
-            foreach ($radar_data as $key => $value) {
-                if (in_array($key, array_keys($indicators))) {
-                    $sorted_data[$key] = $value;
-                }
-            }
-            
+            // Cari 2 terbaik dan 2 terlemah
+            $sorted_data = $radar_data;
             arsort($sorted_data); // Urut dari tinggi ke rendah
             $top_2 = array_slice($sorted_data, 0, 2, true);
             $bottom_2 = array_slice($sorted_data, -2, 2, true);
@@ -220,40 +262,42 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
             
             foreach ($top_2 as $key => $value) {
                 $insights['strengths'][] = [
-                    'name' => $indicators[$key],
+                    'name' => $indicators[$key] ?? $key,
                     'score' => round($value, 1)
                 ];
             }
             
             foreach ($bottom_2 as $key => $value) {
                 $insights['weaknesses'][] = [
-                    'name' => $indicators[$key],
+                    'name' => $indicators[$key] ?? $key,
                     'score' => round($value, 1)
                 ];
             }
         }
         
-        // Prediksi bulan depan berdasarkan trend
+        // Prediksi bulan depan
         if (count($trend_data) >= 3) {
             $recent_scores = array_column($trend_data, 'rata_skor');
+            $recent_scores = array_slice($recent_scores, 0, 3); // Ambil 3 terbaru
+            
             if (count($recent_scores) >= 3) {
                 $avg_growth = ($recent_scores[0] - $recent_scores[2]) / 2;
                 $predicted_score = $recent_scores[0] + $avg_growth;
                 
                 // Pastikan skor dalam rentang 0-50
-                if ($predicted_score > 50) $predicted_score = 50;
-                if ($predicted_score < 0) $predicted_score = 0;
+                $predicted_score = max(0, min(50, $predicted_score));
                 
                 $insights['prediction'] = [
                     'score' => round($predicted_score, 1),
-                    'confidence' => abs($avg_growth) > 2 ? 'Tinggi' : (abs($avg_growth) > 1 ? 'Sedang' : 'Rendah')
+                    'confidence' => abs($avg_growth) > 2 ? 'Tinggi' : 
+                                    (abs($avg_growth) > 1 ? 'Sedang' : 'Rendah')
                 ];
             }
         }
     }
 }
 
-// Data untuk chart
+// Data untuk chart - PERBAIKAN: Pastikan data tersedia
 $chart_labels = [];
 $chart_scores = [];
 $chart_percentages = [];
@@ -267,21 +311,15 @@ if (!empty($trend_data)) {
     }
 }
 
-// Data untuk radar chart (5 indikator)
-$radar_labels = [];
-$radar_values = [];
-if (!empty($radar_data)) {
-    $radar_labels = ['Kemauan Belajar', 'Konsentrasi', 'Berpikir Kritis', 'Kemandirian', 'Pemecahan Masalah'];
-    
-    // Pastikan nilai tidak NULL
-    $radar_values = [
-        round($radar_data['w_learn'] ?? 0, 1),
-        round($radar_data['concentration'] ?? 0, 1),
-        round($radar_data['c_thinking'] ?? 0, 1),
-        round($radar_data['independence'] ?? 0, 1),
-        round($radar_data['p_solving'] ?? 0, 1)
-    ];
-}
+// Data untuk radar chart
+$radar_labels = ['Kemauan Belajar', 'Konsentrasi', 'Berpikir Kritis', 'Kemandirian', 'Pemecahan Masalah'];
+$radar_values = [
+    round($radar_data['w_learn'] ?? 0, 1),
+    round($radar_data['concentration'] ?? 0, 1),
+    round($radar_data['c_thinking'] ?? 0, 1),
+    round($radar_data['independence'] ?? 0, 1),
+    round($radar_data['p_solving'] ?? 0, 1)
+];
 ?>
 
 <!DOCTYPE html>
