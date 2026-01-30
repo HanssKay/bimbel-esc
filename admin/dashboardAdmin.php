@@ -214,18 +214,20 @@ if ($result_guru && $result_guru->num_rows > 0) {
 }
 
 
-    // 5. Pendaftaran Terbaru
-    $pendaftaran_terbaru = [];
-    $sql = "SELECT ps.*, s.nama_lengkap, s.kelas,
-            GROUP_CONCAT(DISTINCT sp.nama_pelajaran SEPARATOR ', ') as mata_pelajaran,
-            u.full_name as nama_guru
-            FROM pendaftaran_siswa ps
-            JOIN siswa s ON ps.siswa_id = s.id
-            LEFT JOIN siswa_pelajaran sp ON ps.id = sp.pendaftaran_id AND sp.status = 'aktif'
-            LEFT JOIN guru g ON sp.guru_id = g.id
-            LEFT JOIN users u ON g.user_id = u.id
-            GROUP BY ps.id
-            ORDER BY ps.created_at DESC LIMIT 5";
+ // 5. Pendaftaran Terbaru - FIXED VERSION
+$pendaftaran_terbaru = [];
+$sql = "SELECT ps.*, s.nama_lengkap, s.kelas,
+        GROUP_CONCAT(DISTINCT sp.nama_pelajaran SEPARATOR ', ') as mata_pelajaran,
+        u.full_name as nama_guru
+        FROM pendaftaran_siswa ps
+        JOIN siswa s ON ps.siswa_id = s.id
+        LEFT JOIN siswa_pelajaran sp ON ps.id = sp.pendaftaran_id AND sp.status = 'aktif'
+        LEFT JOIN guru g ON sp.guru_id = g.id
+        LEFT JOIN users u ON g.user_id = u.id
+        GROUP BY ps.id, ps.siswa_id, ps.jenis_kelas, ps.tingkat, ps.tahun_ajaran, 
+                 ps.status, ps.tanggal_mulai, ps.tanggal_selesai, ps.catatan,
+                 ps.created_at, ps.updated_at, s.nama_lengkap, s.kelas, u.full_name
+        ORDER BY ps.created_at DESC LIMIT 5";
 
     $result = $conn->query($sql);
     if ($result && $result->num_rows > 0) {
