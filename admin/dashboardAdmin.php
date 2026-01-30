@@ -166,7 +166,7 @@ try {
         }
     }
 
-// 4. Guru Aktif - FIXED VERSION
+// 4. Guru Aktif - COMPATIBLE VERSION
 $guru_aktif = [];
 
 $sql = "SELECT 
@@ -199,6 +199,31 @@ $result = $conn->query($sql);
 if ($result && $result->num_rows > 0) {
     while ($row = $result->fetch_assoc()) {
         $guru_aktif[] = $row;
+    }
+} else {
+    // Fallback query tanpa subquery jika masih error
+    $sql_simple = "SELECT 
+        g.id,
+        g.user_id,
+        g.bidang_keahlian,
+        g.pendidikan_terakhir,
+        g.pengalaman_tahun,
+        g.status,
+        g.tanggal_bergabung,
+        u.full_name,
+        u.email
+        FROM guru g
+        INNER JOIN users u ON g.user_id = u.id
+        WHERE g.status = 'aktif'
+        ORDER BY u.full_name ASC 
+        LIMIT 3";
+    
+    $result_simple = $conn->query($sql_simple);
+    if ($result_simple && $result_simple->num_rows > 0) {
+        while ($row = $result_simple->fetch_assoc()) {
+            $row['jumlah_siswa'] = 0; // Default value
+            $guru_aktif[] = $row;
+        }
     }
 }
 
