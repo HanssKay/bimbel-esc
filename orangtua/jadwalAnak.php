@@ -847,7 +847,6 @@ function hitungDurasi($jam_mulai, $jam_selesai) {
                                 <tr>
                                     <th>No</th>
                                     <th>Nama Anak</th>
-                                    <th>Kelas Sekolah</th>
                                     <th>Tingkat Bimbel</th>
                                     <th>Jenis Kelas</th>
                                     <th>Mata Pelajaran</th>
@@ -855,7 +854,6 @@ function hitungDurasi($jam_mulai, $jam_selesai) {
                                     <th>Jam</th>
                                     <th>Durasi</th>
                                     <th>Guru</th>
-                                    <th>Kapasitas</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -869,10 +867,7 @@ function hitungDurasi($jam_mulai, $jam_selesai) {
                                     <td>
                                         <div class="font-medium text-gray-900"><?php echo htmlspecialchars($jadwal['nama_lengkap']); ?></div>
                                     </td>
-                                    <td>
-                                        <span class="badge badge-primary"><?php echo $jadwal['kelas_sekolah']; ?></span>
-                                    </td>
-                                    <td>
+                                    <td class="text-center">
                                         <?php 
                                         $badge_class = '';
                                         switch($jadwal['tingkat_bimbel']) {
@@ -914,14 +909,6 @@ function hitungDurasi($jam_mulai, $jam_selesai) {
                                         <?php else: ?>
                                         <div class="text-gray-500 italic">Belum ditetapkan</div>
                                         <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <div class="text-sm">
-                                            <span class="font-medium"><?php echo $jadwal['kapasitas_terisi']; ?>/<?php echo $jadwal['kapasitas_maks']; ?></span>
-                                            <div class="capacity-bar">
-                                                <div class="capacity-fill" style="width: <?php echo min($kapasitas_persen, 100); ?>%"></div>
-                                            </div>
-                                        </div>
                                     </td>
                                 </tr>
                                 <?php endforeach; ?>
