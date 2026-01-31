@@ -101,17 +101,17 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
             $stmt->bind_param("ii", $siswa_id, $guru_id);
             $stmt->execute();
             $result = $stmt->get_result();
-            
+
             if ($row = $result->fetch_assoc()) {
                 $siswa_detail = $row;
-                
+
                 // QUERY 2: Hitung total program
                 $sql_total_program = "SELECT COUNT(DISTINCT sp.id) as total_program
                                      FROM siswa_pelajaran sp
                                      WHERE sp.siswa_id = ?
                                      AND sp.guru_id = ?
                                      AND sp.status = 'aktif'";
-                
+
                 $stmt2 = $conn->prepare($sql_total_program);
                 $stmt2->bind_param("ii", $siswa_id, $guru_id);
                 $stmt2->execute();
@@ -120,7 +120,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                     $siswa_detail['total_program'] = $row2['total_program'];
                 }
                 $stmt2->close();
-                
+
                 // QUERY 3: Hitung total jadwal
                 $sql_total_jadwal = "SELECT COUNT(DISTINCT jb.id) as total_jadwal
                                     FROM jadwal_belajar jb
@@ -129,7 +129,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                                     AND sp.guru_id = ?
                                     AND jb.status = 'aktif'
                                     AND sp.status = 'aktif'";
-                
+
                 $stmt3 = $conn->prepare($sql_total_jadwal);
                 $stmt3->bind_param("ii", $siswa_id, $guru_id);
                 $stmt3->execute();
@@ -138,7 +138,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                     $siswa_detail['total_jadwal'] = $row3['total_jadwal'];
                 }
                 $stmt3->close();
-                
+
                 // QUERY 4: Ambil data orangtua (bisa lebih dari satu)
                 $sql_ortu = "SELECT 
                             o.id,
@@ -151,7 +151,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                         FROM siswa_orangtua so
                         INNER JOIN orangtua o ON so.orangtua_id = o.id
                         WHERE so.siswa_id = ?";
-                
+
                 $stmt4 = $conn->prepare($sql_ortu);
                 if ($stmt4 === false) {
                     error_log("Prepare orangtua failed: " . $conn->error);
@@ -166,25 +166,25 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                     $siswa_detail['orangtua'] = $orangtua_data;
                     $stmt4->close();
                 }
-                
+
                 // QUERY 5: Ambil saudara kandung (anak lain dari orangtua yang sama)
                 if (!empty($orangtua_data)) {
                     $orangtua_ids = array_column($orangtua_data, 'id');
                     $placeholders = implode(',', array_fill(0, count($orangtua_ids), '?'));
-                    
+
                     $sql_saudara = "SELECT DISTINCT s2.nama_lengkap
                                     FROM siswa s2
                                     INNER JOIN siswa_orangtua so2 ON s2.id = so2.siswa_id
                                     WHERE so2.orangtua_id IN ($placeholders)
                                     AND s2.id != ?
                                     ORDER BY s2.nama_lengkap";
-                    
+
                     $stmt5 = $conn->prepare($sql_saudara);
                     if ($stmt5) {
                         // Bind parameters
                         $bind_types = str_repeat('i', count($orangtua_ids)) . 'i';
                         $bind_params = array_merge($orangtua_ids, [$siswa_id]);
-                        
+
                         // Bind parameters secara manual
                         $stmt5->bind_param($bind_types, ...$bind_params);
                         $stmt5->execute();
@@ -197,7 +197,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                         $stmt5->close();
                     }
                 }
-                
+
                 // QUERY 6: Ambil program bimbel
                 $sql_program = "SELECT DISTINCT sp.nama_pelajaran
                                FROM siswa_pelajaran sp
@@ -206,7 +206,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                                AND sp.guru_id = ?
                                AND sp.status = 'aktif'
                                AND ps.status = 'aktif'";
-                
+
                 $stmt6 = $conn->prepare($sql_program);
                 $stmt6->bind_param("ii", $siswa_id, $guru_id);
                 $stmt6->execute();
@@ -217,7 +217,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                 }
                 $siswa_detail['program_bimbel'] = implode(', ', $program_list);
                 $stmt6->close();
-                
+
                 // QUERY 7: Ambil jadwal belajar
                 $sql_jadwal = "SELECT DISTINCT 
                               smg.hari,
@@ -233,23 +233,23 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                               AND sp.status = 'aktif'
                               ORDER BY FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'), 
                                        smg.jam_mulai";
-                
+
                 $stmt7 = $conn->prepare($sql_jadwal);
                 $stmt7->bind_param("ii", $siswa_id, $guru_id);
                 $stmt7->execute();
                 $jadwal_result = $stmt7->get_result();
                 $jadwal_list = [];
                 while ($jadwal_row = $jadwal_result->fetch_assoc()) {
-                    $jadwal_list[] = $jadwal_row['hari'] . ' ' . 
-                                    $jadwal_row['jam_mulai'] . '-' . 
-                                    $jadwal_row['jam_selesai'] . ' (' . 
-                                    $jadwal_row['nama_pelajaran'] . ')';
+                    $jadwal_list[] = $jadwal_row['hari'] . ' ' .
+                        $jadwal_row['jam_mulai'] . '-' .
+                        $jadwal_row['jam_selesai'] . ' (' .
+                        $jadwal_row['nama_pelajaran'] . ')';
                 }
                 $siswa_detail['jadwal_belajar'] = implode(', ', $jadwal_list);
                 $stmt7->close();
             }
             $stmt->close();
-            
+
         } catch (Exception $e) {
             error_log("Error fetching detail siswa: " . $e->getMessage());
             $_SESSION['error_message'] = "Gagal mengambil data siswa: " . $e->getMessage();
@@ -356,12 +356,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_siswa'])) {
     }
 }
 
-// AMBIL DATA SISWA YANG DIAJAR - DIOPTIMALKAN UNTUK STRUKTUR DATABASE
+// AMBIL DATA SISWA YANG DIAJAR - DENGAN PENCARIAN LENGKAP
 $siswa_data = [];
 if ($guru_id > 0) {
     try {
-        // Query dasar yang lebih sederhana
-        $sql = "SELECT 
+        // Query dasar dengan JOIN ke orangtua untuk pencarian lebih luas
+        $sql = "SELECT DISTINCT 
                     s.id,
                     s.nama_lengkap,
                     s.jenis_kelamin,
@@ -374,87 +374,105 @@ if ($guru_id > 0) {
                     ps.tingkat,
                     ps.jenis_kelas,
                     ps.tanggal_mulai,
-                    -- Ambil pelajaran yang diajar oleh guru ini
-                    (SELECT GROUP_CONCAT(DISTINCT sp2.nama_pelajaran ORDER BY sp2.nama_pelajaran SEPARATOR ', ')
-                     FROM siswa_pelajaran sp2 
-                     WHERE sp2.siswa_id = s.id 
-                     AND sp2.guru_id = ?
-                     AND sp2.status = 'aktif') as program_bimbel_diajar
+                    o.nama_ortu,
+                    o.no_hp as no_hp_ortu
                 FROM siswa_pelajaran sp
                 INNER JOIN siswa s ON sp.siswa_id = s.id
                 INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                LEFT JOIN siswa_orangtua so ON s.id = so.siswa_id
+                LEFT JOIN orangtua o ON so.orangtua_id = o.id
                 WHERE sp.guru_id = ?
                 AND sp.status = 'aktif'
                 AND ps.status = 'aktif'
                 AND s.status = 'aktif'";
-        
-        // Debug: Tampilkan query untuk testing
-        // echo "SQL Query: " . $sql;
-        
+
+        // Parameter untuk prepared statement
+        $params = array($guru_id);
+        $types = "i";
+
+        // Tambahkan kondisi pencarian jika ada
+        if (!empty($search)) {
+            $sql .= " AND (s.nama_lengkap LIKE ? 
+                    OR s.sekolah_asal LIKE ? 
+                    OR o.nama_ortu LIKE ? 
+                    OR o.no_hp LIKE ?)";
+            $params[] = "%$search%";
+            $params[] = "%$search%";
+            $params[] = "%$search%";
+            $params[] = "%$search%";
+            $types .= "ssss";
+        }
+
+        // Tambahkan filter tingkat jika ada
+        if (!empty($filter_tingkat)) {
+            $sql .= " AND ps.tingkat = ?";
+            $params[] = $filter_tingkat;
+            $types .= "s";
+        }
+
+        $sql .= " ORDER BY s.nama_lengkap ASC";
+
         $stmt = $conn->prepare($sql);
-        
-        // Cek jika prepare berhasil
+
         if ($stmt === false) {
             throw new Exception("Prepare failed: " . $conn->error);
         }
-        
-        $stmt->bind_param("ii", $guru_id, $guru_id);
+
+        // Bind parameters secara dinamis
+        if (!empty($params)) {
+            $stmt->bind_param($types, ...$params);
+        }
+
         $stmt->execute();
         $result = $stmt->get_result();
-        
-        // Jika query sukses tapi tidak ada data, tetap proses
+
         $siswa_data_temp = [];
         while ($row = $result->fetch_assoc()) {
             $siswa_data_temp[] = $row;
         }
         $stmt->close();
-        
-        // Sekarang ambil data orangtua untuk setiap siswa
+
+        // Ambil data program untuk setiap siswa
         foreach ($siswa_data_temp as $row) {
-            // Ambil data orangtua untuk setiap siswa
-            $sql_ortu = "SELECT 
-                        o.nama_ortu,
-                        o.no_hp as no_hp_ortu
-                    FROM siswa_orangtua so
-                    INNER JOIN orangtua o ON so.orangtua_id = o.id
-                    WHERE so.siswa_id = ?
-                    LIMIT 1";
-            
-            $stmt_ortu = $conn->prepare($sql_ortu);
-            if ($stmt_ortu) {
-                $stmt_ortu->bind_param("i", $row['id']);
-                $stmt_ortu->execute();
-                $ortu_result = $stmt_ortu->get_result();
-                
-                if ($ortu_row = $ortu_result->fetch_assoc()) {
-                    $row['nama_ortu'] = $ortu_row['nama_ortu'];
-                    $row['no_hp_ortu'] = $ortu_row['no_hp_ortu'];
-                } else {
-                    $row['nama_ortu'] = null;
-                    $row['no_hp_ortu'] = null;
+            $siswa_id = $row['id'];
+
+            // Ambil mata pelajaran yang diajar oleh guru ini
+            $sql_pelajaran = "SELECT GROUP_CONCAT(DISTINCT sp2.nama_pelajaran ORDER BY sp2.nama_pelajaran SEPARATOR ', ') as program_guru
+                             FROM siswa_pelajaran sp2 
+                             WHERE sp2.siswa_id = ? 
+                             AND sp2.guru_id = ?
+                             AND sp2.status = 'aktif'";
+
+            $stmt_pelajaran = $conn->prepare($sql_pelajaran);
+            $program_guru = '';
+            if ($stmt_pelajaran) {
+                $stmt_pelajaran->bind_param("ii", $siswa_id, $guru_id);
+                $stmt_pelajaran->execute();
+                $pelajaran_result = $stmt_pelajaran->get_result();
+                if ($pelajaran_row = $pelajaran_result->fetch_assoc()) {
+                    $program_guru = $pelajaran_row['program_guru'];
                 }
-                $stmt_ortu->close();
+                $stmt_pelajaran->close();
             }
-            
+
             // Format program bimbel
-            if (!empty(trim($row['program_bimbel_diajar'] ?? ''))) {
-                $row['program_bimbel'] = $row['program_bimbel_diajar'] . ' (' . $row['tingkat'] . ' - ' . $row['jenis_kelas'] . ')';
+            if (!empty(trim($program_guru))) {
+                $row['program_bimbel'] = $program_guru . ' (' . $row['tingkat'] . ' - ' . $row['jenis_kelas'] . ')';
             } else {
-                // Cek jika ada pelajaran lain yang bukan dari guru ini
+                // Cek jika ada pelajaran lain
                 $sql_other = "SELECT GROUP_CONCAT(DISTINCT sp3.nama_pelajaran ORDER BY sp3.nama_pelajaran SEPARATOR ', ') as other_programs
                              FROM siswa_pelajaran sp3
                              INNER JOIN pendaftaran_siswa ps3 ON sp3.pendaftaran_id = ps3.id
                              WHERE sp3.siswa_id = ?
                              AND sp3.status = 'aktif'
-                             AND ps3.status = 'aktif'
-                             AND (sp3.guru_id IS NULL OR sp3.guru_id != ?)";
-                
+                             AND ps3.status = 'aktif'";
+
                 $stmt_other = $conn->prepare($sql_other);
                 if ($stmt_other) {
-                    $stmt_other->bind_param("ii", $row['id'], $guru_id);
+                    $stmt_other->bind_param("i", $siswa_id);
                     $stmt_other->execute();
                     $other_result = $stmt_other->get_result();
-                    
+
                     if ($other_row = $other_result->fetch_assoc()) {
                         if (!empty(trim($other_row['other_programs'] ?? ''))) {
                             $row['program_bimbel'] = $other_row['other_programs'] . ' (' . $row['tingkat'] . ' - ' . $row['jenis_kelas'] . ')*';
@@ -467,10 +485,10 @@ if ($guru_id > 0) {
                     $stmt_other->close();
                 }
             }
-            
+
             $siswa_data[] = $row;
         }
-        
+
     } catch (Exception $e) {
         error_log("Error fetching siswa: " . $e->getMessage());
         $error_message = "Terjadi kesalahan saat mengambil data siswa: " . $e->getMessage();
@@ -816,17 +834,18 @@ if ($guru_id > 0) {
                 </div>
             <?php endif; ?>
 
-            <!-- Filter & Search -->
+            <!-- Di bagian Form Search, ganti menjadi: -->
             <div class="bg-white shadow rounded-lg p-6 mb-6">
                 <form method="GET" action="dataSiswa.php" class="flex flex-col md:flex-row gap-4">
                     <div class="flex-1">
-                        <input type="text" name="search" placeholder="Cari nama siswa atau sekolah asal..."
-                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                        <input type="text" name="search"
+                            placeholder="Cari nama siswa, sekolah asal, atau nama orangtua..."
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             value="<?php echo htmlspecialchars($search); ?>">
                     </div>
                     <div>
                         <select name="filter_tingkat"
-                            class="w-full md:w-auto px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                            class="w-full md:w-auto px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                             <option value="">Semua Tingkat</option>
                             <option value="TK" <?php echo ($filter_tingkat == 'TK') ? 'selected' : ''; ?>>TK</option>
                             <option value="SD" <?php echo ($filter_tingkat == 'SD') ? 'selected' : ''; ?>>SD</option>
@@ -840,17 +859,27 @@ if ($guru_id > 0) {
                     </div>
                     <div class="flex gap-2">
                         <button type="submit"
-                            class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-700">
+                            class="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition duration-200">
                             <i class="fas fa-search mr-2"></i> Cari
                         </button>
                         <?php if (!empty($search) || !empty($filter_tingkat)): ?>
                             <a href="dataSiswa.php"
-                                class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-gray-300 text-gray-700 hover:bg-gray-400">
+                                class="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition duration-200">
                                 <i class="fas fa-times mr-2"></i> Reset
                             </a>
                         <?php endif; ?>
                     </div>
                 </form>
+
+                <?php if (!empty($search)): ?>
+                    <div class="mt-3 text-sm text-gray-600">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        Menampilkan hasil pencarian untuk: "<strong><?php echo htmlspecialchars($search); ?></strong>"
+                        <?php if (!empty($filter_tingkat)): ?>
+                            dengan filter tingkat: <strong><?php echo htmlspecialchars($filter_tingkat); ?></strong>
+                        <?php endif; ?>
+                    </div>
+                <?php endif; ?>
             </div>
 
             <!-- Table Siswa -->
@@ -1406,6 +1435,25 @@ if ($guru_id > 0) {
                 menuOverlay.classList.remove('active');
                 document.body.style.overflow = 'auto';
             });
+        });
+
+        // Tambahkan di bagian script, setelah DOMContentLoaded
+        document.addEventListener('DOMContentLoaded', function () {
+            // Auto-submit search dengan debounce
+            const searchInput = document.querySelector('input[name="search"]');
+            let searchTimeout;
+
+            if (searchInput) {
+                searchInput.addEventListener('input', function () {
+                    clearTimeout(searchTimeout);
+                    searchTimeout = setTimeout(() => {
+                        // Submit form jika nilai berubah
+                        if (this.value.length === 0 || this.value.length >= 2) {
+                            this.form.submit();
+                        }
+                    }, 500); // Delay 500ms setelah mengetik
+                });
+            }
         });
 
         // Dropdown functionality
