@@ -813,17 +813,13 @@ if ($siswa_result) {
                                     </div>
                                 </td>
                                 <td class="px-3 md:px-6 py-3 md:py-4 whitespace-nowrap">
-                                    <div class="mobile-action-buttons flex">
+                                    <div class="mobile-action-buttons gap-1 flex">
                                         <button onclick="openDetailModal(<?= htmlspecialchars(json_encode($p)) ?>)" 
                                                 class="action-btn bg-blue-50 text-blue-600 hover:bg-blue-100 touch-target" 
                                                 title="Detail">
                                             <i class="fas fa-eye"></i>
                                         </button>
-                                        <button onclick="openUpdateModal(<?= htmlspecialchars(json_encode($p)) ?>)" 
-                                                class="action-btn bg-yellow-50 text-yellow-600 hover:bg-yellow-100 touch-target" 
-                                                title="Edit">
-                                            <i class="fas fa-edit"></i>
-                                        </button>
+                                        
                                         <button onclick="confirmDelete(<?= $p['id'] ?>, '<?= htmlspecialchars($p['nama_lengkap']) ?>')" 
                                                 class="action-btn bg-red-50 text-red-600 hover:bg-red-100 touch-target" 
                                                 title="Hapus">
