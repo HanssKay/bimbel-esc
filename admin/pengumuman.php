@@ -857,9 +857,6 @@ foreach ($pengumuman_list as $p) {
                                             <i class="fas fa-bullhorn text-3xl mb-3 text-gray-400"></i>
                                             <p class="text-lg mb-2">Belum ada pengumuman</p>
                                             <p class="text-sm text-gray-400 mb-4">Buat pengumuman pertama Anda</p>
-                                            <button id="openModalBtnEmpty" class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                                                <i class="fas fa-plus mr-2"></i> Buat Pengumuman
-                                            </button>
                                         </div>
                                     </td>
                                 </tr>
