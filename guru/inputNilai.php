@@ -64,13 +64,10 @@ if (isset($_SESSION['error_message'])) {
 // AMBIL DATA SISWA YANG DIAJAR OLEH GURU INI (untuk autocomplete)
 if ($guru_id > 0) {
     try {
-        // Query untuk mengambil data siswa yang diajar guru ini
+        // Query untuk mengambil data siswa yang diajar guru ini (hanya nama)
         $sql_siswa_list = "SELECT DISTINCT 
                                 s.id, 
-                                s.nama_lengkap, 
-                                s.kelas as kelas_sekolah,
-                                s.sekolah_asal,
-                                GROUP_CONCAT(DISTINCT sp.nama_pelajaran SEPARATOR ', ') as mata_pelajaran
+                                s.nama_lengkap
                           FROM siswa s
                           INNER JOIN siswa_pelajaran sp ON s.id = sp.siswa_id 
                           INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
@@ -78,7 +75,6 @@ if ($guru_id > 0) {
                             AND sp.status = 'aktif'
                             AND ps.status = 'aktif'
                             AND s.status = 'aktif'
-                          GROUP BY s.id
                           ORDER BY s.nama_lengkap";
 
         $stmt = $conn->prepare($sql_siswa_list);
@@ -92,40 +88,12 @@ if ($guru_id > 0) {
             }
             $stmt->close();
         }
-        
-        // Query untuk mengambil data mata pelajaran yang diajar oleh guru ini
-        $sql_pelajaran = "SELECT 
-                            sp.id as siswa_pelajaran_id,
-                            sp.nama_pelajaran,
-                            sp.siswa_id,
-                            ps.tingkat,
-                            ps.jenis_kelas,
-                            s.nama_lengkap
-                          FROM siswa_pelajaran sp
-                          INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                          INNER JOIN siswa s ON sp.siswa_id = s.id
-                          WHERE sp.guru_id = ? 
-                            AND sp.status = 'aktif'
-                            AND ps.status = 'aktif'
-                          ORDER BY s.nama_lengkap, sp.nama_pelajaran";
-
-        $stmt = $conn->prepare($sql_pelajaran);
-        if ($stmt) {
-            $stmt->bind_param("i", $guru_id);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            
-            while ($row = $result->fetch_assoc()) {
-                $siswa_pelajaran_options[] = $row;
-            }
-            $stmt->close();
-        }
     } catch (Exception $e) {
         $error_message = "❌ Error mengambil data siswa: " . $e->getMessage();
     }
 }
 
-// AJAX Handler untuk autocomplete
+// AJAX Handler untuk autocomplete siswa
 if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
     header('Content-Type: application/json');
     
@@ -135,10 +103,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
     if (!empty($search) && $guru_id > 0) {
         $sql_search = "SELECT DISTINCT 
                             s.id, 
-                            s.nama_lengkap, 
-                            s.kelas as kelas_sekolah,
-                            s.sekolah_asal,
-                            GROUP_CONCAT(DISTINCT sp.nama_pelajaran SEPARATOR ', ') as mata_pelajaran
+                            s.nama_lengkap
                       FROM siswa s
                       INNER JOIN siswa_pelajaran sp ON s.id = sp.siswa_id 
                       INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
@@ -146,10 +111,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
                         AND sp.status = 'aktif'
                         AND ps.status = 'aktif'
                         AND s.status = 'aktif'
-                        AND (s.nama_lengkap LIKE '%$search%' 
-                             OR s.kelas LIKE '%$search%'
-                             OR s.sekolah_asal LIKE '%$search%')
-                      GROUP BY s.id
+                        AND (s.nama_lengkap LIKE '%$search%')
                       ORDER BY s.nama_lengkap
                       LIMIT 20";
         
@@ -162,6 +124,46 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
     }
     
     echo json_encode($filtered_siswa);
+    exit();
+}
+
+// AJAX Handler untuk mengambil mata pelajaran berdasarkan siswa_id
+if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran_by_siswa' && isset($_GET['siswa_id'])) {
+    header('Content-Type: application/json');
+    
+    $siswa_id = intval($_GET['siswa_id']);
+    $pelajaran_data = [];
+    
+    if ($siswa_id > 0 && $guru_id > 0) {
+        $sql_pelajaran = "SELECT 
+                            sp.id as siswa_pelajaran_id,
+                            sp.nama_pelajaran,
+                            ps.tingkat,
+                            ps.jenis_kelas,
+                            s.nama_lengkap
+                          FROM siswa_pelajaran sp
+                          INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                          INNER JOIN siswa s ON sp.siswa_id = s.id
+                          WHERE sp.siswa_id = ? 
+                            AND sp.guru_id = ?
+                            AND sp.status = 'aktif'
+                            AND ps.status = 'aktif'
+                          ORDER BY sp.nama_pelajaran";
+        
+        $stmt = $conn->prepare($sql_pelajaran);
+        if ($stmt) {
+            $stmt->bind_param("ii", $siswa_id, $guru_id);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            
+            while ($row = $result->fetch_assoc()) {
+                $pelajaran_data[] = $row;
+            }
+            $stmt->close();
+        }
+    }
+    
+    echo json_encode($pelajaran_data);
     exit();
 }
 
@@ -470,6 +472,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
         .autocomplete-item .siswa-nama {
             font-weight: 600;
             color: #1f2937;
+            padding: 0.5rem;
         }
 
         .autocomplete-item .siswa-info {
@@ -762,11 +765,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                             <div class="flex justify-between items-start">
                                 <div>
                                     <div class="font-medium text-gray-900" id="selectedSiswaName"></div>
-                                    <div class="text-sm text-gray-600">
-                                        Kelas: <span id="selectedSiswaKelas"></span> |
-                                        Sekolah: <span id="selectedSiswaSekolah"></span>
-                                    </div>
-                                    <div class="text-xs text-blue-600 mt-1" id="selectedSiswaPelajaran"></div>
                                 </div>
                                 <button type="button" onclick="clearSelectedSiswa()"
                                     class="text-gray-400 hover:text-gray-600">
@@ -783,28 +781,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                             class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                             id="selectPelajaran">
                             <option value="">-- Pilih siswa terlebih dahulu --</option>
-                            <?php if (!empty($siswa_pelajaran_options)): ?>
-                                <?php foreach ($siswa_pelajaran_options as $pelajaran):
-                                    $selected = (isset($siswa_data['siswa_pelajaran_id']) && $siswa_data['siswa_pelajaran_id'] == $pelajaran['siswa_pelajaran_id']) ? 'selected' : '';
-                                    ?>
-                                    <option value="<?php echo $pelajaran['siswa_pelajaran_id']; ?>" 
-                                            data-siswa-id="<?php echo $pelajaran['siswa_id']; ?>"
-                                            <?php echo $selected; ?>
-                                            class="pelajaran-option hidden">
-                                        <?php echo htmlspecialchars(
-                                            $pelajaran['nama_pelajaran'] . 
-                                            ' - ' . $pelajaran['tingkat'] . 
-                                            ' (' . $pelajaran['jenis_kelas'] . ')'
-                                        ); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
                         </select>
-                        <?php if (empty($siswa_pelajaran_options) && $guru_id > 0): ?>
-                            <p class="text-red-500 text-sm mt-1">
-                                ❌ Tidak ada mata pelajaran yang diajar.
-                            </p>
-                        <?php endif; ?>
+                        <div id="loadingPelajaran" class="hidden text-sm text-gray-500 mt-1">
+                            <i class="fas fa-spinner fa-spin mr-1"></i> Memuat mata pelajaran...
+                        </div>
                     </div>
 
                     <div>
@@ -1066,14 +1046,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                     setTimeout(() => {
                         selectSiswa({
                             id: siswa.id,
-                            nama: siswa.nama_lengkap,
-                            kelas: siswa.kelas_sekolah,
-                            sekolah: siswa.sekolah_asal,
-                            pelajaran: siswa.mata_pelajaran
+                            nama: siswa.nama_lengkap
                         });
                     }, 500);
                 }
             }
+            
+            // Update preview saat halaman dimuat
+            updatePreview();
         });
 
         function initAutocomplete() {
@@ -1181,7 +1161,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             });
         }
 
-        // Render dropdown
+        // Render dropdown - hanya nama
         function renderDropdown(data) {
             const dropdown = document.getElementById('siswaDropdown');
             dropdown.innerHTML = '';
@@ -1197,19 +1177,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                 item.className = 'autocomplete-item';
                 item.dataset.id = siswa.id;
                 item.dataset.nama = siswa.nama_lengkap;
-                item.dataset.kelas = siswa.kelas_sekolah;
-                item.dataset.sekolah = siswa.sekolah_asal || '';
-                item.dataset.pelajaran = siswa.mata_pelajaran || '';
-
-                // Status badge
-                const statusBadge = '<span style="background-color:#d1fae5;color:#065f46;padding:2px 8px;border-radius:12px;font-size:11px;margin-left:5px;">Siswa Anda</span>';
 
                 item.innerHTML = `
-                    <div class="siswa-nama">${siswa.nama_lengkap} ${statusBadge}</div>
-                    <div class="siswa-info">
-                        Kelas: ${siswa.kelas_sekolah} | Sekolah: ${siswa.sekolah_asal || '-'}
-                        ${siswa.mata_pelajaran ? '<br>Mata Pelajaran: ' + siswa.mata_pelajaran : ''}
-                    </div>
+                    <div class="siswa-nama">${siswa.nama_lengkap}</div>
                 `;
 
                 item.addEventListener('click', function () {
@@ -1245,6 +1215,51 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             });
         }
 
+        // Fungsi untuk load mata pelajaran berdasarkan siswa_id
+        function loadMataPelajaran(siswaId) {
+            const pelajaranSelect = document.getElementById('selectPelajaran');
+            const loadingElement = document.getElementById('loadingPelajaran');
+            
+            // Tampilkan loading
+            pelajaranSelect.innerHTML = '<option value="">Memuat mata pelajaran...</option>';
+            pelajaranSelect.disabled = true;
+            loadingElement.classList.remove('hidden');
+            
+            $.ajax({
+                url: '<?php echo $_SERVER['PHP_SELF']; ?>',
+                type: 'GET',
+                data: {
+                    ajax: 'get_pelajaran_by_siswa',
+                    siswa_id: siswaId
+                },
+                dataType: 'json',
+                success: function (data) {
+                    pelajaranSelect.innerHTML = '<option value="">Pilih Mata Pelajaran</option>';
+                    
+                    if (data.length === 0) {
+                        pelajaranSelect.innerHTML = '<option value="">Tidak ada mata pelajaran untuk siswa ini</option>';
+                    } else {
+                        data.forEach(function(pelajaran) {
+                            const option = document.createElement('option');
+                            option.value = pelajaran.siswa_pelajaran_id;
+                            option.textContent = pelajaran.nama_pelajaran + 
+                                                ' - ' + pelajaran.tingkat + 
+                                                ' (' + pelajaran.jenis_kelas + ')';
+                            pelajaranSelect.appendChild(option);
+                        });
+                    }
+                    
+                    pelajaranSelect.disabled = false;
+                    loadingElement.classList.add('hidden');
+                },
+                error: function () {
+                    pelajaranSelect.innerHTML = '<option value="">Gagal memuat mata pelajaran</option>';
+                    pelajaranSelect.disabled = false;
+                    loadingElement.classList.add('hidden');
+                }
+            });
+        }
+
         // Fungsi pilih siswa
         function selectSiswa(data) {
             const selectedSiswaId = document.getElementById('selectedSiswaId');
@@ -1258,37 +1273,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
 
             // Tampilkan info siswa yang dipilih
             document.getElementById('selectedSiswaName').textContent = data.nama;
-            document.getElementById('selectedSiswaKelas').textContent = data.kelas;
-            document.getElementById('selectedSiswaSekolah').textContent = data.sekolah || '-';
-
-            if (data.pelajaran) {
-                document.getElementById('selectedSiswaPelajaran').textContent = 'Mata Pelajaran: ' + data.pelajaran;
-            }
-
             document.getElementById('selectedSiswaInfo').classList.remove('hidden');
             document.getElementById('clearSearch').style.display = 'none';
 
-            // Filter mata pelajaran berdasarkan siswa yang dipilih
-            if (data.id) {
-                // Reset dan sembunyikan semua option
-                pelajaranSelect.innerHTML = '<option value="">Pilih Mata Pelajaran</option>';
-                
-                // Tampilkan hanya option yang sesuai dengan siswa_id
-                const pelajaranOptions = pelajaranSelect.querySelectorAll('.pelajaran-option');
-                pelajaranOptions.forEach(option => {
-                    if (option.getAttribute('data-siswa-id') === data.id) {
-                        const newOption = document.createElement('option');
-                        newOption.value = option.value;
-                        newOption.textContent = option.textContent;
-                        pelajaranSelect.appendChild(newOption);
-                    }
-                });
-                
-                // Jika tidak ada mata pelajaran untuk siswa ini
-                if (pelajaranSelect.options.length === 1) {
-                    pelajaranSelect.innerHTML = '<option value="">Tidak ada mata pelajaran untuk siswa ini</option>';
-                }
-            }
+            // Load mata pelajaran via AJAX
+            loadMataPelajaran(data.id);
         }
 
         // Fungsi clear selected siswa
@@ -1301,6 +1290,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             // Reset mata pelajaran
             const pelajaranSelect = document.getElementById('selectPelajaran');
             pelajaranSelect.innerHTML = '<option value="">-- Pilih siswa terlebih dahulu --</option>';
+            pelajaranSelect.disabled = false;
         }
 
         // ==================== FUNGSI PENILAIAN ====================
@@ -1369,6 +1359,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             kategoriElement.className = `text-2xl font-bold ${kategoriColor}`;
         }
 
+        // Inisialisasi event listeners untuk input nilai
         document.querySelectorAll('.rating-input').forEach(input => {
             input.addEventListener('input', function() {
                 validateInput(this);
@@ -1381,6 +1372,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             });
         });
 
+        // Reset button
         document.getElementById('resetButton').addEventListener('click', function() {
             if (confirm('Apakah Anda yakin ingin mereset form? Semua data yang telah diisi akan hilang.')) {
                 document.querySelectorAll('.rating-input').forEach(input => {
@@ -1464,11 +1456,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             }
         });
 
-        // Inisialisasi saat halaman dimuat
-        document.addEventListener('DOMContentLoaded', function() {
-            updatePreview();
-            setInterval(updateServerTime, 1000);
-        });
+        // Inisialisasi waktu server
+        setInterval(updateServerTime, 1000);
 
         // Dropdown functionality
         document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
