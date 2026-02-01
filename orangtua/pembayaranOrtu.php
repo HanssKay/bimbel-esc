@@ -1099,12 +1099,12 @@ for ($i = 0; $i < 12; $i++) {
                                                 </div>
                                             <?php endif; ?>
 
-                                            <?php if (!empty($pembayaran['keterangan'])): ?>
-                                                <div class="mt-2 text-xs text-gray-500">
-                                                    <i class="fas fa-info-circle mr-1"></i>
-                                                    <?= htmlspecialchars($pembayaran['keterangan']) ?>
-                                                </div>
-                                            <?php endif; ?>
+                                            <!-- <?php if (!empty($pembayaran['keterangan'])): ?>
+                                    <div class="mt-2 text-xs text-gray-500">
+                                        <i class="fas fa-info-circle mr-1"></i>
+                                        <?= htmlspecialchars($pembayaran['keterangan']) ?>
+                                    </div>
+                                    <?php endif; ?> -->
                                         </td>
 
                                         <td class="px-6 py-4 whitespace-nowrap">
