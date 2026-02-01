@@ -797,7 +797,8 @@ for ($i = 0; $i < 12; $i++) {
                         <div>
                             <p class="text-sm text-gray-600">Total Dibayar</p>
                             <h3 class="text-2xl font-bold text-gray-800">Rp
-                                <?= number_format($total_dibayar, 0, ',', '.') ?></h3>
+                                <?= number_format($total_dibayar, 0, ',', '.') ?>
+                            </h3>
                         </div>
                     </div>
                 </div>
@@ -1353,33 +1354,6 @@ for ($i = 0; $i < 12; $i++) {
                         ` : ''}
                     </div>
                 </div>
-                
-                <!-- Informasi Tambahan -->
-                ${paymentData.keterangan || paymentData.dibuat_pada ? `
-                <div class="mb-6">
-                    <h4 class="font-bold text-gray-800 mb-4 pb-2 border-b border-gray-200">Informasi Tambahan</h4>
-                    <div class="space-y-2">
-                        ${paymentData.keterangan ? `
-                        <div class="detail-item">
-                            <span class="detail-label">Keterangan</span>
-                            <span class="detail-value">${paymentData.keterangan}</span>
-                        </div>
-                        ` : ''}
-                        
-                        <div class="detail-item">
-                            <span class="detail-label">Dibuat Pada</span>
-                            <span class="detail-value">${formattedDate(paymentData.dibuat_pada)} ${formatTime(paymentData.dibuat_pada)}</span>
-                        </div>
-                        
-                        ${paymentData.diperbarui_pada && paymentData.diperbarui_pada !== paymentData.dibuat_pada ? `
-                        <div class="detail-item">
-                            <span class="detail-label">Diperbarui Pada</span>
-                            <span class="detail-value">${formattedDate(paymentData.diperbarui_pada)} ${formatTime(paymentData.diperbarui_pada)}</span>
-                        </div>
-                        ` : ''}
-                    </div>
-                </div>
-                ` : ''}
                 
                 <!-- Informasi Program -->
                 <div class="mt-6 pt-6 border-t border-gray-200">
