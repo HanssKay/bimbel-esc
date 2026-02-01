@@ -1262,7 +1262,7 @@ if (isset($_GET['ajax'])) {
                         <i class="fas fa-calendar-alt mr-2"></i>Jadwal Siswa
                     </h1>
                     <p class="text-gray-600">
-                        Kelola jadwal bimbingan belajar semua siswa
+                        Kelola jadwal belajar semua siswa
                     </p>
                 </div>
                 <div class="mt-2 md:mt-0 flex space-x-2">
