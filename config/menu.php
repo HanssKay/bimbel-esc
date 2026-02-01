@@ -37,22 +37,22 @@ $menuConfig = [
                     'title' => 'Laporan Penilaian',
                     'icon' => 'fas fa-clipboard-list',
                     'url' => 'dataNilai.php',
-                    'active' => ['dataNilai.php']  
+                    'active' => ['dataNilai.php']
                 ],
-                 [
+                [
                     'title' => 'Jadwal Siswa',
                     'icon' => 'fas fa-calendar-alt',
                     'url' => 'jadwalSiswa.php',
-                    'active' => ['jadwalSiswa.php']  
+                    'active' => ['jadwalSiswa.php']
                 ],
-                 [
+                [
                     'title' => 'Rekap Absensi Siswa',
                     'icon' => 'fas fa-school',
                     'url' => 'rekapSiswa.php',
                     'active' => ['rekapSiswa.php']
                 ],
             ]
-            
+
         ],
         // [
         //     'title' => 'Laporan',
@@ -122,7 +122,7 @@ $menuConfig = [
                     'active' => ['rekapAbsensi.php']
                 ],
             ]
-            
+
         ],
         [
             'title' => 'Penilaian Siswa',
@@ -147,7 +147,7 @@ $menuConfig = [
                 //     'active' => ['laporanGuru.php']
                 // ],
             ]
-            
+
         ],
         [
             'title' => 'Pengumuman',
@@ -202,7 +202,7 @@ $menuConfig = [
             'icon' => 'fas fa-calendar-alt',
             'submenu' => [
                 [
-                    'title' => 'Abensi Anak',
+                    'title' => 'Absensi Anak',
                     'icon' => 'fas fa-calendar-alt',
                     'url' => 'absensiAnak.php',
                     'active' => ['absensiAnak.php']
@@ -213,17 +213,17 @@ $menuConfig = [
                     'url' => 'jadwalAnak.php',
                     'active' => ['jadwalAnak.php']
                 ],
-                
+
             ]
         ],
-        
+
         [
             'title' => 'Pembayaran',
             'icon' => 'fas fa-money-bill-wave',
             'url' => 'pembayaranOrtu.php',
             'active' => ['pembayaranOrtu.php']
         ],
-        
+
         [
             'title' => 'Pengumuman',
             'icon' => 'fas fa-bullhorn ',
