@@ -527,7 +527,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
                 <div>
                     <h1 class="text-2xl font-bold text-gray-800">Input Penilaian Siswa</h1>
-                    <p class="text-gray-600">Isi form penilaian untuk siswa bimbingan</p>
+                    <p class="text-gray-600">Isi form penilaian untuk siswa bimbel</p>
                 </div>
                 <div class="mt-2 md:mt-0 text-right">
                     <a href="riwayat.php" class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-800 hover:bg-blue-200">
