@@ -984,17 +984,6 @@ for ($i = 0; $i < 12; $i++) {
                                         </div>
                                         <?php endif; ?>
                                         
-                                        <!-- Progress Bar -->
-                                        <div class="pt-2">
-                                            <div class="flex justify-between text-xs text-gray-500 mb-1">
-                                                <span>Progress Pembayaran</span>
-                                                <span><?= round($persentase) ?>%</span>
-                                            </div>
-                                            <div class="progress-bar">
-                                                <div class="progress-fill <?= $status_color ?>" 
-                                                     style="width: <?= $persentase ?>%"></div>
-                                            </div>
-                                        </div>
                                     </div>
                                 </td>
                                 
