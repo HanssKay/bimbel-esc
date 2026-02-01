@@ -541,7 +541,7 @@ for ($i = 0; $i < 12; $i++) {
                         <i class="fas fa-chart-bar mr-2"></i> Rekap Absensi
                     </h1>
                     <p class="text-gray-600">
-                        Lihat rekap kehadiran anak Anda di bimbingan belajar
+                        Lihat rekap kehadiran anak anda selama belajar
                     </p>
                 </div>
                 <div class="mt-2 md:mt-0 flex space-x-2">
