@@ -134,11 +134,14 @@ if (!empty($pendaftaran_data)) {
     }
 }
 
-// AMBIL PENILAIAN TERBARU untuk semua anak (satu per anak)
+// AMBIL PENILAIAN TERBARU untuk semua anak (hanya 1 minggu terakhir)
 $penilaian_terbaru = [];
 if ($orangtua_id > 0 && !empty($anak_data)) {
     try {
-        // Query untuk mengambil penilaian terbaru setiap anak
+        // Hitung tanggal 1 minggu yang lalu
+        $satu_minggu_lalu = date('Y-m-d', strtotime('-1 week'));
+
+        // Query untuk mengambil penilaian terbaru setiap anak dalam 1 minggu terakhir
         $sql_penilaian = "SELECT pn.*, 
                                  s.nama_lengkap as nama_siswa,
                                  u.full_name as nama_guru,
@@ -154,18 +157,13 @@ if ($orangtua_id > 0 && !empty($anak_data)) {
                           JOIN guru g ON pn.guru_id = g.id
                           JOIN users u ON g.user_id = u.id
                           WHERE so.orangtua_id = ?
-                          AND pn.id IN (
-                              SELECT MAX(id) 
-                              FROM penilaian_siswa 
-                              WHERE siswa_id = pn.siswa_id 
-                              GROUP BY siswa_id
-                          )
+                          AND pn.tanggal_penilaian >= ?
                           AND ps.status = 'aktif'
                           AND s.status = 'aktif'
                           ORDER BY pn.tanggal_penilaian DESC";
 
         $stmt = $conn->prepare($sql_penilaian);
-        $stmt->bind_param("i", $orangtua_id);
+        $stmt->bind_param("is", $orangtua_id, $satu_minggu_lalu);
         $stmt->execute();
         $result = $stmt->get_result();
 
@@ -178,17 +176,41 @@ if ($orangtua_id > 0 && !empty($anak_data)) {
     }
 }
 
-// STATISTIK
+// STATISTIK - hanya berdasarkan 1 minggu terakhir
 $statistik = [
-    'total_penilaian' => 0,
+    'total_penilaian' => count($penilaian_terbaru),
     'rata_total_skor' => 0,
     'kategori_terbaik' => '',
     'kategori_terburuk' => ''
 ];
 
-// Ambil penilaian dengan tanggal TERBARU dari array $penilaian_terbaru
+// Hitung rata-rata skor dari penilaian 1 minggu terakhir
 if (!empty($penilaian_terbaru)) {
-    // Urutkan berdasarkan tanggal descending
+    $total_skor = 0;
+    $kategori_count = [];
+
+    foreach ($penilaian_terbaru as $penilaian) {
+        $total_skor += $penilaian['total_score'];
+
+        // Hitung frekuensi kategori
+        $kategori = $penilaian['kategori'];
+        if (!isset($kategori_count[$kategori])) {
+            $kategori_count[$kategori] = 0;
+        }
+        $kategori_count[$kategori]++;
+    }
+
+    $statistik['rata_total_skor'] = round($total_skor / count($penilaian_terbaru), 1);
+
+    // Cari kategori terbanyak (terbaik) dan tersedikit (terburuk)
+    if (!empty($kategori_count)) {
+        arsort($kategori_count); // Urutkan dari terbanyak ke tersedikit
+        $kategori_keys = array_keys($kategori_count);
+        $statistik['kategori_terbaik'] = $kategori_keys[0]; // Kategori dengan jumlah terbanyak
+        $statistik['kategori_terburuk'] = end($kategori_keys); // Kategori dengan jumlah tersedikit
+    }
+
+    // Ambil penilaian dengan tanggal TERBARU
     usort($penilaian_terbaru, function ($a, $b) {
         return strtotime($b['tanggal_penilaian']) - strtotime($a['tanggal_penilaian']);
     });
@@ -203,6 +225,8 @@ if (!empty($penilaian_terbaru)) {
 } else {
     $statistik['skor_terbaru'] = 0;
     $statistik['kategori_terbaru'] = '-';
+    $statistik['tanggal_terbaru'] = '-';
+    $statistik['pelajaran_terbaru'] = '-';
 }
 
 // AMBIL DATA DARI VIEW UNTUK DASHBOARD
@@ -723,7 +747,10 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                             <i class="fas fa-clipboard-check text-green-600 text-lg md:text-xl"></i>
                         </div>
                         <div>
-                            <p class="text-xs md:text-sm text-gray-600">Penilaian Terbaru </p>
+                            <div class="grid grid-cols-1">
+                                <p class="text-xs md:text-sm text-gray-600">Penilaian Terbaru</p>
+                                 <p class="text-green-500 text-xs">(1 minggu)</p>
+                            </div>
                             <p class="text-xl md:text-2xl font-bold text-gray-800">
                                 <?php echo $statistik['total_penilaian']; ?>
                             </p>
