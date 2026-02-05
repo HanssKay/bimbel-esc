@@ -722,7 +722,6 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                 </div>
                 <div class="mt-2 md:mt-0 text-right">
                     <p class="text-sm text-gray-600"><?php echo date('l, d F Y'); ?></p>
-                    <p class="text-sm text-blue-600"><span id="serverTime"><?php echo date('H:i'); ?></span> WIB</p>
                 </div>
             </div>
         </div>
