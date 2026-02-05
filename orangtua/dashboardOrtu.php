@@ -160,7 +160,8 @@ if ($orangtua_id > 0 && !empty($anak_data)) {
                           AND pn.tanggal_penilaian >= ?
                           AND ps.status = 'aktif'
                           AND s.status = 'aktif'
-                          ORDER BY pn.tanggal_penilaian DESC";
+                          ORDER BY pn.tanggal_penilaian DESC
+                          LIMIT 2 ";
 
         $stmt = $conn->prepare($sql_penilaian);
         $stmt->bind_param("is", $orangtua_id, $satu_minggu_lalu);
