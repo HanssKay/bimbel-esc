@@ -186,34 +186,23 @@ $statistik = [
     'kategori_terburuk' => ''
 ];
 
-if ($orangtua_id > 0 && !empty($penilaian_terbaru)) {
-    $statistik['total_penilaian'] = count($penilaian_terbaru);
+// Ambil penilaian dengan tanggal TERBARU dari array $penilaian_terbaru
+if (!empty($penilaian_terbaru)) {
+    // Urutkan berdasarkan tanggal descending
+    usort($penilaian_terbaru, function ($a, $b) {
+        return strtotime($b['tanggal_penilaian']) - strtotime($a['tanggal_penilaian']);
+    });
 
-    // Hanya jumlahkan total_score dari penilaian terbaru
-    $total_skor = 0;
-    $kategori_count = [];
+    // Ambil yang pertama (terbaru)
+    $penilaian_paling_baru = $penilaian_terbaru[0];
 
-    foreach ($penilaian_terbaru as $penilaian) {
-        $total_skor += $penilaian['total_score'];  // Jumlahkan saja, tidak dibagi
-
-        $kategori = $penilaian['kategori'];
-        $kategori_count[$kategori] = isset($kategori_count[$kategori]) ?
-            $kategori_count[$kategori] + 1 : 1;
-    }
-
-    // SIMPAN TOTAL SKOR (bukan rata-rata)
-    $statistik['total_skor'] = $total_skor;  // <-- INI TOTAL SKOR
-    $statistik['max_skor'] = count($penilaian_terbaru) * 50;  // Maksimal skor
-
-    if (!empty($kategori_count)) {
-        arsort($kategori_count);
-        $kategori_keys = array_keys($kategori_count);
-        $statistik['kategori_terbaik'] = $kategori_keys[0];
-
-        asort($kategori_count);
-        $kategori_keys = array_keys($kategori_count);
-        $statistik['kategori_terburuk'] = $kategori_keys[0];
-    }
+    $statistik['skor_terbaru'] = $penilaian_paling_baru['total_score'];
+    $statistik['kategori_terbaru'] = $penilaian_paling_baru['kategori'];
+    $statistik['tanggal_terbaru'] = $penilaian_paling_baru['tanggal_format'];
+    $statistik['pelajaran_terbaru'] = $penilaian_paling_baru['nama_pelajaran'];
+} else {
+    $statistik['skor_terbaru'] = 0;
+    $statistik['kategori_terbaru'] = '-';
 }
 
 // AMBIL DATA DARI VIEW UNTUK DASHBOARD
@@ -736,7 +725,8 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                         <div>
                             <p class="text-xs md:text-sm text-gray-600">Penilaian Terbaru </p>
                             <p class="text-xl md:text-2xl font-bold text-gray-800">
-                                <?php echo $statistik['total_penilaian']; ?></p>
+                                <?php echo $statistik['total_penilaian']; ?>
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -747,14 +737,9 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                             <i class="fas fa-star text-purple-600 text-lg md:text-xl"></i>
                         </div>
                         <div>
-                            <p class="text-xs md:text-sm text-gray-600">Skor</p>
-                            <!-- INI YANG DIUBAH: -->
+                            p class="text-xs md:text-sm text-gray-600">Skor Terbaru</p>
                             <p class="text-xl md:text-2xl font-bold text-gray-800">
-                                <?php echo $statistik['total_skor']; ?>/<?php echo $statistik['max_skor']; ?>
-                            </p>
-                            <!-- Tambahkan info: -->
-                            <p class="text-xs text-gray-500 mt-1">
-                                Dari <?php echo $statistik['total_penilaian']; ?> penilaian terbaru
+                                <?php echo $statistik['skor_terbaru']; ?>/50
                             </p>
                         </div>
                     </div>
@@ -767,7 +752,7 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                         <div>
                             <p class="text-xs md:text-sm text-gray-600">Kategori Nilai</p>
                             <p class="text-xl md:text-2xl font-bold text-gray-800">
-                                <?php echo $statistik['kategori_terbaik'] ?: '-'; ?>
+                                <?php echo $statistik['kategori_terbaru'] ?: '-'; ?>
                             </p>
                         </div>
                     </div>
@@ -1018,7 +1003,8 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                         <div>
                             <p class="text-xs md:text-sm text-gray-600">Penilaian Baru</p>
                             <p class="text-lg md:text-xl font-bold text-gray-800">
-                                <?php echo $statistik['total_penilaian']; ?></p>
+                                <?php echo $statistik['total_penilaian']; ?>
+                            </p>
                         </div>
                         <div>
                             <p class="text-xs md:text-sm text-gray-600">Saran</p>
