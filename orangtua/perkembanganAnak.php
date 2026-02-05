@@ -48,7 +48,7 @@ if ($orangtua_id > 0) {
                 INNER JOIN siswa_orangtua so ON s.id = so.siswa_id
                 WHERE so.orangtua_id = ? AND s.status = 'aktif'
                 ORDER BY s.nama_lengkap";
-        
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("i", $orangtua_id);
@@ -93,7 +93,7 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
         }
         $stmt_anak->close();
     }
-    
+
     // 2. DATA TREND 6 BULAN TERAKHIR - PERBAIKAN QUERY UNTUK VPS
     // Ambil semua data dulu, lalu proses di PHP
     $sql_trend_raw = "SELECT 
@@ -109,19 +109,19 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
                       WHERE siswa_id = ? 
                       AND tanggal_penilaian >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
                       ORDER BY tanggal_penilaian DESC";
-    
+
     $stmt_trend = $conn->prepare($sql_trend_raw);
     if ($stmt_trend) {
         $stmt_trend->bind_param("i", $selected_anak_id);
         $stmt_trend->execute();
         $result_trend = $stmt_trend->get_result();
-        
+
         // Group data per bulan di PHP (lebih aman untuk VPS)
         $raw_data_by_month = [];
         while ($row = $result_trend->fetch_assoc()) {
             $bulan_key = date('Y-m', strtotime($row['tanggal_penilaian']));
             $bulan_format = date('F Y', strtotime($row['tanggal_penilaian']));
-            
+
             if (!isset($raw_data_by_month[$bulan_key])) {
                 $raw_data_by_month[$bulan_key] = [
                     'bulan' => $bulan_key,
@@ -135,7 +135,7 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
                     'problem' => []
                 ];
             }
-            
+
             $raw_data_by_month[$bulan_key]['scores'][] = $row['total_score'];
             $raw_data_by_month[$bulan_key]['percentages'][] = $row['persentase'];
             $raw_data_by_month[$bulan_key]['willingness'][] = $row['willingness_learn'];
@@ -145,33 +145,33 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
             $raw_data_by_month[$bulan_key]['problem'][] = $row['problem_solving'];
         }
         $stmt_trend->close();
-        
+
         // Hitung rata-rata per bulan
         foreach ($raw_data_by_month as $month_key => $month_data) {
             $trend_data[] = [
                 'bulan' => $month_data['bulan'],
                 'bulan_format' => $month_data['bulan_format'],
                 'jumlah_penilaian' => count($month_data['scores']),
-                'rata_skor' => count($month_data['scores']) > 0 ? 
+                'rata_skor' => count($month_data['scores']) > 0 ?
                     array_sum($month_data['scores']) / count($month_data['scores']) : 0,
-                'rata_persen' => count($month_data['percentages']) > 0 ? 
+                'rata_persen' => count($month_data['percentages']) > 0 ?
                     array_sum($month_data['percentages']) / count($month_data['percentages']) : 0,
-                'min_skor' => count($month_data['scores']) > 0 ? 
+                'min_skor' => count($month_data['scores']) > 0 ?
                     min($month_data['scores']) : 0,
-                'max_skor' => count($month_data['scores']) > 0 ? 
+                'max_skor' => count($month_data['scores']) > 0 ?
                     max($month_data['scores']) : 0
             ];
         }
-        
+
         // Urutkan dari terbaru ke terlama (DESC)
-        usort($trend_data, function($a, $b) {
+        usort($trend_data, function ($a, $b) {
             return strtotime($b['bulan']) - strtotime($a['bulan']);
         });
-        
+
         // Batasi 6 bulan terakhir
         $trend_data = array_slice($trend_data, 0, 6);
     }
-    
+
     // 3. DATA RATA-RATA INDIKATOR (UNTUK RADAR CHART) - QUERY LEBIH SEDERHANA
     $sql_radar = "SELECT 
                     AVG(COALESCE(willingness_learn, 0)) as w_learn,
@@ -181,7 +181,7 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
                     AVG(COALESCE(problem_solving, 0)) as p_solving
                   FROM penilaian_siswa 
                   WHERE siswa_id = ?";
-    
+
     $stmt_radar = $conn->prepare($sql_radar);
     if ($stmt_radar) {
         $stmt_radar->bind_param("i", $selected_anak_id);
@@ -199,48 +199,52 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
         }
         $stmt_radar->close();
     }
-    
+
     // 4. ANALISIS & INSIGHTS
-    if (!empty($trend_data)) {
-        $trend_data_reverse = array_reverse($trend_data); // Urut dari lama ke baru
+   if (!empty($trend_data)) {
+    $trend_data_reverse = array_reverse($trend_data); // Urut dari lama ke baru
+    
+    // Hitung perkembangan
+    if (count($trend_data_reverse) >= 2) {
+        $first_month = $trend_data_reverse[0];
+        $last_month = end($trend_data_reverse);
         
-        // Hitung perkembangan
-        if (count($trend_data_reverse) >= 2) {
-            $first_month = $trend_data_reverse[0];
-            $last_month = end($trend_data_reverse);
-            
-            $score_change = $last_month['rata_skor'] - $first_month['rata_skor'];
-            $percent_change = $first_month['rata_skor'] > 0 ? 
-                ($score_change / $first_month['rata_skor']) * 100 : 0;
-            
-            // Tentukan trend
-            if ($score_change > 3) {
-                $trend_icon = '↗';
-                $trend_text = 'Meningkat signifikan';
-                $trend_color = 'text-green-600';
-            } elseif ($score_change > 0) {
-                $trend_icon = '→';
-                $trend_text = 'Stabil cenderung naik';
-                $trend_color = 'text-blue-600';
-            } elseif ($score_change < -3) {
-                $trend_icon = '↘';
-                $trend_text = 'Menurun perlu perhatian';
-                $trend_color = 'text-red-600';
-            } else {
-                $trend_icon = '→';
-                $trend_text = 'Stabil';
-                $trend_color = 'text-gray-600';
-            }
-            
-            $insights['trend'] = [
-                'icon' => $trend_icon,
-                'text' => $trend_text,
-                'color' => $trend_color,
-                'score_change' => round($score_change, 1),
-                'percent_change' => round($percent_change, 1)
-            ];
+        $score_change = $last_month['rata_skor'] - $first_month['rata_skor'];
+        $percent_change = $first_month['rata_skor'] > 0 ? 
+            ($score_change / $first_month['rata_skor']) * 100 : 0;
+        
+        // Tentukan trend dengan lebih detail
+        if ($score_change > 3) {
+            $trend_text = 'Meningkat Signifikan';
+            $trend_color = 'text-green-600';
+        } elseif ($score_change > 1) {
+            $trend_text = 'Meningkat';
+            $trend_color = 'text-green-500';
+        } elseif ($score_change > 0) {
+            $trend_text = 'Sedikit Meningkat';
+            $trend_color = 'text-blue-500';
+        } elseif ($score_change == 0) {
+            $trend_text = 'Stabil';
+            $trend_color = 'text-gray-600';
+        } elseif ($score_change > -2) {
+            $trend_text = 'Sedikit Menurun';
+            $trend_color = 'text-yellow-500';
+        } elseif ($score_change > -4) {
+            $trend_text = 'Menurun';
+            $trend_color = 'text-orange-500';
+        } else {
+            $trend_text = 'Menurun Signifikan';
+            $trend_color = 'text-red-600';
         }
         
+        $insights['trend'] = [
+            'text' => $trend_text,
+            'color' => $trend_color,
+            'score_change' => round($score_change, 1),
+            'percent_change' => round($percent_change, 1)
+        ];
+    }
+
         // Cari area terkuat dan terlemah dari radar data
         if (!empty($radar_data)) {
             $indicators = [
@@ -250,23 +254,23 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
                 'independence' => 'Kemandirian',
                 'p_solving' => 'Pemecahan Masalah'
             ];
-            
+
             // Cari 2 terbaik dan 2 terlemah
             $sorted_data = $radar_data;
             arsort($sorted_data); // Urut dari tinggi ke rendah
             $top_2 = array_slice($sorted_data, 0, 2, true);
             $bottom_2 = array_slice($sorted_data, -2, 2, true);
-            
+
             $insights['strengths'] = [];
             $insights['weaknesses'] = [];
-            
+
             foreach ($top_2 as $key => $value) {
                 $insights['strengths'][] = [
                     'name' => $indicators[$key] ?? $key,
                     'score' => round($value, 1)
                 ];
             }
-            
+
             foreach ($bottom_2 as $key => $value) {
                 $insights['weaknesses'][] = [
                     'name' => $indicators[$key] ?? $key,
@@ -274,23 +278,23 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
                 ];
             }
         }
-        
+
         // Prediksi bulan depan
         if (count($trend_data) >= 3) {
             $recent_scores = array_column($trend_data, 'rata_skor');
             $recent_scores = array_slice($recent_scores, 0, 3); // Ambil 3 terbaru
-            
+
             if (count($recent_scores) >= 3) {
                 $avg_growth = ($recent_scores[0] - $recent_scores[2]) / 2;
                 $predicted_score = $recent_scores[0] + $avg_growth;
-                
+
                 // Pastikan skor dalam rentang 0-50
                 $predicted_score = max(0, min(50, $predicted_score));
-                
+
                 $insights['prediction'] = [
                     'score' => round($predicted_score, 1),
-                    'confidence' => abs($avg_growth) > 2 ? 'Tinggi' : 
-                                    (abs($avg_growth) > 1 ? 'Sedang' : 'Rendah')
+                    'confidence' => abs($avg_growth) > 2 ? 'Tinggi' :
+                        (abs($avg_growth) > 1 ? 'Sedang' : 'Rendah')
                 ];
             }
         }
@@ -324,6 +328,7 @@ $radar_values = [
 
 <!DOCTYPE html>
 <html lang="id">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -335,21 +340,33 @@ $radar_values = [
         .card {
             transition: transform 0.2s, box-shadow 0.2s;
         }
+
         .card:hover {
             transform: translateY(-2px);
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
         }
+
         .stat-card {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
         }
+
         .progress-bar {
             transition: width 0.5s ease-in-out;
         }
-        .trend-up { color: #10B981; }
-        .trend-down { color: #EF4444; }
-        .trend-stable { color: #6B7280; }
-        
+
+        .trend-up {
+            color: #10B981;
+        }
+
+        .trend-down {
+            color: #EF4444;
+        }
+
+        .trend-stable {
+            color: #6B7280;
+        }
+
         /* Dropdown styles */
         .dropdown-submenu {
             display: none;
@@ -365,7 +382,7 @@ $radar_values = [
         .dropdown-toggle.open .arrow {
             transform: rotate(90deg);
         }
-        
+
         /* Desktop sidebar tetap terlihat */
         .desktop-sidebar {
             display: none;
@@ -424,19 +441,19 @@ $radar_values = [
             .chart-container {
                 height: 250px !important;
             }
-            
+
             .stat-cards {
                 grid-template-columns: repeat(2, 1fr) !important;
             }
-            
+
             .insights-grid {
                 grid-template-columns: 1fr !important;
             }
-            
+
             .detail-table {
                 font-size: 0.8rem;
             }
-            
+
             .detail-table th,
             .detail-table td {
                 padding: 0.5rem !important;
@@ -450,6 +467,7 @@ $radar_values = [
         }
     </style>
 </head>
+
 <body class="bg-gray-100">
     <!-- Desktop Sidebar -->
     <div class="desktop-sidebar w-64 bg-blue-800 text-white fixed h-full z-40">
@@ -548,23 +566,23 @@ $radar_values = [
                 <div class="mt-4 md:mt-0 w-full md:w-auto">
                     <!-- Pilih Anak Dropdown -->
                     <?php if (!empty($anak_data)): ?>
-                    <div class="relative">
-                        <form method="GET" class="flex items-center">
-                            <select name="anak_id" onchange="this.form.submit()" 
+                        <div class="relative">
+                            <form method="GET" class="flex items-center">
+                                <select name="anak_id" onchange="this.form.submit()"
                                     class="w-full md:w-auto border border-gray-300 rounded-lg px-4 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
-                                <?php foreach ($anak_data as $anak): ?>
-                                <option value="<?php echo $anak['id']; ?>" 
-                                        <?php echo $selected_anak_id == $anak['id'] ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($anak['nama_lengkap']); ?> 
-                                    (<?php echo $anak['kelas']; ?>)
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
-                            <button type="submit" class="ml-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                                <i class="fas fa-sync-alt"></i>
-                            </button>
-                        </form>
-                    </div>
+                                    <?php foreach ($anak_data as $anak): ?>
+                                        <option value="<?php echo $anak['id']; ?>" <?php echo $selected_anak_id == $anak['id'] ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($anak['nama_lengkap']); ?>
+                                            (<?php echo $anak['kelas']; ?>)
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="submit"
+                                    class="ml-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                                    <i class="fas fa-sync-alt"></i>
+                                </button>
+                            </form>
+                        </div>
                     <?php endif; ?>
                 </div>
             </div>
@@ -577,7 +595,8 @@ $radar_values = [
                 <div class="text-center py-12 md:py-16">
                     <i class="fas fa-child text-5xl md:text-6xl text-gray-400 mb-4"></i>
                     <h3 class="text-xl md:text-2xl font-bold text-gray-700 mb-2">Belum ada data anak</h3>
-                    <p class="text-gray-600 mb-6 text-sm md:text-base">Hubungi admin untuk mendaftarkan anak Anda ke bimbel.</p>
+                    <p class="text-gray-600 mb-6 text-sm md:text-base">Hubungi admin untuk mendaftarkan anak Anda ke bimbel.
+                    </p>
                     <div class="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                         <p class="text-sm text-yellow-700">
                             <strong>Debug Info:</strong><br>
@@ -586,31 +605,36 @@ $radar_values = [
                             Nama Orangtua: <?php echo htmlspecialchars($nama_ortu); ?>
                         </p>
                     </div>
-                    <a href="dashboardOrtu.php" class="mt-4 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm md:text-base">
+                    <a href="dashboardOrtu.php"
+                        class="mt-4 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm md:text-base">
                         <i class="fas fa-arrow-left mr-2"></i> Kembali ke Dashboard
                     </a>
                 </div>
-            
+
             <?php elseif ($selected_anak_id == 0): ?>
                 <!-- Pilih Anak Terlebih Dahulu -->
                 <div class="text-center py-12 md:py-16">
                     <i class="fas fa-user-graduate text-5xl md:text-6xl text-gray-400 mb-4"></i>
                     <h3 class="text-xl md:text-2xl font-bold text-gray-700 mb-2">Pilih anak terlebih dahulu</h3>
-                    <p class="text-gray-600 text-sm md:text-base">Silakan pilih salah satu anak untuk melihat perkembangan mereka.</p>
+                    <p class="text-gray-600 text-sm md:text-base">Silakan pilih salah satu anak untuk melihat perkembangan
+                        mereka.</p>
                 </div>
-            
+
             <?php elseif (empty($trend_data)): ?>
                 <!-- Belum Ada Data Penilaian -->
                 <div class="text-center py-12 md:py-16">
                     <i class="fas fa-chart-line text-5xl md:text-6xl text-gray-400 mb-4"></i>
                     <h3 class="text-xl md:text-2xl font-bold text-gray-700 mb-2">Belum ada data perkembangan</h3>
-                    <p class="text-gray-600 mb-4 text-sm md:text-base">Anak <strong><?php echo htmlspecialchars($selected_anak_name); ?></strong> belum memiliki data penilaian.</p>
-                    <p class="text-gray-500 text-sm md:text-base">Data perkembangan akan muncul setelah anak mendapatkan penilaian dari guru.</p>
+                    <p class="text-gray-600 mb-4 text-sm md:text-base">Anak
+                        <strong><?php echo htmlspecialchars($selected_anak_name); ?></strong> belum memiliki data penilaian.
+                    </p>
+                    <p class="text-gray-500 text-sm md:text-base">Data perkembangan akan muncul setelah anak mendapatkan
+                        penilaian dari guru.</p>
                 </div>
-            
+
             <?php else: ?>
                 <!-- ADA DATA - TAMPILKAN DASHBOARD PERKEMBANGAN -->
-                
+
                 <!-- Header Anak -->
                 <div class="mb-6 md:mb-8">
                     <div class="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-4 md:p-6 text-white shadow-lg">
@@ -622,7 +646,7 @@ $radar_values = [
                                 <div class="flex flex-wrap gap-2 md:gap-4">
                                     <span class="bg-white/20 px-2 py-1 md:px-3 md:py-1 rounded-full text-xs md:text-sm">
                                         <i class="fas fa-graduation-cap mr-1"></i>
-                                        <?php 
+                                        <?php
                                         $selected_anak = array_filter($anak_data, fn($a) => $a['id'] == $selected_anak_id);
                                         $selected_anak = reset($selected_anak);
                                         echo $selected_anak['kelas'] ?? '-';
@@ -638,19 +662,54 @@ $radar_values = [
                                     </span>
                                 </div>
                             </div>
-                            <?php if (isset($insights['trend'])): ?>
-                            <div class="mt-4 md:mt-0 text-center md:text-right">
-                                <div class="text-3xl md:text-4xl lg:text-5xl font-bold <?php echo $insights['trend']['color']; ?>">
-                                    <?php echo $insights['trend']['icon']; ?>
+
+                            <?php if (isset($insights['trend'])):
+                                // Tentukan icon dan warna berdasarkan trend
+                                $trend_icon = '';
+                                $text_color = '';
+
+                                if ($insights['trend']['score_change'] > 3) {
+                                    $trend_icon = 'fa-arrow-up';
+                                    $text_color = 'text-green-600';
+                                    $bg_color = 'bg-green-100';
+                                    $border_color = 'border-green-200';
+                                } elseif ($insights['trend']['score_change'] > 0) {
+                                    $trend_icon = 'fa-arrow-up';
+                                    $text_color = 'text-blue-600';
+                                    $bg_color = 'bg-blue-100';
+                                    $border_color = 'border-blue-200';
+                                } elseif ($insights['trend']['score_change'] < -3) {
+                                    $trend_icon = 'fa-arrow-down';
+                                    $text_color = 'text-red-600';
+                                    $bg_color = 'bg-red-100';
+                                    $border_color = 'border-red-200';
+                                } else {
+                                    $trend_icon = 'fa-minus';
+                                    $text_color = 'text-gray-600';
+                                    $bg_color = 'bg-gray-100';
+                                    $border_color = 'border-gray-200';
+                                }
+                                ?>
+                                <div class="mt-4 md:mt-2 text-center md:text-right">
+                                    <!-- Container dengan background sesuai trend -->
+                                    <div
+                                        class="inline-flex items-center <?php echo $bg_color . ' ' . $border_color; ?> border rounded-full px-3 md:px-4 py-1 md:py-2 mb-2 md:mb-3">
+                                        <!-- Icon dengan warna yang sesuai -->
+                                        <i
+                                            class="fas <?php echo $trend_icon . ' ' . $text_color; ?> text-lg md:text-xl lg:text-2xl mr-1 md:mr-2"></i>
+                                        <div class="text-left">
+                                            <p class="text-xs md:text-sm font-medium <?php echo $text_color; ?> mb-0.5">
+                                                <?php echo $insights['trend']['text']; ?>
+                                            </p>
+                                            <p class="text-xs <?php echo $text_color; ?> opacity-75">
+                                                <?php echo $insights['trend']['score_change'] > 0 ? '+' : ''; ?>
+                                                <?php echo $insights['trend']['score_change']; ?> poin
+                                                (<?php echo $insights['trend']['percent_change'] > 0 ? '+' : ''; ?>
+                                                <?php echo $insights['trend']['percent_change']; ?>%)
+                                            </p>
+                                        </div>
+                                    </div>
                                 </div>
-                                <p class="text-xs md:text-sm opacity-90"><?php echo $insights['trend']['text']; ?></p>
-                                <p class="text-xs opacity-75">
-                                    <?php echo $insights['trend']['score_change'] > 0 ? '+' : ''; ?>
-                                    <?php echo $insights['trend']['score_change']; ?> poin
-                                    (<?php echo $insights['trend']['percent_change'] > 0 ? '+' : ''; ?>
-                                    <?php echo $insights['trend']['percent_change']; ?>%)
-                                </p>
-                            </div>
                             <?php endif; ?>
                         </div>
                     </div>
@@ -676,12 +735,13 @@ $radar_values = [
                                 <span>Max: <?php echo max(array_column($trend_data, 'max_skor')); ?></span>
                             </div>
                             <div class="w-full bg-gray-200 rounded-full h-1.5 md:h-2">
-                                <?php 
+                                <?php
                                 $current_score = end($trend_data)['rata_skor'] ?? 0;
                                 $percentage = ($current_score / 50) * 100;
                                 $color = $percentage >= 80 ? 'bg-green-500' : ($percentage >= 60 ? 'bg-yellow-500' : 'bg-red-500');
                                 ?>
-                                <div class="h-1.5 md:h-2 rounded-full <?php echo $color; ?>" style="width: <?php echo $percentage; ?>%"></div>
+                                <div class="h-1.5 md:h-2 rounded-full <?php echo $color; ?>"
+                                    style="width: <?php echo $percentage; ?>%"></div>
                             </div>
                         </div>
                     </div>
@@ -702,18 +762,22 @@ $radar_values = [
                             <div class="flex justify-between text-xs md:text-sm text-gray-600 mb-1">
                                 <span>Kategori</span>
                                 <span class="font-medium">
-                                    <?php 
+                                    <?php
                                     $avg_percent = end($trend_data)['rata_persen'] ?? 0;
-                                    if ($avg_percent >= 80) echo 'Sangat Baik';
-                                    elseif ($avg_percent >= 60) echo 'Baik';
-                                    elseif ($avg_percent >= 40) echo 'Cukup';
-                                    else echo 'Kurang';
+                                    if ($avg_percent >= 80)
+                                        echo 'Sangat Baik';
+                                    elseif ($avg_percent >= 60)
+                                        echo 'Baik';
+                                    elseif ($avg_percent >= 40)
+                                        echo 'Cukup';
+                                    else
+                                        echo 'Kurang';
                                     ?>
                                 </span>
                             </div>
                             <div class="w-full bg-gray-200 rounded-full h-1.5 md:h-2">
-                                <div class="h-1.5 md:h-2 rounded-full bg-gradient-to-r from-green-400 to-green-600" 
-                                     style="width: <?php echo $avg_percent; ?>%"></div>
+                                <div class="h-1.5 md:h-2 rounded-full bg-gradient-to-r from-green-400 to-green-600"
+                                    style="width: <?php echo $avg_percent; ?>%"></div>
                             </div>
                         </div>
                     </div>
@@ -732,7 +796,8 @@ $radar_values = [
                         </div>
                         <div class="mt-3">
                             <p class="text-xs md:text-sm text-gray-600">Periode: <?php echo count($trend_data); ?> bulan</p>
-                            <p class="text-xs text-gray-500">Total: <?php echo array_sum(array_column($trend_data, 'jumlah_penilaian')); ?> penilaian</p>
+                            <p class="text-xs text-gray-500">Total:
+                                <?php echo array_sum(array_column($trend_data, 'jumlah_penilaian')); ?> penilaian</p>
                         </div>
                     </div>
                 </div>
@@ -782,16 +847,18 @@ $radar_values = [
                         <?php if (isset($insights['strengths']) && !empty($insights['strengths'])): ?>
                             <div class="space-y-3">
                                 <?php foreach ($insights['strengths'] as $strength): ?>
-                                <div class="bg-green-50 border border-green-200 rounded-lg p-3">
-                                    <div class="flex justify-between items-center mb-1 md:mb-2">
-                                        <span class="font-medium text-green-800 text-sm md:text-base"><?php echo $strength['name']; ?></span>
-                                        <span class="font-bold text-green-600 text-sm md:text-base"><?php echo $strength['score']; ?>/10</span>
+                                    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+                                        <div class="flex justify-between items-center mb-1 md:mb-2">
+                                            <span
+                                                class="font-medium text-green-800 text-sm md:text-base"><?php echo $strength['name']; ?></span>
+                                            <span
+                                                class="font-bold text-green-600 text-sm md:text-base"><?php echo $strength['score']; ?>/10</span>
+                                        </div>
+                                        <div class="w-full bg-green-100 rounded-full h-1.5 md:h-2">
+                                            <div class="bg-green-500 h-1.5 md:h-2 rounded-full"
+                                                style="width: <?php echo ($strength['score'] / 10) * 100; ?>%"></div>
+                                        </div>
                                     </div>
-                                    <div class="w-full bg-green-100 rounded-full h-1.5 md:h-2">
-                                        <div class="bg-green-500 h-1.5 md:h-2 rounded-full" 
-                                             style="width: <?php echo ($strength['score'] / 10) * 100; ?>%"></div>
-                                    </div>
-                                </div>
                                 <?php endforeach; ?>
                             </div>
                         <?php else: ?>
@@ -807,16 +874,18 @@ $radar_values = [
                         <?php if (isset($insights['weaknesses']) && !empty($insights['weaknesses'])): ?>
                             <div class="space-y-3">
                                 <?php foreach ($insights['weaknesses'] as $weakness): ?>
-                                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                                    <div class="flex justify-between items-center mb-1 md:mb-2">
-                                        <span class="font-medium text-yellow-800 text-sm md:text-base"><?php echo $weakness['name']; ?></span>
-                                        <span class="font-bold text-yellow-600 text-sm md:text-base"><?php echo $weakness['score']; ?>/10</span>
+                                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                                        <div class="flex justify-between items-center mb-1 md:mb-2">
+                                            <span
+                                                class="font-medium text-yellow-800 text-sm md:text-base"><?php echo $weakness['name']; ?></span>
+                                            <span
+                                                class="font-bold text-yellow-600 text-sm md:text-base"><?php echo $weakness['score']; ?>/10</span>
+                                        </div>
+                                        <div class="w-full bg-yellow-100 rounded-full h-1.5 md:h-2">
+                                            <div class="bg-yellow-500 h-1.5 md:h-2 rounded-full"
+                                                style="width: <?php echo ($weakness['score'] / 10) * 100; ?>%"></div>
+                                        </div>
                                     </div>
-                                    <div class="w-full bg-yellow-100 rounded-full h-1.5 md:h-2">
-                                        <div class="bg-yellow-500 h-1.5 md:h-2 rounded-full" 
-                                             style="width: <?php echo ($weakness['score'] / 10) * 100; ?>%"></div>
-                                    </div>
-                                </div>
                                 <?php endforeach; ?>
                             </div>
                         <?php else: ?>
@@ -831,36 +900,40 @@ $radar_values = [
                         </h3>
                         <div class="space-y-4 md:space-y-6">
                             <?php if (isset($insights['prediction'])): ?>
-                            <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 md:p-4">
-                                <h4 class="font-medium text-blue-800 mb-1 md:mb-2 text-sm md:text-base">Prediksi Bulan Depan</h4>
-                                <div class="text-xl md:text-3xl font-bold text-blue-600 mb-1">
-                                    <?php echo $insights['prediction']['score']; ?>/50
+                                <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 md:p-4">
+                                    <h4 class="font-medium text-blue-800 mb-1 md:mb-2 text-sm md:text-base">Prediksi Bulan Depan
+                                    </h4>
+                                    <div class="text-xl md:text-3xl font-bold text-blue-600 mb-1">
+                                        <?php echo $insights['prediction']['score']; ?>/50
+                                    </div>
+                                    <p class="text-xs md:text-sm text-blue-600">
+                                        Tingkat Kepercayaan: <?php echo $insights['prediction']['confidence']; ?>
+                                    </p>
                                 </div>
-                                <p class="text-xs md:text-sm text-blue-600">
-                                    Tingkat Kepercayaan: <?php echo $insights['prediction']['confidence']; ?>
-                                </p>
-                            </div>
                             <?php endif; ?>
 
                             <div class="bg-purple-50 border border-purple-200 rounded-lg p-3 md:p-4">
                                 <h4 class="font-medium text-purple-800 mb-2 text-sm md:text-base">Rekomendasi</h4>
                                 <ul class="space-y-1 md:space-y-2 text-xs md:text-sm text-purple-700">
                                     <?php if (isset($insights['trend']) && $insights['trend']['score_change'] > 0): ?>
-                                    <li class="flex items-start">
-                                        <i class="fas fa-check-circle text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                        <span>Pertahankan trend positif dengan konsisten belajar</span>
-                                    </li>
+                                        <li class="flex items-start">
+                                            <i
+                                                class="fas fa-check-circle text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                            <span>Pertahankan trend positif dengan konsisten belajar</span>
+                                        </li>
                                     <?php endif; ?>
-                                    
+
                                     <?php if (isset($insights['weaknesses'])): ?>
-                                    <li class="flex items-start">
-                                        <i class="fas fa-lightbulb text-yellow-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                        <span>Fokus pada area perbaikan dengan latihan khusus</span>
-                                    </li>
+                                        <li class="flex items-start">
+                                            <i
+                                                class="fas fa-lightbulb text-yellow-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                            <span>Fokus pada area perbaikan dengan latihan khusus</span>
+                                        </li>
                                     <?php endif; ?>
-                                    
+
                                     <li class="flex items-start">
-                                        <i class="fas fa-calendar-check text-blue-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                        <i
+                                            class="fas fa-calendar-check text-blue-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
                                         <span>Target: <?php echo round(end($trend_data)['rata_skor'] + 1, 1); ?>/50</span>
                                     </li>
                                 </ul>
@@ -880,72 +953,90 @@ $radar_values = [
                         <table class="min-w-full divide-y divide-gray-200 detail-table">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th class="px-3 md:px-6 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                    <th
+                                        class="px-3 md:px-6 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase">
                                         Bulan
                                     </th>
-                                    <th class="px-3 md:px-6 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                    <th
+                                        class="px-3 md:px-6 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase">
                                         Jumlah
                                     </th>
-                                    <th class="px-3 md:px-6 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                    <th
+                                        class="px-3 md:px-6 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase">
                                         Skor
                                     </th>
-                                    <th class="px-3 md:px-6 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                    <th
+                                        class="px-3 md:px-6 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase">
                                         %
                                     </th>
-                                    <th class="px-3 md:px-6 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                    <th
+                                        class="px-3 md:px-6 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase">
                                         Kategori
                                     </th>
-                                    <th class="px-3 md:px-6 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                    <th
+                                        class="px-3 md:px-6 py-2 md:py-3 text-left text-xs font-medium text-gray-500 uppercase">
                                         Range
                                     </th>
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
-                                <?php foreach ($trend_data as $data): 
+                                <?php foreach ($trend_data as $data):
                                     $kategori = '';
-                                    if ($data['rata_persen'] >= 80) $kategori = 'Sangat Baik';
-                                    elseif ($data['rata_persen'] >= 60) $kategori = 'Baik';
-                                    elseif ($data['rata_persen'] >= 40) $kategori = 'Cukup';
-                                    else $kategori = 'Kurang';
-                                    
+                                    if ($data['rata_persen'] >= 80)
+                                        $kategori = 'Sangat Baik';
+                                    elseif ($data['rata_persen'] >= 60)
+                                        $kategori = 'Baik';
+                                    elseif ($data['rata_persen'] >= 40)
+                                        $kategori = 'Cukup';
+                                    else
+                                        $kategori = 'Kurang';
+
                                     $badge_class = '';
-                                    if ($kategori == 'Sangat Baik') $badge_class = 'bg-green-100 text-green-800';
-                                    elseif ($kategori == 'Baik') $badge_class = 'bg-blue-100 text-blue-800';
-                                    elseif ($kategori == 'Cukup') $badge_class = 'bg-yellow-100 text-yellow-800';
-                                    else $badge_class = 'bg-red-100 text-red-800';
-                                ?>
-                                <tr class="hover:bg-gray-50">
-                                    <td class="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap">
-                                        <div class="font-medium text-gray-900 text-xs md:text-sm"><?php echo $data['bulan_format']; ?></div>
-                                    </td>
-                                    <td class="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap">
-                                        <span class="px-2 md:px-3 py-0.5 md:py-1 bg-gray-100 text-gray-800 rounded-full text-xs">
-                                            <?php echo $data['jumlah_penilaian']; ?>
-                                        </span>
-                                    </td>
-                                    <td class="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap">
-                                        <div class="font-bold text-gray-900 text-sm md:text-base">
-                                            <?php echo round($data['rata_skor'], 1); ?>
-                                        </div>
-                                    </td>
-                                    <td class="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap">
-                                        <div class="flex items-center">
-                                            <div class="w-12 md:w-16 bg-gray-200 rounded-full h-1.5 md:h-2.5 mr-2">
-                                                <div class="bg-blue-600 h-1.5 md:h-2.5 rounded-full" 
-                                                     style="width: <?php echo $data['rata_persen']; ?>%"></div>
+                                    if ($kategori == 'Sangat Baik')
+                                        $badge_class = 'bg-green-100 text-green-800';
+                                    elseif ($kategori == 'Baik')
+                                        $badge_class = 'bg-blue-100 text-blue-800';
+                                    elseif ($kategori == 'Cukup')
+                                        $badge_class = 'bg-yellow-100 text-yellow-800';
+                                    else
+                                        $badge_class = 'bg-red-100 text-red-800';
+                                    ?>
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap">
+                                            <div class="font-medium text-gray-900 text-xs md:text-sm">
+                                                <?php echo $data['bulan_format']; ?></div>
+                                        </td>
+                                        <td class="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap">
+                                            <span
+                                                class="px-2 md:px-3 py-0.5 md:py-1 bg-gray-100 text-gray-800 rounded-full text-xs">
+                                                <?php echo $data['jumlah_penilaian']; ?>
+                                            </span>
+                                        </td>
+                                        <td class="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap">
+                                            <div class="font-bold text-gray-900 text-sm md:text-base">
+                                                <?php echo round($data['rata_skor'], 1); ?>
                                             </div>
-                                            <span class="font-medium text-xs md:text-sm"><?php echo round($data['rata_persen'], 1); ?>%</span>
-                                        </div>
-                                    </td>
-                                    <td class="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap">
-                                        <span class="px-2 md:px-3 py-0.5 md:py-1 rounded-full text-xs font-medium <?php echo $badge_class; ?>">
-                                            <?php echo $kategori; ?>
-                                        </span>
-                                    </td>
-                                    <td class="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap text-xs text-gray-500">
-                                        <?php echo $data['min_skor']; ?>-<?php echo $data['max_skor']; ?>
-                                    </td>
-                                </tr>
+                                        </td>
+                                        <td class="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap">
+                                            <div class="flex items-center">
+                                                <div class="w-12 md:w-16 bg-gray-200 rounded-full h-1.5 md:h-2.5 mr-2">
+                                                    <div class="bg-blue-600 h-1.5 md:h-2.5 rounded-full"
+                                                        style="width: <?php echo $data['rata_persen']; ?>%"></div>
+                                                </div>
+                                                <span
+                                                    class="font-medium text-xs md:text-sm"><?php echo round($data['rata_persen'], 1); ?>%</span>
+                                            </div>
+                                        </td>
+                                        <td class="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap">
+                                            <span
+                                                class="px-2 md:px-3 py-0.5 md:py-1 rounded-full text-xs font-medium <?php echo $badge_class; ?>">
+                                                <?php echo $kategori; ?>
+                                            </span>
+                                        </td>
+                                        <td class="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap text-xs text-gray-500">
+                                            <?php echo $data['min_skor']; ?>-<?php echo $data['max_skor']; ?>
+                                        </td>
+                                    </tr>
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
@@ -962,21 +1053,24 @@ $radar_values = [
                             <h4 class="font-medium text-gray-700 mb-1 md:mb-2 text-sm md:text-base">Berdasarkan Data:</h4>
                             <ul class="space-y-1 md:space-y-2">
                                 <?php if (isset($insights['trend']) && $insights['trend']['score_change'] > 0): ?>
-                                <li class="flex items-start">
-                                    <i class="fas fa-check text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                    <span class="text-xs md:text-sm">Berikan apresiasi untuk perkembangan positif</span>
-                                </li>
+                                    <li class="flex items-start">
+                                        <i
+                                            class="fas fa-check text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                        <span class="text-xs md:text-sm">Berikan apresiasi untuk perkembangan positif</span>
+                                    </li>
                                 <?php endif; ?>
-                                
+
                                 <?php if (isset($insights['weaknesses'])): ?>
-                                <li class="flex items-start">
-                                    <i class="fas fa-exclamation-triangle text-yellow-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                    <span class="text-xs md:text-sm">Diskusikan area perbaikan dengan guru bimbel</span>
-                                </li>
+                                    <li class="flex items-start">
+                                        <i
+                                            class="fas fa-exclamation-triangle text-yellow-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                        <span class="text-xs md:text-sm">Diskusikan area perbaikan dengan guru bimbel</span>
+                                    </li>
                                 <?php endif; ?>
-                                
+
                                 <li class="flex items-start">
-                                    <i class="fas fa-clock text-blue-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                    <i
+                                        class="fas fa-clock text-blue-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
                                     <span class="text-xs md:text-sm">Pantau perkembangan bulanan secara konsisten</span>
                                 </li>
                             </ul>
@@ -985,15 +1079,18 @@ $radar_values = [
                             <h4 class="font-medium text-gray-700 mb-1 md:mb-2 text-sm md:text-base">Strategi Belajar:</h4>
                             <ul class="space-y-1 md:space-y-2">
                                 <li class="flex items-start">
-                                    <i class="fas fa-book text-purple-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                    <i
+                                        class="fas fa-book text-purple-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
                                     <span class="text-xs md:text-sm">Buat jadwal belajar rutin di rumah</span>
                                 </li>
                                 <li class="flex items-start">
-                                    <i class="fas fa-gamepad text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                    <i
+                                        class="fas fa-gamepad text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
                                     <span class="text-xs md:text-sm">Gunakan metode belajar yang menyenangkan</span>
                                 </li>
                                 <li class="flex items-start">
-                                    <i class="fas fa-comments text-red-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                    <i
+                                        class="fas fa-comments text-red-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
                                     <span class="text-xs md:text-sm">Komunikasi intens dengan guru bimbel</span>
                                 </li>
                             </ul>
@@ -1069,14 +1166,14 @@ $radar_values = [
 
         // Dropdown functionality
         document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-            toggle.addEventListener('click', function(e) {
+            toggle.addEventListener('click', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
-                
+
                 const dropdownGroup = this.closest('.mb-1');
                 const submenu = dropdownGroup.querySelector('.dropdown-submenu');
                 const arrow = this.querySelector('.arrow');
-                
+
                 // Toggle current dropdown
                 if (submenu.style.display === 'block') {
                     submenu.style.display = 'none';
@@ -1091,7 +1188,7 @@ $radar_values = [
                         t.classList.remove('open');
                         t.querySelector('.arrow').style.transform = 'rotate(0deg)';
                     });
-                    
+
                     // Open this dropdown
                     submenu.style.display = 'block';
                     arrow.style.transform = 'rotate(-90deg)';
@@ -1101,7 +1198,7 @@ $radar_values = [
         });
 
         // Close dropdowns when clicking outside
-        document.addEventListener('click', function(e) {
+        document.addEventListener('click', function (e) {
             if (!e.target.closest('.mb-1')) {
                 document.querySelectorAll('.dropdown-submenu').forEach(submenu => {
                     submenu.style.display = 'none';
@@ -1114,146 +1211,146 @@ $radar_values = [
         });
 
         // Charts
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             <?php if (!empty($chart_labels) && !empty($chart_scores)): ?>
-            // Trend Chart
-            const trendCtx = document.getElementById('trendChart').getContext('2d');
-            window.trendChart = new Chart(trendCtx, {
-                type: 'line',
-                data: {
-                    labels: <?php echo json_encode($chart_labels); ?>,
-                    datasets: [{
-                        label: 'Rata-rata Skor',
-                        data: <?php echo json_encode($chart_scores); ?>,
-                        borderColor: '#3B82F6',
-                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.4
-                    }, {
-                        label: 'Rata-rata %',
-                        data: <?php echo json_encode($chart_percentages); ?>,
-                        borderColor: '#10B981',
-                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                        borderWidth: 1,
-                        borderDash: [5, 5],
-                        fill: false,
-                        tension: 0.4,
-                        yAxisID: 'y1'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: {
-                        mode: 'index',
-                        intersect: false,
+                // Trend Chart
+                const trendCtx = document.getElementById('trendChart').getContext('2d');
+                window.trendChart = new Chart(trendCtx, {
+                    type: 'line',
+                    data: {
+                        labels: <?php echo json_encode($chart_labels); ?>,
+                        datasets: [{
+                            label: 'Rata-rata Skor',
+                            data: <?php echo json_encode($chart_scores); ?>,
+                            borderColor: '#3B82F6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4
+                        }, {
+                            label: 'Rata-rata %',
+                            data: <?php echo json_encode($chart_percentages); ?>,
+                            borderColor: '#10B981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            borderWidth: 1,
+                            borderDash: [5, 5],
+                            fill: false,
+                            tension: 0.4,
+                            yAxisID: 'y1'
+                        }]
                     },
-                    scales: {
-                        y: {
-                            type: 'linear',
-                            display: true,
-                            position: 'left',
-                            title: {
-                                display: true,
-                                text: 'Skor (max 50)'
-                            },
-                            min: 0,
-                            max: 50
-                        },
-                        y1: {
-                            type: 'linear',
-                            display: true,
-                            position: 'right',
-                            title: {
-                                display: true,
-                                text: 'Persentase %'
-                            },
-                            min: 0,
-                            max: 100,
-                            grid: {
-                                drawOnChartArea: false,
-                            },
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            position: 'top',
-                            labels: {
-                                font: {
-                                    size: window.innerWidth < 640 ? 10 : 12
-                                }
-                            }
-                        },
-                        tooltip: {
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
                             mode: 'index',
                             intersect: false,
-                            bodyFont: {
-                                size: window.innerWidth < 640 ? 10 : 12
+                        },
+                        scales: {
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                title: {
+                                    display: true,
+                                    text: 'Skor (max 50)'
+                                },
+                                min: 0,
+                                max: 50
                             },
-                            titleFont: {
-                                size: window.innerWidth < 640 ? 10 : 12
+                            y1: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                title: {
+                                    display: true,
+                                    text: 'Persentase %'
+                                },
+                                min: 0,
+                                max: 100,
+                                grid: {
+                                    drawOnChartArea: false,
+                                },
                             }
-                        }
-                    }
-                }
-            });
-
-            // Radar Chart
-            const radarCtx = document.getElementById('radarChart').getContext('2d');
-            window.radarChart = new Chart(radarCtx, {
-                type: 'radar',
-                data: {
-                    labels: <?php echo json_encode($radar_labels); ?>,
-                    datasets: [{
-                        label: 'Rata-rata Skor',
-                        data: <?php echo json_encode($radar_values); ?>,
-                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                        borderColor: '#3B82F6',
-                        borderWidth: 1,
-                        pointBackgroundColor: '#3B82F6',
-                        pointBorderColor: '#fff',
-                        pointHoverBackgroundColor: '#fff',
-                        pointHoverBorderColor: '#3B82F6'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        r: {
-                            angleLines: {
-                                display: true
-                            },
-                            suggestedMin: 0,
-                            suggestedMax: 10,
-                            ticks: {
-                                stepSize: 2,
-                                font: {
-                                    size: window.innerWidth < 640 ? 8 : 10
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                labels: {
+                                    font: {
+                                        size: window.innerWidth < 640 ? 10 : 12
+                                    }
                                 }
                             },
-                            pointLabels: {
-                                font: {
-                                    size: window.innerWidth < 640 ? 8 : 10
-                                }
-                            }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            position: 'top',
-                            labels: {
-                                font: {
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                bodyFont: {
+                                    size: window.innerWidth < 640 ? 10 : 12
+                                },
+                                titleFont: {
                                     size: window.innerWidth < 640 ? 10 : 12
                                 }
                             }
                         }
                     }
-                }
-            });
+                });
+
+                // Radar Chart
+                const radarCtx = document.getElementById('radarChart').getContext('2d');
+                window.radarChart = new Chart(radarCtx, {
+                    type: 'radar',
+                    data: {
+                        labels: <?php echo json_encode($radar_labels); ?>,
+                        datasets: [{
+                            label: 'Rata-rata Skor',
+                            data: <?php echo json_encode($radar_values); ?>,
+                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                            borderColor: '#3B82F6',
+                            borderWidth: 1,
+                            pointBackgroundColor: '#3B82F6',
+                            pointBorderColor: '#fff',
+                            pointHoverBackgroundColor: '#fff',
+                            pointHoverBorderColor: '#3B82F6'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            r: {
+                                angleLines: {
+                                    display: true
+                                },
+                                suggestedMin: 0,
+                                suggestedMax: 10,
+                                ticks: {
+                                    stepSize: 2,
+                                    font: {
+                                        size: window.innerWidth < 640 ? 8 : 10
+                                    }
+                                },
+                                pointLabels: {
+                                    font: {
+                                        size: window.innerWidth < 640 ? 8 : 10
+                                    }
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                labels: {
+                                    font: {
+                                        size: window.innerWidth < 640 ? 10 : 12
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
             <?php endif; ?>
-            
+
             // Update server time
             function updateServerTime() {
                 const now = new Date();
@@ -1263,31 +1360,32 @@ $radar_values = [
                     timeElement.textContent = timeString;
                 }
             }
-            
+
             setInterval(updateServerTime, 1000);
             updateServerTime();
         });
-        
+
         // Handle window resize for charts
-        window.addEventListener('resize', function() {
+        window.addEventListener('resize', function () {
             <?php if (!empty($chart_labels) && !empty($chart_scores)): ?>
-            // Update chart font sizes on resize
-            if (window.trendChart && window.radarChart) {
-                const fontSize = window.innerWidth < 640 ? 10 : 12;
-                const pointLabelSize = window.innerWidth < 640 ? 8 : 10;
-                
-                window.trendChart.options.plugins.legend.labels.font.size = fontSize;
-                window.trendChart.options.plugins.tooltip.bodyFont.size = fontSize;
-                window.trendChart.options.plugins.tooltip.titleFont.size = fontSize;
-                window.trendChart.update();
-                
-                window.radarChart.options.scales.r.ticks.font.size = pointLabelSize;
-                window.radarChart.options.scales.r.pointLabels.font.size = pointLabelSize;
-                window.radarChart.options.plugins.legend.labels.font.size = fontSize;
-                window.radarChart.update();
-            }
+                // Update chart font sizes on resize
+                if (window.trendChart && window.radarChart) {
+                    const fontSize = window.innerWidth < 640 ? 10 : 12;
+                    const pointLabelSize = window.innerWidth < 640 ? 8 : 10;
+
+                    window.trendChart.options.plugins.legend.labels.font.size = fontSize;
+                    window.trendChart.options.plugins.tooltip.bodyFont.size = fontSize;
+                    window.trendChart.options.plugins.tooltip.titleFont.size = fontSize;
+                    window.trendChart.update();
+
+                    window.radarChart.options.scales.r.ticks.font.size = pointLabelSize;
+                    window.radarChart.options.scales.r.pointLabels.font.size = pointLabelSize;
+                    window.radarChart.options.plugins.legend.labels.font.size = fontSize;
+                    window.radarChart.update();
+                }
             <?php endif; ?>
         });
     </script>
 </body>
+
 </html>
