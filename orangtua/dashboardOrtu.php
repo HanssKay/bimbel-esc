@@ -188,26 +188,28 @@ $statistik = [
 
 if ($orangtua_id > 0 && !empty($penilaian_terbaru)) {
     $statistik['total_penilaian'] = count($penilaian_terbaru);
-
+    
+    // Hanya jumlahkan total_score dari penilaian terbaru
     $total_skor = 0;
     $kategori_count = [];
-
+    
     foreach ($penilaian_terbaru as $penilaian) {
-        $total_skor += $penilaian['total_score'];
-
+        $total_skor += $penilaian['total_score'];  // Jumlahkan saja, tidak dibagi
+        
         $kategori = $penilaian['kategori'];
         $kategori_count[$kategori] = isset($kategori_count[$kategori]) ?
             $kategori_count[$kategori] + 1 : 1;
     }
-
-    // Rata-rata total skor (max 50, bukan 110)
-    $statistik['rata_total_skor'] = round($total_skor / $statistik['total_penilaian'], 1);
-
+    
+    // SIMPAN TOTAL SKOR (bukan rata-rata)
+    $statistik['total_skor'] = $total_skor;  // <-- INI TOTAL SKOR
+    $statistik['max_skor'] = count($penilaian_terbaru) * 50;  // Maksimal skor
+    
     if (!empty($kategori_count)) {
         arsort($kategori_count);
         $kategori_keys = array_keys($kategori_count);
         $statistik['kategori_terbaik'] = $kategori_keys[0];
-
+        
         asort($kategori_count);
         $kategori_keys = array_keys($kategori_count);
         $statistik['kategori_terburuk'] = $kategori_keys[0];
