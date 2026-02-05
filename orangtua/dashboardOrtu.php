@@ -737,7 +737,7 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                             <i class="fas fa-star text-purple-600 text-lg md:text-xl"></i>
                         </div>
                         <div>
-                            p class="text-xs md:text-sm text-gray-600">Skor Terbaru</p>
+                            <p class="text-xs md:text-sm text-gray-600"> Skor Terbaru </p>
                             <p class="text-xl md:text-2xl font-bold text-gray-800">
                                 <?php echo $statistik['skor_terbaru']; ?>/50
                             </p>
