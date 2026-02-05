@@ -868,14 +868,6 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                                                 else
                                                     $badge_class = 'badge-kurang';
                                                 ?>
-                                                <div class="mt-1 flex items-center gap-2">
-                                                    <span class="text-xs px-2 py-1 rounded-full <?php echo $badge_class; ?>">
-                                                        <?php echo htmlspecialchars($anak_dashboard['kategori_terkini']); ?>
-                                                    </span>
-                                                    <span class="text-xs text-gray-500">
-                                                        <?php echo $anak_dashboard['aktif_pendaftaran'] ?? 0; ?> program aktif
-                                                    </span>
-                                                </div>
                                             <?php endif; ?>
                                         </div>
                                         <button onclick="showDetailAnak(<?php echo $anak['id']; ?>)"
@@ -1381,57 +1373,6 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                             </div>
                         </div>
                         ` : ''}
-                        
-                        <!-- Statistik -->
-                        <div class="bg-gradient-to-r from-gray-50 to-white border border-gray-200 rounded-lg p-4 md:p-5 shadow-sm">
-                            <h3 class="text-base md:text-lg font-semibold text-gray-800 mb-3 md:mb-4 pb-2 border-b">
-                                <i class="fas fa-chart-bar mr-2"></i> Statistik Penilaian
-                            </h3>
-                            
-                            ${stat.total_penilaian > 0 ? `
-                            <div class="space-y-3 md:space-y-4">
-                                <!-- Stats Cards -->
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
-                                    <div class="bg-white rounded-lg p-3 md:p-4 text-center border">
-                                        <div class="text-2xl md:text-3xl font-bold text-blue-600">${stat.total_penilaian}</div>
-                                        <div class="text-xs md:text-sm text-gray-600 mt-1">Total Penilaian</div>
-                                    </div>
-                                    <div class="bg-white rounded-lg p-3 md:p-4 text-center border">
-                                        <div class="text-2xl md:text-3xl font-bold text-green-600">${Math.round(stat.rata_skor || 0)}/50</div>
-                                        <div class="text-xs md:text-sm text-gray-600 mt-1">Rata-rata Skor</div>
-                                    </div>
-                                    <div class="bg-white rounded-lg p-3 md:p-4 text-center border">
-                                        <div class="text-2xl md:text-3xl font-bold ${badgeClass} text-white p-2 md:p-2 rounded">${kategori}</div>
-                                        <div class="text-xs md:text-sm text-gray-600 mt-1">Kategori Terakhir</div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Progress Bar -->
-                                <div class="mt-4 md:mt-6">
-                                    <div class="flex justify-between mb-1 md:mb-2">
-                                        <span class="text-xs md:text-sm font-medium text-gray-700">Rata-rata Persentase</span>
-                                        <span class="text-xs md:text-sm font-medium text-gray-700">${Math.round(stat.rata_persentase || 0)}%</span>
-                                    </div>
-                                    <div class="w-full bg-gray-200 rounded-full h-2 md:h-4">
-                                        <div class="bg-gradient-to-r from-blue-500 to-blue-600 h-2 md:h-4 rounded-full" 
-                                            style="width: ${stat.rata_persentase || 0}%">
-                                        </div>
-                                    </div>
-                                    <div class="flex justify-between text-xs text-gray-500 mt-1">
-                                        <span>0%</span>
-                                        <span>50%</span>
-                                        <span>100%</span>
-                                    </div>
-                                </div>
-                            </div>
-                            ` : `
-                            <div class="text-center py-6 md:py-8">
-                                <i class="fas fa-clipboard-list text-3xl md:text-4xl text-gray-300 mb-3"></i>
-                                <p class="text-gray-600 text-base md:text-lg">Belum ada data penilaian</p>
-                                <p class="text-gray-500 text-sm md:text-base mt-1">Anak ini belum mendapatkan penilaian dari guru</p>
-                            </div>
-                            `}
-                        </div>
                     </div>
                 `;
             }
