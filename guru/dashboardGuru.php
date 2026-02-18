@@ -106,43 +106,7 @@ try {
                 }
             }
             $stmt->close();
-        }
-
-        // 3. DETAIL JADWAL PER HARI
-        $sql = "SELECT 
-                    smg.hari,
-                    COUNT(DISTINCT sp.siswa_id) as jumlah_siswa,
-                    GROUP_CONCAT(DISTINCT s.nama_lengkap ORDER BY s.nama_lengkap SEPARATOR ', ') as nama_siswa,
-                    DATE_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai_format,
-                    DATE_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai_format,
-                    sp.nama_pelajaran
-                FROM siswa_pelajaran sp 
-                INNER JOIN siswa s ON sp.siswa_id = s.id
-                INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                INNER JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id
-                INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
-                WHERE sp.guru_id = ? 
-                AND sp.status = 'aktif'
-                AND ps.status = 'aktif'
-                AND jb.status = 'aktif'
-                AND smg.guru_id = ?
-                GROUP BY smg.hari, smg.jam_mulai, smg.jam_selesai, sp.nama_pelajaran
-                ORDER BY FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
-                         smg.jam_mulai";
-        
-        $stmt = $conn->prepare($sql);
-        if ($stmt) {
-            $stmt->bind_param("ii", $guru_id, $guru_id);
-            if ($stmt->execute()) {
-                $result = $stmt->get_result();
-                if ($result) {
-                    while ($row = $result->fetch_assoc()) {
-                        $jadwal_per_hari[] = $row;
-                    }
-                }
-            }
-            $stmt->close();
-        }
+        } 
 
         // ============== PERBAIKAN DI SINI ==============
         // 4. TOTAL PENILAIAN - DENGAN SQL_NO_CACHE
