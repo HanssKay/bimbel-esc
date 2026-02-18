@@ -4,8 +4,8 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
 require_once '../includes/config.php';
-require_once '../config/menu.php'; 
-require_once '../includes/menu_functions.php'; 
+require_once '../config/menu.php';
+require_once '../includes/menu_functions.php';
 
 // CEK LOGIN & ROLE
 if (!isset($_SESSION['user_id'])) {
@@ -46,6 +46,9 @@ try {
     error_log("Error getting guru_id: " . $e->getMessage());
 }
 
+// Debug: Cek guru_id yang login
+error_log("Current user_id: " . $user_id . ", guru_id: " . $guru_id);
+
 // Hitung statistik dengan error handling
 $statistics = [
     'total_siswa' => 0,
@@ -70,20 +73,20 @@ try {
                 WHERE sp.guru_id = ? 
                 AND sp.status = 'aktif' 
                 AND ps.status = 'aktif'";
-        
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("i", $guru_id);
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result && $row = $result->fetch_assoc()) {
-                    $statistics['total_siswa'] = (int)$row['total'];
+                    $statistics['total_siswa'] = (int) $row['total'];
                 }
             }
             $stmt->close();
         }
 
-        // 2. SISWA DENGAN JADWAL AKTIF (Query yang error - diperbaiki)
+        // 2. SISWA DENGAN JADWAL AKTIF
         $sql = "SELECT COUNT(DISTINCT s.id) as total 
                 FROM siswa_pelajaran sp 
                 INNER JOIN siswa s ON sp.siswa_id = s.id
@@ -95,14 +98,14 @@ try {
                 AND ps.status = 'aktif'
                 AND jb.status = 'aktif'
                 AND smg.guru_id = ?";
-        
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("ii", $guru_id, $guru_id);
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result && $row = $result->fetch_assoc()) {
-                    $statistics['total_siswa_jadwal'] = (int)$row['total'];
+                    $statistics['total_siswa_jadwal'] = (int) $row['total'];
                 }
             }
             $stmt->close();
@@ -129,7 +132,7 @@ try {
                 GROUP BY smg.hari, smg.jam_mulai, smg.jam_selesai, sp.nama_pelajaran
                 ORDER BY FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
                          smg.jam_mulai";
-        
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("ii", $guru_id, $guru_id);
@@ -152,23 +155,28 @@ try {
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result && $row = $result->fetch_assoc()) {
-                    $statistics['total_penilaian'] = (int)$row['total'];
+                    $statistics['total_penilaian'] = (int) $row['total'];
                 }
             }
             $stmt->close();
         }
 
-        // 5. PENILAIAN BULAN INI
+        // 5. PENILAIAN BULAN INI - FIXED: Gunakan periode_penilaian atau tanggal_penilaian
         $current_month = date('Y-m');
+        $current_month_name = date('F Y'); // Contoh: February 2026
+
+        // Cek berdasarkan periode_penilaian dulu, lalu fallback ke tanggal_penilaian
         $sql = "SELECT COUNT(*) as total FROM penilaian_siswa 
-                WHERE guru_id = ? AND DATE_FORMAT(tanggal_penilaian, '%Y-%m') = ?";
+                WHERE guru_id = ? 
+                AND (periode_penilaian = ? OR DATE_FORMAT(tanggal_penilaian, '%Y-%m') = ?)";
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
-            $stmt->bind_param("is", $guru_id, $current_month);
+            $stmt->bind_param("iss", $guru_id, $current_month_name, $current_month);
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result && $row = $result->fetch_assoc()) {
-                    $statistics['penilaian_bulan_ini'] = (int)$row['total'];
+                    $statistics['penilaian_bulan_ini'] = (int) $row['total'];
                 }
             }
             $stmt->close();
@@ -184,7 +192,7 @@ try {
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result && $row = $result->fetch_assoc()) {
-                    $statistics['rata_nilai'] = number_format((float)$row['rata_nilai'], 1);
+                    $statistics['rata_nilai'] = number_format((float) $row['rata_nilai'], 1);
                 }
             }
             $stmt->close();
@@ -199,7 +207,7 @@ try {
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result && $row = $result->fetch_assoc()) {
-                    $statistics['total_pelajaran'] = (int)$row['total'];
+                    $statistics['total_pelajaran'] = (int) $row['total'];
                 }
             }
             $stmt->close();
@@ -221,7 +229,7 @@ try {
                 if ($result && $row = $result->fetch_assoc()) {
                     $statistics['siswa_terbaik'] = [
                         'nama_lengkap' => $row['nama_lengkap'] ?? '-',
-                        'total_score' => (int)($row['total_score'] ?? 0),
+                        'total_score' => (int) ($row['total_score'] ?? 0),
                         'nama_pelajaran' => $row['nama_pelajaran'] ?? '-'
                     ];
                 }
@@ -229,15 +237,16 @@ try {
             $stmt->close();
         }
 
-        // 9. PENILAIAN TERBARU
-        $sql = "SELECT ps.*, s.nama_lengkap as nama_siswa, s.kelas, sp.nama_pelajaran
+        // 9. PENILAIAN TERBARU - FIXED: Tambah validasi dan debug
+        $sql = "SELECT ps.*, s.nama_lengkap as nama_siswa, s.kelas, 
+                       COALESCE(sp.nama_pelajaran, 'Tanpa Pelajaran') as nama_pelajaran
                 FROM penilaian_siswa ps
                 INNER JOIN siswa s ON ps.siswa_id = s.id
                 LEFT JOIN siswa_pelajaran sp ON ps.siswa_pelajaran_id = sp.id
                 WHERE ps.guru_id = ?
                 ORDER BY ps.tanggal_penilaian DESC 
-                LIMIT 5";
-        
+                LIMIT 10"; // Tambah limit untuk debug
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("i", $guru_id);
@@ -252,8 +261,8 @@ try {
             $stmt->close();
         }
 
-        // 10. SISWA YANG BELUM DINILAI BULAN INI
-        $sql = "SELECT DISTINCT sp.siswa_id as id, s.nama_lengkap, s.kelas, sp.nama_pelajaran
+        // 10. SISWA YANG BELUM DINILAI BULAN INI - FIXED: Perbaiki query
+        $sql = "SELECT DISTINCT s.id, s.nama_lengkap, s.kelas, sp.nama_pelajaran
                 FROM siswa_pelajaran sp
                 INNER JOIN siswa s ON sp.siswa_id = s.id
                 INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
@@ -265,14 +274,16 @@ try {
                     FROM penilaian_siswa pn 
                     WHERE pn.siswa_id = sp.siswa_id 
                     AND pn.siswa_pelajaran_id = sp.id
-                    AND DATE_FORMAT(pn.tanggal_penilaian, '%Y-%m') = ?
+                    AND (pn.periode_penilaian = ? OR DATE_FORMAT(pn.tanggal_penilaian, '%Y-%m') = ?)
                 )
+                ORDER BY s.nama_lengkap
                 LIMIT 5";
-        
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
+            $current_month_name = date('F Y'); // Contoh: February 2026
             $current_month = date('Y-m');
-            $stmt->bind_param("is", $guru_id, $current_month);
+            $stmt->bind_param("iss", $guru_id, $current_month_name, $current_month);
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result) {
@@ -283,12 +294,19 @@ try {
             }
             $stmt->close();
         }
+
+        // Debug: Cek jumlah data
+        error_log("Total penilaian untuk guru_id $guru_id: " . $statistics['total_penilaian']);
+        error_log("Penilaian bulan ini: " . $statistics['penilaian_bulan_ini']);
+        error_log("Jumlah penilaian terbaru: " . count($penilaian_terbaru));
     }
 
 } catch (Exception $e) {
     error_log("Error in dashboardGuru.php: " . $e->getMessage());
-    // Tetap gunakan default values yang sudah ditetapkan
 }
+
+// Debug info di HTML (hidden)
+$debug_info = "Guru ID: $guru_id, Total Penilaian: " . $statistics['total_penilaian'] . ", Bulan Ini: " . $statistics['penilaian_bulan_ini'];
 ?>
 
 <!DOCTYPE html>
@@ -309,7 +327,7 @@ try {
             transform: translateY(-5px);
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
         }
-        
+
         /* Dropdown styles */
         .dropdown-submenu {
             display: none;
@@ -370,15 +388,15 @@ try {
             .desktop-sidebar {
                 display: block;
             }
-            
+
             .mobile-header {
                 display: none;
             }
-            
+
             #mobileMenu {
                 display: none;
             }
-            
+
             .menu-overlay {
                 display: none !important;
             }
@@ -388,11 +406,11 @@ try {
             .desktop-sidebar {
                 display: none;
             }
-            
+
             .stat-card {
                 padding: 1rem !important;
             }
-            
+
             .quick-action-btn {
                 padding: 0.75rem !important;
             }
@@ -401,6 +419,9 @@ try {
 </head>
 
 <body class="bg-gray-100">
+    <!-- Hidden debug info -->
+    <!-- <?php echo $debug_info; ?> -->
+
     <!-- Desktop Sidebar -->
     <div class="desktop-sidebar w-64 bg-blue-800 text-white fixed h-full z-40">
         <div class="p-4">
@@ -418,7 +439,8 @@ try {
                     <p class="font-medium"><?php echo htmlspecialchars($full_name); ?></p>
                     <p class="text-sm text-blue-300">Guru</p>
                     <?php if (!empty($guru_detail['bidang_keahlian'])): ?>
-                        <p class="text-xs text-blue-200"><?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?></p>
+                        <p class="text-xs text-blue-200"><?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?>
+                        </p>
                     <?php endif; ?>
                 </div>
             </div>
@@ -474,7 +496,9 @@ try {
                         <p class="font-medium"><?php echo htmlspecialchars($full_name); ?></p>
                         <p class="text-sm text-blue-300">Guru</p>
                         <?php if (!empty($guru_detail['bidang_keahlian'])): ?>
-                            <p class="text-xs text-blue-200"><?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?></p>
+                            <p class="text-xs text-blue-200">
+                                <?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?>
+                            </p>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -503,7 +527,8 @@ try {
                     <?php endif; ?>
                 </div>
                 <div class="mt-2 md:mt-0 text-right">
-                    <span class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-800">
+                    <span
+                        class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-800">
                         <i class="fas fa-calendar-alt mr-2"></i>
                         <?php echo date('d F Y'); ?>
                     </span>
@@ -523,7 +548,9 @@ try {
                         </div>
                         <div>
                             <p class="text-gray-600 text-sm md:text-base">Total Siswa Diajar</p>
-                            <h3 class="text-2xl font-bold text-gray-800"><?php echo number_format($statistics['total_siswa']); ?></h3>
+                            <h3 class="text-2xl font-bold text-gray-800">
+                                <?php echo number_format($statistics['total_siswa']); ?>
+                            </h3>
                         </div>
                     </div>
                 </div>
@@ -536,7 +563,9 @@ try {
                         </div>
                         <div>
                             <p class="text-gray-600 text-sm md:text-base">Siswa dengan Jadwal</p>
-                            <h3 class="text-2xl font-bold text-gray-800"><?php echo number_format($statistics['total_siswa_jadwal']); ?></h3>
+                            <h3 class="text-2xl font-bold text-gray-800">
+                                <?php echo number_format($statistics['total_siswa_jadwal']); ?>
+                            </h3>
                             <p class="text-xs text-gray-500 mt-1">Memiliki jadwal aktif</p>
                         </div>
                     </div>
@@ -550,7 +579,9 @@ try {
                         </div>
                         <div>
                             <p class="text-gray-600 text-sm md:text-base">Total Penilaian</p>
-                            <h3 class="text-2xl font-bold text-gray-800"><?php echo number_format($statistics['total_penilaian']); ?></h3>
+                            <h3 class="text-2xl font-bold text-gray-800">
+                                <?php echo number_format($statistics['total_penilaian']); ?>
+                            </h3>
                         </div>
                     </div>
                 </div>
@@ -563,13 +594,14 @@ try {
                         </div>
                         <div>
                             <p class="text-gray-600 text-sm md:text-base">Penilaian Bulan Ini</p>
-                            <h3 class="text-2xl font-bold text-gray-800"><?php echo number_format($statistics['penilaian_bulan_ini']); ?></h3>
+                            <h3 class="text-2xl font-bold text-gray-800">
+                                <?php echo number_format($statistics['penilaian_bulan_ini']); ?>
+                            </h3>
                             <p class="text-xs text-gray-500 mt-1"><?php echo date('F Y'); ?></p>
                         </div>
                     </div>
                 </div>
             </div>
-
 
             <!-- Recent Data -->
             <div class="grid grid-cols-1 gap-8 mb-8">
@@ -584,48 +616,53 @@ try {
                         <div class="flow-root">
                             <ul class="divide-y divide-gray-200">
                                 <?php if (count($penilaian_terbaru) > 0): ?>
-                                    <?php foreach ($penilaian_terbaru as $penilaian): ?>
-                                        <li class="py-3 hover:bg-gray-50">
-                                            <div class="flex items-center space-x-4">
-                                                <div class="flex-shrink-0">
-                                                    <div class="h-10 w-10 rounded-full 
+                                        <?php foreach ($penilaian_terbaru as $penilaian): ?>
+                                                                        <li class="py-3 hover:bg-gray-50">
+                                                                            <div class="flex items-center space-x-4">
+                                                                                <div class="flex-shrink-0">
+                                                                                    <div class="h-10 w-10 rounded-full 
                                                         <?php
                                                         $score = $penilaian['total_score'] ?? 0;
-                                                        if ($score >= 40) echo 'bg-green-100 text-green-800';
-                                                        elseif ($score >= 30) echo 'bg-blue-100 text-blue-800';
-                                                        elseif ($score >= 20) echo 'bg-yellow-100 text-yellow-800';
-                                                        else echo 'bg-red-100 text-red-800';
+                                                        if ($score >= 40)
+                                                            echo 'bg-green-100 text-green-800';
+                                                        elseif ($score >= 30)
+                                                            echo 'bg-blue-100 text-blue-800';
+                                                        elseif ($score >= 20)
+                                                            echo 'bg-yellow-100 text-yellow-800';
+                                                        else
+                                                            echo 'bg-red-100 text-red-800';
                                                         ?> flex items-center justify-center">
-                                                        <span class="text-xs font-bold">
-                                                            <?php echo $score; ?>
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                                <div class="flex-1 min-w-0">
-                                                    <p class="text-sm font-medium text-gray-900 truncate">
-                                                        <?php echo htmlspecialchars($penilaian['nama_siswa'] ?? 'N/A'); ?>
-                                                    </p>
-                                                    <p class="text-sm text-gray-500 truncate">
-                                                        <?php echo htmlspecialchars($penilaian['nama_pelajaran'] ?? 'N/A'); ?> | 
-                                                        Kelas: <?php echo htmlspecialchars($penilaian['kelas'] ?? 'N/A'); ?>
-                                                    </p>
-                                                </div>
-                                                <div class="text-right">
-                                                    <div class="text-sm font-semibold text-gray-900">
-                                                        <?php echo $penilaian['total_score'] ?? 0; ?>/50
-                                                    </div>
-                                                    <div class="text-xs text-gray-500">
-                                                        <?php echo isset($penilaian['tanggal_penilaian']) ? date('d M Y', strtotime($penilaian['tanggal_penilaian'])) : '-'; ?>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </li>
-                                    <?php endforeach; ?>
+                                                                                        <span class="text-xs font-bold">
+                                                                                            <?php echo $score; ?>
+                                                                                        </span>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div class="flex-1 min-w-0">
+                                                                                    <p class="text-sm font-medium text-gray-900 truncate">
+                                                                                        <?php echo htmlspecialchars($penilaian['nama_siswa'] ?? 'N/A'); ?>
+                                                                                    </p>
+                                                                                    <p class="text-sm text-gray-500 truncate">
+                                                                                        <?php echo htmlspecialchars($penilaian['nama_pelajaran'] ?? 'N/A'); ?> | 
+                                                                                        Kelas: <?php echo htmlspecialchars($penilaian['kelas'] ?? 'N/A'); ?>
+                                                                                    </p>
+                                                                                </div>
+                                                                                <div class="text-right">
+                                                                                    <div class="text-sm font-semibold text-gray-900">
+                                                                                        <?php echo $penilaian['total_score'] ?? 0; ?>/50
+                                                                                    </div>
+                                                                                    <div class="text-xs text-gray-500">
+                                                                                        <?php echo isset($penilaian['tanggal_penilaian']) ? date('d M Y', strtotime($penilaian['tanggal_penilaian'])) : '-'; ?>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        </li>
+                                                    <?php endforeach; ?>
                                 <?php else: ?>
-                                    <li class="py-4 text-center text-gray-500">
-                                        <i class="fas fa-clipboard-list text-2xl mb-2"></i>
-                                        <p>Belum ada data penilaian</p>
-                                    </li>
+                                                    <li class="py-4 text-center text-gray-500">
+                                                        <i class="fas fa-clipboard-list text-2xl mb-2"></i>
+                                                        <p>Belum ada data penilaian</p>
+                                                        <p class="text-xs text-gray-400 mt-1">Silakan input penilaian baru</p>
+                                                    </li>
                                 <?php endif; ?>
                             </ul>
                         </div>
@@ -637,7 +674,10 @@ try {
                     </div>
                 </div>
 
+               
             </div>
+
+            
 
             <!-- Quick Actions -->
             <div class="bg-white shadow rounded-lg p-6">
@@ -661,12 +701,12 @@ try {
                         <span class="text-xs text-gray-500 mt-1">Lihat siswa</span>
                     </a>
 
-                    <a href="laporanGuru.php" class="flex flex-col items-center justify-center p-6 bg-yellow-50 hover:bg-yellow-100 rounded-lg transition duration-300">
-                        <div class="h-12 w-12 rounded-full bg-yellow-600 flex items-center justify-center mb-3">
-                            <i class="fas fa-chart-bar text-white text-xl"></i>
+                    <a href="absensiGuru.php" class="flex flex-col items-center justify-center p-6 bg-orange-50 hover:bg-orange-100 rounded-lg transition duration-300">
+                        <div class="h-12 w-12 rounded-full bg-orange-600 flex items-center justify-center mb-3">
+                            <i class="fas fa-calendar-check text-white text-xl"></i>
                         </div>
-                        <span class="text-sm font-medium text-gray-900">Laporan</span>
-                        <span class="text-xs text-gray-500 mt-1">Analisis data</span>
+                        <span class="text-sm font-medium text-gray-900">Absensi</span>
+                        <span class="text-xs text-gray-500 mt-1">Input kehadiran</span>
                     </a>
 
                     <a href="riwayat.php" class="flex flex-col items-center justify-center p-6 bg-purple-50 hover:bg-purple-100 rounded-lg transition duration-300">
@@ -805,6 +845,12 @@ try {
 
         setInterval(updateServerTime, 1000);
         updateServerTime();
+
+        // Debug info di console
+        console.log('Guru ID:', <?php echo $guru_id; ?>);
+        console.log('Total Penilaian:', <?php echo $statistics['total_penilaian']; ?>);
+        console.log('Penilaian Bulan Ini:', <?php echo $statistics['penilaian_bulan_ini']; ?>);
+        console.log('Data Penilaian Terbaru:', <?php echo json_encode($penilaian_terbaru); ?>);
     </script>
 </body>
 </html>
