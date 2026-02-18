@@ -220,20 +220,20 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
 
                 // QUERY 7: Ambil jadwal belajar - DIPERBAIKI
                 $sql_jadwal = "SELECT DISTINCT 
-                              smg.hari,
-                              smg.jam_mulai as jam_mulai_original,
-                              TIME_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai,
-                              TIME_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai,
-                              sp.nama_pelajaran
-                              FROM jadwal_belajar jb
-                              INNER JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
-                              INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
-                              WHERE sp.siswa_id = ?
-                              AND sp.guru_id = ?
-                              AND jb.status = 'aktif'
-                              AND sp.status = 'aktif'
-                              ORDER BY FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'), 
-                                       smg.jam_mulai_original";
+              smg.hari,
+              smg.jam_mulai,  // LANGSUNG PAKAI NAMA KOLOM ASLI
+              TIME_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai_format,
+              TIME_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai_format,
+              sp.nama_pelajaran
+              FROM jadwal_belajar jb
+              INNER JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
+              INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+              WHERE sp.siswa_id = ?
+              AND sp.guru_id = ?
+              AND jb.status = 'aktif'
+              AND sp.status = 'aktif'
+              ORDER BY FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'), 
+                       smg.jam_mulai";  // PAKAI NAMA KOLOM ASLI
 
                 $stmt7 = $conn->prepare($sql_jadwal);
                 if ($stmt7 === false) {
@@ -245,8 +245,8 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                     $jadwal_list = [];
                     while ($jadwal_row = $jadwal_result->fetch_assoc()) {
                         $jadwal_list[] = $jadwal_row['hari'] . ' ' .
-                            $jadwal_row['jam_mulai'] . '-' .
-                            $jadwal_row['jam_selesai'] . ' (' .
+                            $jadwal_row['jam_mulai_format'] . '-' .
+                            $jadwal_row['jam_selesai_format'] . ' (' .
                             $jadwal_row['nama_pelajaran'] . ')';
                     }
                     $siswa_detail['jadwal_belajar'] = implode(', ', $jadwal_list);
