@@ -221,7 +221,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                 // QUERY 7: Ambil jadwal belajar - DIPERBAIKI
                 $sql_jadwal = "SELECT DISTINCT 
               smg.hari,
-              smg.jam_mulai,  // LANGSUNG PAKAI NAMA KOLOM ASLI
+              smg.jam_mulai, 
               TIME_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai_format,
               TIME_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai_format,
               sp.nama_pelajaran
