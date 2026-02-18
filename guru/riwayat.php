@@ -1057,292 +1057,370 @@ foreach ($riwayat_penilaian as $penilaian) {
         </div>
     </div>
 
-    <!-- JavaScript -->
-    <script>
-        // Mobile Menu Toggle
-        const menuToggle = document.getElementById('menuToggle');
-        const menuClose = document.getElementById('menuClose');
-        const mobileMenu = document.getElementById('mobileMenu');
-        const menuOverlay = document.getElementById('menuOverlay');
+   <!-- JavaScript -->
+<script>
+    // Mobile Menu Toggle
+    const menuToggle = document.getElementById('menuToggle');
+    const menuClose = document.getElementById('menuClose');
+    const mobileMenu = document.getElementById('mobileMenu');
+    const menuOverlay = document.getElementById('menuOverlay');
 
-        if (menuToggle) {
-            menuToggle.addEventListener('click', () => {
-                mobileMenu.classList.add('menu-open');
-                menuOverlay.classList.add('active');
-                document.body.style.overflow = 'hidden';
-            });
-        }
-
-        if (menuClose) {
-            menuClose.addEventListener('click', () => {
-                mobileMenu.classList.remove('menu-open');
-                menuOverlay.classList.remove('active');
-                document.body.style.overflow = 'auto';
-            });
-        }
-
-        if (menuOverlay) {
-            menuOverlay.addEventListener('click', () => {
-                mobileMenu.classList.remove('menu-open');
-                menuOverlay.classList.remove('active');
-                document.body.style.overflow = 'auto';
-            });
-        }
-
-        // Close menu when clicking on menu items
-        document.querySelectorAll('.menu-item').forEach(item => {
-            item.addEventListener('click', () => {
-                mobileMenu.classList.remove('menu-open');
-                menuOverlay.classList.remove('active');
-                document.body.style.overflow = 'auto';
-            });
+    if (menuToggle) {
+        menuToggle.addEventListener('click', () => {
+            mobileMenu.classList.add('menu-open');
+            menuOverlay.classList.add('active');
+            document.body.style.overflow = 'hidden';
         });
+    }
 
-        let currentPenilaianId = null;
-        let penilaianToDelete = null;
-        let studentNameToDelete = '';
-        
-        // Fungsi untuk menampilkan detail penilaian
-        function showDetail(penilaianId) {
-            currentPenilaianId = penilaianId;
-            const modal = document.getElementById('detailModal');
-            const content = document.getElementById('modalContent');
-            
-            // Close mobile menu if open
+    if (menuClose) {
+        menuClose.addEventListener('click', () => {
             mobileMenu.classList.remove('menu-open');
             menuOverlay.classList.remove('active');
-            
-            // Tampilkan loading
-            content.innerHTML = `
-                <div class="text-center py-8">
-                    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-                    <p class="mt-4 text-gray-600">Memuat data penilaian...</p>
-                </div>
-            `;
-            
-            modal.style.display = 'block';
-            document.body.style.overflow = 'hidden';
-            
-            // Ambil data dari server
-            fetch(`get_penilaian_detail.php?id=${penilaianId}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        content.innerHTML = renderDetailContent(data.data);
-                    } else {
-                        content.innerHTML = `
-                            <div class="text-center py-8 text-red-600">
-                                <i class="fas fa-exclamation-triangle text-3xl"></i>
-                                <p class="mt-2 text-lg">${data.message || 'Gagal memuat data'}</p>
-                            </div>
-                        `;
-                    }
-                })
-                .catch(error => {
+            document.body.style.overflow = 'auto';
+        });
+    }
+
+    if (menuOverlay) {
+        menuOverlay.addEventListener('click', () => {
+            mobileMenu.classList.remove('menu-open');
+            menuOverlay.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        });
+    }
+
+    // Close menu when clicking on menu items
+    document.querySelectorAll('.menu-item').forEach(item => {
+        item.addEventListener('click', () => {
+            mobileMenu.classList.remove('menu-open');
+            menuOverlay.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        });
+    });
+
+    let currentPenilaianId = null;
+    let penilaianToDelete = null;
+    let studentNameToDelete = '';
+
+    // Fungsi untuk menampilkan detail penilaian
+    function showDetail(penilaianId) {
+        currentPenilaianId = penilaianId;
+        const modal = document.getElementById('detailModal');
+        const content = document.getElementById('modalContent');
+
+        // Close mobile menu if open
+        if (mobileMenu) mobileMenu.classList.remove('menu-open');
+        if (menuOverlay) menuOverlay.classList.remove('active');
+
+        // Tampilkan loading
+        content.innerHTML = `
+            <div class="text-center py-8">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                <p class="mt-4 text-gray-600">Memuat data penilaian...</p>
+            </div>
+        `;
+
+        modal.style.display = 'block';
+        document.body.style.overflow = 'hidden';
+
+        // Ambil data dari server
+        fetch(`get_penilaian_detail.php?id=${penilaianId}`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(responseData => {
+                console.log('Response dari server:', responseData);
+
+                if (responseData.success) {
+                    content.innerHTML = renderDetailContent(responseData.data);
+                } else {
                     content.innerHTML = `
                         <div class="text-center py-8 text-red-600">
-                            <i class="fas fa-exclamation-triangle text-3xl"></i>
-                            <p class="mt-2 text-lg">Terjadi kesalahan: ${error.message}</p>
-                            <p class="text-sm mt-2">Silakan refresh halaman dan coba lagi</p>
+                            <i class="fas fa-exclamation-triangle text-5xl mb-4"></i>
+                            <p class="text-lg font-medium mb-2">Gagal Memuat Data</p>
+                            <p class="text-sm">${responseData.message || 'Terjadi kesalahan saat memuat data'}</p>
+                            <button onclick="closeModal()" 
+                                class="mt-4 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">
+                                Tutup
+                            </button>
                         </div>
                     `;
-                });
-        }
-        
-        // Render konten detail
-        function renderDetailContent(data) {
-            // Tentukan warna kategori
-            let kategoriClass = '';
-            switch(data.kategori) {
-                case 'Sangat Baik': kategoriClass = 'text-green-600 bg-green-100'; break;
-                case 'Baik': kategoriClass = 'text-blue-600 bg-blue-100'; break;
-                case 'Cukup': kategoriClass = 'text-yellow-600 bg-yellow-100'; break;
-                default: kategoriClass = 'text-red-600 bg-red-100';
-            }
-            
-            return `
-                <div class="space-y-6">
-                    <!-- Header Info -->
-                    <div class="bg-blue-50 p-4 rounded-lg">
-                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
-                            <div>
-                                <h3 class="text-xl font-bold text-gray-800">${data.nama_siswa}</h3>
-                                <p class="text-gray-600">${data.kelas_sekolah}</p>
-                                <p class="text-gray-600">${data.tanggal_format}</p>
-                            </div>
-                            <div class="mt-2 md:mt-0">
-                                <span class="px-3 py-1 rounded-full text-sm font-medium ${kategoriClass}">
-                                    ${data.kategori} (${data.persentase}%)
-                                </span>
-                            </div>
-                        </div>
-                        <div class="mt-2">
-                            <p class="text-sm text-gray-700">
-                                <span class="font-medium">Mata Pelajaran:</span> ${data.nama_pelajaran}<br>
-                                <span class="font-medium">Tingkat:</span> ${data.tingkat}<br>
-                                <span class="font-medium">Jenis Kelas:</span> ${data.jenis_kelas}
-                            </p>
-                        </div>
-                    </div>
-                    
-                    <!-- Total Score -->
-                    <div class="text-center p-4 md:p-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg">
-                        <h4 class="text-lg font-semibold text-gray-700 mb-2">Total Skor</h4>
-                        <div class="text-4xl md:text-5xl font-bold text-blue-600">${data.total_score}/50</div>
-                        <div class="mt-2 text-gray-600 text-sm md:text-base">Nilai rata-rata per indikator: ${(data.total_score/5).toFixed(1)}/10</div>
-                    </div>
-                    
-                    <!-- Indikator Nilai -->
-                    <div>
-                        <h4 class="text-lg font-semibold text-gray-800 mb-4">Detail Indikator</h4>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-                            ${renderIndicator('Willingness to Learn', data.willingness_learn)}
-                            ${renderIndicator('Problem Solving', data.problem_solving)}
-                            ${renderIndicator('Critical Thinking', data.critical_thinking)}
-                            ${renderIndicator('Concentration', data.concentration)}
-                            ${renderIndicator('Independence', data.independence)}
-                        </div>
-                    </div>
-                    
-                    <!-- Catatan Guru -->
-                    ${data.catatan_guru ? `
-                    <div>
-                        <h4 class="text-lg font-semibold text-gray-800 mb-2">Catatan Guru</h4>
-                        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
-                            <p class="text-gray-700">${data.catatan_guru}</p>
-                        </div>
-                    </div>
-                    ` : ''}
-                    
-                    <!-- Rekomendasi -->
-                    ${data.rekomendasi ? `
-                    <div>
-                        <h4 class="text-lg font-semibold text-gray-800 mb-2">Rekomendasi</h4>
-                        <div class="bg-green-50 border-l-4 border-green-400 p-4 rounded">
-                            <p class="text-gray-700">${data.rekomendasi}</p>
-                        </div>
-                    </div>
-                    ` : ''}
-                </div>
-            `;
-        }
-        
-        // Helper untuk render indikator
-        function renderIndicator(label, value) {
-            const percentage = (value / 10) * 100;
-            let color = '';
-            if (value >= 9) color = 'bg-green-500';
-            else if (value >= 7) color = 'bg-blue-500';
-            else if (value >= 5) color = 'bg-yellow-500';
-            else color = 'bg-red-500';
-            
-            return `
-                <div class="bg-white border border-gray-200 rounded-lg p-3 md:p-4">
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="font-medium text-gray-700 text-sm md:text-base">${label}</span>
-                        <span class="font-bold text-gray-900 text-sm md:text-base">${value}/10</span>
-                    </div>
-                    <div class="w-full bg-gray-200 rounded-full h-2">
-                        <div class="${color} h-2 rounded-full" style="width: ${percentage}%"></div>
-                    </div>
-                </div>
-            `;
-        }
-        
-        // Tutup modal detail
-        function closeModal() {
-            const modal = document.getElementById('detailModal');
-            modal.style.display = 'none';
-            document.body.style.overflow = 'auto';
-            currentPenilaianId = null;
-        }
-        
-        // Dropdown functionality
-        document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-            toggle.addEventListener('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                const dropdownGroup = this.closest('.mb-1');
-                const submenu = dropdownGroup.querySelector('.dropdown-submenu');
-                const arrow = this.querySelector('.arrow');
-                
-                // Toggle current dropdown
-                if (submenu.style.display === 'block') {
-                    submenu.style.display = 'none';
-                    arrow.style.transform = 'rotate(0deg)';
-                    this.classList.remove('open');
-                } else {
-                    // Close other dropdowns
-                    document.querySelectorAll('.dropdown-submenu').forEach(sm => {
-                        sm.style.display = 'none';
-                    });
-                    document.querySelectorAll('.dropdown-toggle').forEach(t => {
-                        t.classList.remove('open');
-                        t.querySelector('.arrow').style.transform = 'rotate(0deg)';
-                    });
-                    
-                    // Open this dropdown
-                    submenu.style.display = 'block';
-                    arrow.style.transform = 'rotate(-90deg)';
-                    this.classList.add('open');
                 }
+            })
+            .catch(error => {
+                console.error('Fetch error:', error);
+                content.innerHTML = `
+                    <div class="text-center py-8 text-red-600">
+                        <i class="fas fa-exclamation-triangle text-5xl mb-4"></i>
+                        <p class="text-lg font-medium mb-2">Terjadi Kesalahan</p>
+                        <p class="text-sm">${error.message}</p>
+                        <p class="text-xs mt-2 text-gray-500">Silakan refresh halaman dan coba lagi</p>
+                        <button onclick="closeModal()" 
+                            class="mt-4 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">
+                            Tutup
+                        </button>
+                    </div>
+                `;
             });
-        });
+    }
 
-        // Close dropdowns when clicking outside
-        document.addEventListener('click', function(e) {
-            if (!e.target.closest('.mb-1')) {
-                document.querySelectorAll('.dropdown-submenu').forEach(submenu => {
-                    submenu.style.display = 'none';
+    // Render konten detail (PERBAIKAN DI SINI)
+    function renderDetailContent(data) {
+        // Tentukan warna kategori
+        let kategoriClass = '';
+        let kategoriBgClass = '';
+        switch (data.kategori) {
+            case 'Sangat Baik':
+                kategoriClass = 'text-green-600';
+                kategoriBgClass = 'bg-green-100';
+                break;
+            case 'Baik':
+                kategoriClass = 'text-blue-600';
+                kategoriBgClass = 'bg-blue-100';
+                break;
+            case 'Cukup':
+                kategoriClass = 'text-yellow-600';
+                kategoriBgClass = 'bg-yellow-100';
+                break;
+            case 'Kurang':
+                kategoriClass = 'text-red-600';
+                kategoriBgClass = 'bg-red-100';
+                break;
+            default:
+                kategoriClass = 'text-gray-600';
+                kategoriBgClass = 'bg-gray-100';
+        }
+
+        // PERBAIKAN: Data dari server menggunakan nama_lengkap, bukan nama_siswa
+        // Gunakan data.nama_lengkap karena dari query di get_penilaian_detail.php
+        const safeData = {
+            nama_siswa: data.nama_lengkap || data.nama_siswa || 'Tidak diketahui',
+            kelas_sekolah: data.kelas_sekolah || '-',
+            tanggal_format: data.tanggal_format || new Date().toLocaleDateString('id-ID'),
+            nama_pelajaran: data.nama_pelajaran || '-',
+            tingkat: data.tingkat || '-',
+            jenis_kelas: data.jenis_kelas || '-',
+            total_score: data.total_score || 0,
+            kategori: data.kategori || 'Belum Dinilai',
+            persentase: data.persentase || 0,
+            willingness_learn: data.willingness_learn || 0,
+            problem_solving: data.problem_solving || 0,
+            critical_thinking: data.critical_thinking || 0,
+            concentration: data.concentration || 0,
+            independence: data.independence || 0,
+            catatan_guru: data.catatan_guru || '',
+            rekomendasi: data.rekomendasi || ''
+        };
+
+        return `
+            <div class="space-y-6">
+                <!-- Header Info -->
+                <div class="bg-blue-50 p-4 rounded-lg">
+                    <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
+                        <div>
+                            <h3 class="text-xl font-bold text-gray-800">${escapeHtml(safeData.nama_siswa)}</h3>
+                            <p class="text-gray-600">Kelas: ${escapeHtml(safeData.kelas_sekolah)}</p>
+                            <p class="text-gray-600">${escapeHtml(safeData.tanggal_format)}</p>
+                        </div>
+                        <div class="mt-2 md:mt-0">
+                            <span class="px-3 py-1 rounded-full text-sm font-medium ${kategoriBgClass} ${kategoriClass}">
+                                ${escapeHtml(safeData.kategori)} (${safeData.persentase}%)
+                            </span>
+                        </div>
+                    </div>
+                    <div class="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <p class="text-sm text-gray-700">
+                            <span class="font-medium">Mata Pelajaran:</span> ${escapeHtml(safeData.nama_pelajaran)}
+                        </p>
+                        <p class="text-sm text-gray-700">
+                            <span class="font-medium">Tingkat:</span> ${escapeHtml(safeData.tingkat)}
+                        </p>
+                        <p class="text-sm text-gray-700">
+                            <span class="font-medium">Jenis Kelas:</span> ${escapeHtml(safeData.jenis_kelas)}
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Total Score -->
+                <div class="text-center p-4 md:p-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg">
+                    <h4 class="text-lg font-semibold text-gray-700 mb-2">Total Skor</h4>
+                    <div class="text-4xl md:text-5xl font-bold text-blue-600">${safeData.total_score}/50</div>
+                    <div class="mt-2 text-gray-600 text-sm md:text-base">Nilai rata-rata per indikator: ${(safeData.total_score / 5).toFixed(1)}/10</div>
+                </div>
+
+                <!-- Indikator Nilai -->
+                <div>
+                    <h4 class="text-lg font-semibold text-gray-800 mb-4">Detail Indikator</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+                        ${renderIndicator('Willingness to Learn', safeData.willingness_learn)}
+                        ${renderIndicator('Problem Solving', safeData.problem_solving)}
+                        ${renderIndicator('Critical Thinking', safeData.critical_thinking)}
+                        ${renderIndicator('Concentration', safeData.concentration)}
+                        ${renderIndicator('Independence', safeData.independence)}
+                    </div>
+                </div>
+
+                <!-- Catatan Guru -->
+                ${safeData.catatan_guru ? `
+                <div>
+                    <h4 class="text-lg font-semibold text-gray-800 mb-2">Catatan Guru</h4>
+                    <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
+                        <p class="text-gray-700">${escapeHtml(safeData.catatan_guru)}</p>
+                    </div>
+                </div>
+                ` : ''}
+
+                <!-- Rekomendasi -->
+                ${safeData.rekomendasi ? `
+                <div>
+                    <h4 class="text-lg font-semibold text-gray-800 mb-2">Rekomendasi</h4>
+                    <div class="bg-green-50 border-l-4 border-green-400 p-4 rounded">
+                        <p class="text-gray-700">${escapeHtml(safeData.rekomendasi)}</p>
+                    </div>
+                </div>
+                ` : ''}
+
+                <!-- Info Tambahan -->
+                <div class="text-xs text-gray-400 border-t pt-2">
+                    <p>ID Penilaian: ${data.id}</p>
+                </div>
+            </div>
+        `;
+    }
+
+    // Helper untuk render indikator
+    function renderIndicator(label, value) {
+        const percentage = (value / 10) * 100;
+        let color = '';
+        if (value >= 9) color = 'bg-green-500';
+        else if (value >= 7) color = 'bg-blue-500';
+        else if (value >= 5) color = 'bg-yellow-500';
+        else color = 'bg-red-500';
+
+        return `
+            <div class="bg-white border border-gray-200 rounded-lg p-3 md:p-4">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="font-medium text-gray-700 text-sm md:text-base">${label}</span>
+                    <span class="font-bold text-gray-900 text-sm md:text-base">${value}/10</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2">
+                    <div class="${color} h-2 rounded-full" style="width: ${percentage}%"></div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Helper untuk escape HTML
+    function escapeHtml(unsafe) {
+        if (!unsafe) return '';
+        return String(unsafe)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    // Tutup modal detail
+    function closeModal() {
+        const modal = document.getElementById('detailModal');
+        modal.style.display = 'none';
+        document.body.style.overflow = 'auto';
+        currentPenilaianId = null;
+    }
+
+    // Dropdown functionality
+    document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
+        toggle.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const dropdownGroup = this.closest('.mb-1');
+            const submenu = dropdownGroup.querySelector('.dropdown-submenu');
+            const arrow = this.querySelector('.arrow');
+
+            // Toggle current dropdown
+            if (submenu.style.display === 'block') {
+                submenu.style.display = 'none';
+                arrow.style.transform = 'rotate(0deg)';
+                this.classList.remove('open');
+            } else {
+                // Close other dropdowns
+                document.querySelectorAll('.dropdown-submenu').forEach(sm => {
+                    sm.style.display = 'none';
                 });
-                document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-                    toggle.classList.remove('open');
-                    toggle.querySelector('.arrow').style.transform = 'rotate(0deg)';
+                document.querySelectorAll('.dropdown-toggle').forEach(t => {
+                    t.classList.remove('open');
+                    t.querySelector('.arrow').style.transform = 'rotate(0deg)';
                 });
+
+                // Open this dropdown
+                submenu.style.display = 'block';
+                arrow.style.transform = 'rotate(-90deg)';
+                this.classList.add('open');
             }
         });
-        
-        // Fungsi konfirmasi hapus
-        function confirmDelete(penilaianId, studentName) {
-            penilaianToDelete = penilaianId;
-            studentNameToDelete = studentName;
-            
-            // Close mobile menu if open
-            mobileMenu.classList.remove('menu-open');
-            menuOverlay.classList.remove('active');
-            
-            // Update modal content
-            document.getElementById('deleteStudentName').textContent = `Hapus Penilaian ${studentName}?`;
-            
-            // Show modal
-            const modal = document.getElementById('deleteModal');
-            modal.style.display = 'block';
-            document.body.style.overflow = 'hidden';
+    });
+
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.mb-1')) {
+            document.querySelectorAll('.dropdown-submenu').forEach(submenu => {
+                submenu.style.display = 'none';
+            });
+            document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
+                toggle.classList.remove('open');
+                toggle.querySelector('.arrow').style.transform = 'rotate(0deg)';
+            });
         }
-        
-        // Fungsi tutup modal hapus
-        function closeDeleteModal() {
-            const modal = document.getElementById('deleteModal');
-            modal.style.display = 'none';
-            document.body.style.overflow = 'auto';
-            penilaianToDelete = null;
-            studentNameToDelete = '';
+    });
+
+    // Fungsi konfirmasi hapus
+    function confirmDelete(penilaianId, studentName) {
+        penilaianToDelete = penilaianId;
+        studentNameToDelete = studentName;
+
+        // Close mobile menu if open
+        if (mobileMenu) mobileMenu.classList.remove('menu-open');
+        if (menuOverlay) menuOverlay.classList.remove('active');
+
+        // Update modal content
+        const deleteStudentName = document.getElementById('deleteStudentName');
+        if (deleteStudentName) {
+            deleteStudentName.textContent = `Hapus Penilaian ${studentName}?`;
         }
-        
-        // Fungsi hapus penilaian
-        function deletePenilaian() {
-            if (!penilaianToDelete) return;
-            
-            const deleteBtn = document.getElementById('deleteConfirmBtn');
-            const originalText = deleteBtn.innerHTML;
-            
-            // Tampilkan loading
-            deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Menghapus...';
-            deleteBtn.disabled = true;
-            
-            // Kirim request hapus
-            fetch('delete_penilaian.php', {
+
+        // Show modal
+        const modal = document.getElementById('deleteModal');
+        modal.style.display = 'block';
+        document.body.style.overflow = 'hidden';
+    }
+
+    // Fungsi tutup modal hapus
+    function closeDeleteModal() {
+        const modal = document.getElementById('deleteModal');
+        modal.style.display = 'none';
+        document.body.style.overflow = 'auto';
+        penilaianToDelete = null;
+        studentNameToDelete = '';
+    }
+
+    // Fungsi hapus penilaian
+    function deletePenilaian() {
+        if (!penilaianToDelete) return;
+
+        const deleteBtn = document.getElementById('deleteConfirmBtn');
+        const originalText = deleteBtn.innerHTML;
+
+        // Tampilkan loading
+        deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Menghapus...';
+        deleteBtn.disabled = true;
+
+        // Kirim request hapus
+        fetch('delete_penilaian.php', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -1354,7 +1432,7 @@ foreach ($riwayat_penilaian as $penilaian) {
                 if (data.success) {
                     // Tampilkan pesan sukses
                     showNotification('success', data.message);
-                    
+
                     // Tutup modal setelah 1 detik
                     setTimeout(() => {
                         closeDeleteModal();
@@ -1364,7 +1442,7 @@ foreach ($riwayat_penilaian as $penilaian) {
                 } else {
                     // Tampilkan pesan error
                     showNotification('error', data.message);
-                    
+
                     // Reset button
                     deleteBtn.innerHTML = originalText;
                     deleteBtn.disabled = false;
@@ -1375,20 +1453,20 @@ foreach ($riwayat_penilaian as $penilaian) {
                 deleteBtn.innerHTML = originalText;
                 deleteBtn.disabled = false;
             });
-        }
-        
-        // Fungsi tampilkan notifikasi
-        function showNotification(type, message) {
-            // Hapus notifikasi sebelumnya
-            const oldNotif = document.getElementById('notification');
-            if (oldNotif) oldNotif.remove();
-            
-            // Buat notifikasi baru
-            const notification = document.createElement('div');
-            notification.id = 'notification';
-            notification.className = `fixed top-4 right-4 z-50 px-6 py-4 rounded-lg shadow-lg flex items-center ${type === 'success' ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-200'}`;
-            
-            notification.innerHTML = `
+    }
+
+    // Fungsi tampilkan notifikasi
+    function showNotification(type, message) {
+        // Hapus notifikasi sebelumnya
+        const oldNotif = document.getElementById('notification');
+        if (oldNotif) oldNotif.remove();
+
+        // Buat notifikasi baru
+        const notification = document.createElement('div');
+        notification.id = 'notification';
+        notification.className = `fixed top-4 right-4 z-50 px-6 py-4 rounded-lg shadow-lg flex items-center ${type === 'success' ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-200'}`;
+
+        notification.innerHTML = `
                 <i class="fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'} mr-3 text-lg"></i>
                 <div>
                     <p class="font-medium">${message}</p>
@@ -1397,43 +1475,75 @@ foreach ($riwayat_penilaian as $penilaian) {
                     <i class="fas fa-times"></i>
                 </button>
             `;
-            
-            document.body.appendChild(notification);
-            
-            // Auto-hide setelah 5 detik
-            setTimeout(() => {
-                if (notification.parentElement) {
-                    notification.remove();
+
+        document.body.appendChild(notification);
+
+        // Auto-hide setelah 5 detik
+        setTimeout(() => {
+            if (notification.parentElement) {
+                notification.remove();
+            }
+        }, 5000);
+    }
+
+    // Tutup modal saat klik di luar
+    window.onclick = function(event) {
+        const modal = document.getElementById('detailModal');
+        const deleteModal = document.getElementById('deleteModal');
+
+        if (event.target === modal) {
+            closeModal();
+        }
+
+        if (event.target === deleteModal) {
+            closeDeleteModal();
+        }
+    }
+
+    // Update server time
+    function updateServerTime() {
+        const now = new Date();
+        const timeString = now.toLocaleTimeString('id-ID');
+        const timeElement = document.getElementById('serverTime');
+        if (timeElement) {
+            timeElement.textContent = timeString;
+        }
+    }
+
+    setInterval(updateServerTime, 1000);
+    updateServerTime();
+
+    // FUNGSI DEBUGGING (opsional, untuk testing dari console)
+    window.testDetail = function(id) {
+        fetch(`get_penilaian_detail.php?id=${id}`)
+            .then(response => response.json())
+            .then(data => {
+                console.log('Data penilaian:', data);
+                if (data.success) {
+                    alert('Data berhasil diambil. Lihat di console untuk detail.');
+                } else {
+                    alert('Error: ' + data.message);
                 }
-            }, 5000);
-        }
-        
-        // Tutup modal saat klik di luar
-        window.onclick = function(event) {
-            const modal = document.getElementById('detailModal');
-            const deleteModal = document.getElementById('deleteModal');
-            
-            if (event.target === modal) {
-                closeModal();
-            }
-            
-            if (event.target === deleteModal) {
-                closeDeleteModal();
-            }
-        }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error: ' + error.message);
+            });
+    };
 
-        // Update server time
-        function updateServerTime() {
-            const now = new Date();
-            const timeString = now.toLocaleTimeString('id-ID');
-            const timeElement = document.getElementById('serverTime');
-            if (timeElement) {
-                timeElement.textContent = timeString;
-            }
-        }
-
-        setInterval(updateServerTime, 1000);
-        updateServerTime();
-    </script>
+    window.checkResponse = function(id) {
+        fetch(`get_penilaian_detail.php?id=${id}`)
+            .then(response => response.text())
+            .then(text => {
+                console.log('Raw response:', text);
+                try {
+                    const json = JSON.parse(text);
+                    console.log('Parsed JSON:', json);
+                } catch (e) {
+                    console.error('Bukan JSON valid:', e);
+                }
+            });
+    };
+</script>
 </body>
 </html>
