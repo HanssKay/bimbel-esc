@@ -218,9 +218,10 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                 $siswa_detail['program_bimbel'] = implode(', ', $program_list);
                 $stmt6->close();
 
-                // QUERY 7: Ambil jadwal belajar
+                // QUERY 7: Ambil jadwal belajar - DIPERBAIKI
                 $sql_jadwal = "SELECT DISTINCT 
                               smg.hari,
+                              smg.jam_mulai as jam_mulai_original,
                               TIME_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai,
                               TIME_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai,
                               sp.nama_pelajaran
@@ -232,21 +233,25 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                               AND jb.status = 'aktif'
                               AND sp.status = 'aktif'
                               ORDER BY FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'), 
-                                       smg.jam_mulai";
+                                       smg.jam_mulai_original";
 
                 $stmt7 = $conn->prepare($sql_jadwal);
-                $stmt7->bind_param("ii", $siswa_id, $guru_id);
-                $stmt7->execute();
-                $jadwal_result = $stmt7->get_result();
-                $jadwal_list = [];
-                while ($jadwal_row = $jadwal_result->fetch_assoc()) {
-                    $jadwal_list[] = $jadwal_row['hari'] . ' ' .
-                        $jadwal_row['jam_mulai'] . '-' .
-                        $jadwal_row['jam_selesai'] . ' (' .
-                        $jadwal_row['nama_pelajaran'] . ')';
+                if ($stmt7 === false) {
+                    error_log("Prepare jadwal failed: " . $conn->error);
+                } else {
+                    $stmt7->bind_param("ii", $siswa_id, $guru_id);
+                    $stmt7->execute();
+                    $jadwal_result = $stmt7->get_result();
+                    $jadwal_list = [];
+                    while ($jadwal_row = $jadwal_result->fetch_assoc()) {
+                        $jadwal_list[] = $jadwal_row['hari'] . ' ' .
+                            $jadwal_row['jam_mulai'] . '-' .
+                            $jadwal_row['jam_selesai'] . ' (' .
+                            $jadwal_row['nama_pelajaran'] . ')';
+                    }
+                    $siswa_detail['jadwal_belajar'] = implode(', ', $jadwal_list);
+                    $stmt7->close();
                 }
-                $siswa_detail['jadwal_belajar'] = implode(', ', $jadwal_list);
-                $stmt7->close();
             }
             $stmt->close();
 
