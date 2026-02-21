@@ -486,9 +486,6 @@ $urutan_hari = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
             </div>
             <div class="mt-3 text-sm">
                 <p><i class="fas fa-child mr-2"></i> <?php echo $total_anak; ?> Anak</p>
-                <?php if (!empty($no_hp)): ?>
-                    <p class="text-xs mt-1"><i class="fas fa-phone mr-1"></i> <?php echo htmlspecialchars($no_hp); ?></p>
-                <?php endif; ?>
             </div>
         </div>
         <nav class="mt-4">
