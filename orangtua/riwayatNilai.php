@@ -980,7 +980,7 @@ if (!empty($riwayat_data)) {
         <input type="hidden" name="anak_id" value="<?php echo $selected_anak_id; ?>">
         <input type="hidden" name="page" value="1">
         
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-3 md:gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
             <!-- Filter Guru -->
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">Filter Guru</label>
@@ -1023,20 +1023,6 @@ if (!empty($riwayat_data)) {
                 </select>
             </div>
             
-            <!-- Filter Minggu -->
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Filter Minggu</label>
-                <select name="minggu" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base"
-                        <?php echo empty($filter_bulan) ? 'disabled' : ''; ?>>
-                    <option value=""><?php echo empty($filter_bulan) ? 'Pilih bulan dulu' : 'Semua Minggu'; ?></option>
-                    <?php foreach ($minggu_options as $minggu_ke => $label): ?>
-                    <option value="<?php echo $minggu_ke; ?>"
-                            <?php echo $filter_minggu == $minggu_ke ? 'selected' : ''; ?>>
-                        <?php echo $label; ?>
-                    </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
         </div>
         
         <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
@@ -1343,6 +1329,61 @@ if (!empty($riwayat_data)) {
                         </div>
                         <?php endif; ?>
                     <?php endif; ?>
+                </div>
+
+                <!-- Tips & Saran -->
+                <div class="card bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow p-4 md:p-6">
+                    <h3 class="text-base md:text-lg font-semibold text-gray-800 mb-3 md:mb-4">
+                        <i class="fas fa-lightbulb text-yellow-600 mr-2"></i> Tips untuk Orang Tua
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+                        <div>
+                            <h4 class="font-medium text-gray-700 mb-1 md:mb-2 text-sm md:text-base">Berdasarkan Data:</h4>
+                            <ul class="space-y-1 md:space-y-2">
+                                <?php if (isset($insights['trend']) && $insights['trend']['score_change'] > 0): ?>
+                                    <li class="flex items-start">
+                                        <i
+                                            class="fas fa-check text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                        <span class="text-xs md:text-sm">Berikan apresiasi untuk perkembangan positif</span>
+                                    </li>
+                                <?php endif; ?>
+
+                                <?php if (isset($insights['weaknesses'])): ?>
+                                    <li class="flex items-start">
+                                        <i
+                                            class="fas fa-exclamation-triangle text-yellow-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                        <span class="text-xs md:text-sm">Diskusikan area perbaikan dengan guru bimbel</span>
+                                    </li>
+                                <?php endif; ?>
+
+                                <li class="flex items-start">
+                                    <i
+                                        class="fas fa-clock text-blue-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                    <span class="text-xs md:text-sm">Pantau perkembangan bulanan secara konsisten</span>
+                                </li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h4 class="font-medium text-gray-700 mb-1 md:mb-2 text-sm md:text-base">Strategi Belajar:</h4>
+                            <ul class="space-y-1 md:space-y-2">
+                                <li class="flex items-start">
+                                    <i
+                                        class="fas fa-book text-purple-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                    <span class="text-xs md:text-sm">Buat jadwal belajar rutin di rumah</span>
+                                </li>
+                                <li class="flex items-start">
+                                    <i
+                                        class="fas fa-gamepad text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                    <span class="text-xs md:text-sm">Gunakan metode belajar yang menyenangkan</span>
+                                </li>
+                                <li class="flex items-start">
+                                    <i
+                                        class="fas fa-comments text-red-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                    <span class="text-xs md:text-sm">Komunikasi intens dengan guru bimbel</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
                 </div>
 
             <?php endif; ?>
