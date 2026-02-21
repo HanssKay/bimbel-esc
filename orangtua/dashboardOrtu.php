@@ -6,34 +6,208 @@ ini_set('display_errors', 1);
 require_once '../includes/config.php';
 require_once '../includes/menu_functions.php';
 
+// CEK KONEKSI DATABASE DULU
+if (!$conn) {
+    die("Error: Koneksi database tidak tersedia.");
+}
+
+if ($conn->connect_error) {
+    die("Error koneksi database: " . $conn->connect_error);
+}
+
 // CEK LOGIN & ROLE
-if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] != 'orangtua') {
+if (!isset($_SESSION['user_id'])) {
     header('Location: ../index.php');
     exit();
 }
 
-// AMBIL DATA ORANG TUA DARI SESSION
+// CEK ROLE USER
 $user_id = $_SESSION['user_id'];
+$check_role = $conn->prepare("SELECT role FROM users WHERE id = ?");
+if ($check_role) {
+    $check_role->bind_param("i", $user_id);
+    $check_role->execute();
+    $role_result = $check_role->get_result();
+
+    if ($role_result->num_rows === 0) {
+        session_destroy();
+        header('Location: ../index.php');
+        exit();
+    }
+
+    $user_data = $role_result->fetch_assoc();
+    if ($user_data['role'] != 'orangtua') {
+        header('Location: ../index.php');
+        exit();
+    }
+    $check_role->close();
+} else {
+    die("Error: " . $conn->error);
+}
+
 $full_name = $_SESSION['full_name'] ?? 'Orang Tua';
 $email = $_SESSION['email'] ?? '';
 $currentPage = basename($_SERVER['PHP_SELF']);
 
-// AMBIL ID ORANGTUA DARI TABLE ORANGTUA
+// AMBIL ID ORANGTUA DARI TABLE ORANGTUA - DENGAN ERROR HANDLING
 $orangtua_id = 0;
 $nama_ortu = '';
+
 try {
+    // Cek dulu apakah user_id ada di tabel orangtua
     $sql_ortu = "SELECT id, nama_ortu FROM orangtua WHERE user_id = ?";
     $stmt_ortu = $conn->prepare($sql_ortu);
+
+    if ($stmt_ortu === false) {
+        throw new Exception("Prepare statement error: " . $conn->error);
+    }
+
     $stmt_ortu->bind_param("i", $user_id);
     $stmt_ortu->execute();
     $result_ortu = $stmt_ortu->get_result();
+
     if ($row_ortu = $result_ortu->fetch_assoc()) {
         $orangtua_id = $row_ortu['id'];
         $nama_ortu = $row_ortu['nama_ortu'] ?? $full_name;
+    } else {
+        // Jika tidak ditemukan, coba cari langsung dari tabel users
+        error_log("Warning: User ID $user_id tidak ditemukan di tabel orangtua");
+
+        // Query alternatif
+        $sql_alt = "SELECT id FROM orangtua WHERE user_id = ?";
+        $stmt_alt = $conn->prepare($sql_alt);
+        if ($stmt_alt) {
+            $stmt_alt->bind_param("i", $user_id);
+            $stmt_alt->execute();
+            $result_alt = $stmt_alt->get_result();
+            if ($row_alt = $result_alt->fetch_assoc()) {
+                $orangtua_id = $row_alt['id'];
+            }
+            $stmt_alt->close();
+        }
     }
     $stmt_ortu->close();
 } catch (Exception $e) {
     error_log("Error fetching orangtua data: " . $e->getMessage());
+    // Set default values
+    $orangtua_id = 0;
+    $nama_ortu = $full_name;
+}
+
+// AMBIL DATA ANAK-ANAK - DENGAN ERROR HANDLING
+$anak_data = [];
+$total_anak = 0;
+
+if ($orangtua_id > 0) {
+    try {
+        // Query dengan JOIN yang benar
+        $sql = "SELECT s.* 
+                FROM siswa s
+                INNER JOIN siswa_orangtua so ON s.id = so.siswa_id
+                WHERE so.orangtua_id = ? AND s.status = 'aktif'
+                ORDER BY s.nama_lengkap";
+
+        $stmt = $conn->prepare($sql);
+
+        if ($stmt === false) {
+            throw new Exception("Prepare anak query error: " . $conn->error);
+        }
+
+        $stmt->bind_param("i", $orangtua_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        while ($row = $result->fetch_assoc()) {
+            $anak_data[] = $row;
+        }
+        $total_anak = count($anak_data);
+        $stmt->close();
+    } catch (Exception $e) {
+        error_log("Error fetching anak data: " . $e->getMessage());
+        $anak_data = [];
+        $total_anak = 0;
+    }
+}
+
+// AMBIL DATA PENDAFTARAN AKTIF
+$pendaftaran_data = [];
+if (!empty($anak_data)) {
+    try {
+        $siswa_ids = array_column($anak_data, 'id');
+
+        if (empty($siswa_ids)) {
+            throw new Exception("Tidak ada ID siswa");
+        }
+
+        $placeholders = implode(',', array_fill(0, count($siswa_ids), '?'));
+
+        $sql = "SELECT ps.*, s.id as siswa_id, s.nama_lengkap
+                FROM pendaftaran_siswa ps
+                INNER JOIN siswa s ON ps.siswa_id = s.id
+                WHERE ps.siswa_id IN ($placeholders) 
+                AND ps.status = 'aktif'";
+
+        $stmt = $conn->prepare($sql);
+
+        if ($stmt === false) {
+            throw new Exception("Prepare pendaftaran query error: " . $conn->error);
+        }
+
+        $types = str_repeat('i', count($siswa_ids));
+        $stmt->bind_param($types, ...$siswa_ids);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        while ($row = $result->fetch_assoc()) {
+            $pendaftaran_data[$row['siswa_id']] = $row;
+        }
+        $stmt->close();
+    } catch (Exception $e) {
+        error_log("Error fetching pendaftaran data: " . $e->getMessage());
+        $pendaftaran_data = [];
+    }
+}
+
+// AMBIL DATA PELAJARAN
+$pelajaran_data = [];
+if (!empty($pendaftaran_data)) {
+    try {
+        $pendaftaran_ids = array_column($pendaftaran_data, 'id');
+
+        if (empty($pendaftaran_ids)) {
+            throw new Exception("Tidak ada ID pendaftaran");
+        }
+
+        $placeholders = implode(',', array_fill(0, count($pendaftaran_ids), '?'));
+
+        $sql = "SELECT sp.*, ps.siswa_id, 
+                       COALESCE(u.full_name, 'Belum ada guru') as nama_guru
+                FROM siswa_pelajaran sp
+                INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                LEFT JOIN guru g ON sp.guru_id = g.id
+                LEFT JOIN users u ON g.user_id = u.id
+                WHERE sp.pendaftaran_id IN ($placeholders) 
+                AND sp.status = 'aktif'";
+
+        $stmt = $conn->prepare($sql);
+
+        if ($stmt === false) {
+            throw new Exception("Prepare pelajaran query error: " . $conn->error);
+        }
+
+        $types = str_repeat('i', count($pendaftaran_ids));
+        $stmt->bind_param($types, ...$pendaftaran_ids);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        while ($row = $result->fetch_assoc()) {
+            $pelajaran_data[$row['siswa_id']][] = $row;
+        }
+        $stmt->close();
+    } catch (Exception $e) {
+        error_log("Error fetching pelajaran data: " . $e->getMessage());
+        $pelajaran_data = [];
+    }
 }
 
 // CEK JIKA ADA REQUEST AJAX
@@ -48,123 +222,38 @@ if (isset($_GET['action'])) {
     }
 }
 
-// AMBIL DATA ANAK-ANAK BERDASARKAN TABEL SISWA_ORANGTUA
-$anak_data = [];
-$total_anak = 0;
-
-if ($orangtua_id > 0) {
-    try {
-        // Query untuk mengambil data anak melalui tabel siswa_orangtua
-        $sql = "SELECT s.* 
-                FROM siswa s
-                INNER JOIN siswa_orangtua so ON s.id = so.siswa_id
-                WHERE so.orangtua_id = ? AND s.status = 'aktif'
-                ORDER BY s.nama_lengkap";
-
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("i", $orangtua_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-
-        while ($row = $result->fetch_assoc()) {
-            $anak_data[] = $row;
-        }
-        $total_anak = count($anak_data);
-        $stmt->close();
-    } catch (Exception $e) {
-        error_log("Error fetching anak data: " . $e->getMessage());
-    }
-}
-
-// AMBIL DATA PENDAFTARAN AKTIF UNTUK SETIAP ANAK
-$pendaftaran_data = [];
-if ($orangtua_id > 0 && !empty($anak_data)) {
-    try {
-        $siswa_ids = array_column($anak_data, 'id');
-        $placeholders = implode(',', array_fill(0, count($siswa_ids), '?'));
-
-        $sql = "SELECT ps.*, s.id as siswa_id, s.nama_lengkap
-                FROM pendaftaran_siswa ps
-                JOIN siswa s ON ps.siswa_id = s.id
-                WHERE ps.siswa_id IN ($placeholders) 
-                AND ps.status = 'aktif'";
-
-        $stmt = $conn->prepare($sql);
-        $types = str_repeat('i', count($siswa_ids));
-        $stmt->bind_param($types, ...$siswa_ids);
-        $stmt->execute();
-        $result = $stmt->get_result();
-
-        while ($row = $result->fetch_assoc()) {
-            $pendaftaran_data[$row['siswa_id']] = $row;
-        }
-        $stmt->close();
-    } catch (Exception $e) {
-        error_log("Error fetching pendaftaran data: " . $e->getMessage());
-    }
-}
-
-// AMBIL DATA PELAJARAN UNTUK SETIAP PENDAFTARAN
-$pelajaran_data = [];
-if (!empty($pendaftaran_data)) {
-    try {
-        $pendaftaran_ids = array_column($pendaftaran_data, 'id');
-        $placeholders = implode(',', array_fill(0, count($pendaftaran_ids), '?'));
-
-        $sql = "SELECT sp.*, ps.siswa_id, u.full_name as nama_guru
-                FROM siswa_pelajaran sp
-                JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                LEFT JOIN guru g ON sp.guru_id = g.id
-                LEFT JOIN users u ON g.user_id = u.id
-                WHERE sp.pendaftaran_id IN ($placeholders) 
-                AND sp.status = 'aktif'";
-
-        $stmt = $conn->prepare($sql);
-        $types = str_repeat('i', count($pendaftaran_ids));
-        $stmt->bind_param($types, ...$pendaftaran_ids);
-        $stmt->execute();
-        $result = $stmt->get_result();
-
-        while ($row = $result->fetch_assoc()) {
-            $pelajaran_data[$row['siswa_id']][] = $row;
-        }
-        $stmt->close();
-    } catch (Exception $e) {
-        error_log("Error fetching pelajaran data: " . $e->getMessage());
-    }
-}
-
-// AMBIL PENILAIAN TERBARU untuk semua anak (hanya 1 minggu terakhir)
+// AMBIL PENILAIAN TERBARU
 $penilaian_terbaru = [];
 if ($orangtua_id > 0 && !empty($anak_data)) {
     try {
-        // Hitung tanggal 1 minggu yang lalu
-        $satu_minggu_lalu = date('Y-m-d', strtotime('-1 week'));
-
-        // Query untuk mengambil penilaian terbaru setiap anak dalam 1 minggu terakhir
+        // Query penilaian terbaru
         $sql_penilaian = "SELECT pn.*, 
                                  s.nama_lengkap as nama_siswa,
-                                 u.full_name as nama_guru,
-                                 sp.nama_pelajaran,
+                                 COALESCE(u.full_name, 'Guru') as nama_guru,
+                                 COALESCE(sp.nama_pelajaran, '-') as nama_pelajaran,
                                  DATE_FORMAT(pn.tanggal_penilaian, '%d %M %Y') as tanggal_format,
                                  pn.persentase,
                                  pn.kategori
                           FROM penilaian_siswa pn
-                          JOIN siswa s ON pn.siswa_id = s.id
-                          JOIN siswa_orangtua so ON s.id = so.siswa_id
-                          JOIN pendaftaran_siswa ps ON pn.pendaftaran_id = ps.id
-                          JOIN siswa_pelajaran sp ON pn.siswa_pelajaran_id = sp.id
-                          JOIN guru g ON pn.guru_id = g.id
-                          JOIN users u ON g.user_id = u.id
+                          INNER JOIN siswa s ON pn.siswa_id = s.id
+                          INNER JOIN siswa_orangtua so ON s.id = so.siswa_id
+                          INNER JOIN pendaftaran_siswa ps ON pn.pendaftaran_id = ps.id
+                          LEFT JOIN siswa_pelajaran sp ON pn.siswa_pelajaran_id = sp.id
+                          LEFT JOIN guru g ON pn.guru_id = g.id
+                          LEFT JOIN users u ON g.user_id = u.id
                           WHERE so.orangtua_id = ?
-                          AND pn.tanggal_penilaian >= ?
                           AND ps.status = 'aktif'
                           AND s.status = 'aktif'
                           ORDER BY pn.tanggal_penilaian DESC
-                          LIMIT 2 ";
+                          LIMIT 2";
 
         $stmt = $conn->prepare($sql_penilaian);
-        $stmt->bind_param("is", $orangtua_id, $satu_minggu_lalu);
+
+        if ($stmt === false) {
+            throw new Exception("Prepare penilaian query error: " . $conn->error);
+        }
+
+        $stmt->bind_param("i", $orangtua_id);
         $stmt->execute();
         $result = $stmt->get_result();
 
@@ -174,78 +263,25 @@ if ($orangtua_id > 0 && !empty($anak_data)) {
         $stmt->close();
     } catch (Exception $e) {
         error_log("Error fetching penilaian terbaru: " . $e->getMessage());
+        $penilaian_terbaru = [];
     }
 }
 
-// STATISTIK - hanya berdasarkan 1 minggu terakhir
+// STATISTIK SEDERHANA
 $statistik = [
     'total_penilaian' => count($penilaian_terbaru),
-    'rata_total_skor' => 0,
-    'kategori_terbaik' => '',
-    'kategori_terburuk' => ''
+    'skor_terbaru' => 0,
+    'kategori_terbaru' => '-',
+    'tanggal_terbaru' => '-',
+    'pelajaran_terbaru' => '-'
 ];
 
-// Hitung rata-rata skor dari penilaian 1 minggu terakhir
 if (!empty($penilaian_terbaru)) {
-    $total_skor = 0;
-    $kategori_count = [];
-
-    foreach ($penilaian_terbaru as $penilaian) {
-        $total_skor += $penilaian['total_score'];
-
-        // Hitung frekuensi kategori
-        $kategori = $penilaian['kategori'];
-        if (!isset($kategori_count[$kategori])) {
-            $kategori_count[$kategori] = 0;
-        }
-        $kategori_count[$kategori]++;
-    }
-
-    $statistik['rata_total_skor'] = round($total_skor / count($penilaian_terbaru), 1);
-
-    // Cari kategori terbanyak (terbaik) dan tersedikit (terburuk)
-    if (!empty($kategori_count)) {
-        arsort($kategori_count); // Urutkan dari terbanyak ke tersedikit
-        $kategori_keys = array_keys($kategori_count);
-        $statistik['kategori_terbaik'] = $kategori_keys[0]; // Kategori dengan jumlah terbanyak
-        $statistik['kategori_terburuk'] = end($kategori_keys); // Kategori dengan jumlah tersedikit
-    }
-
-    // Ambil penilaian dengan tanggal TERBARU
-    usort($penilaian_terbaru, function ($a, $b) {
-        return strtotime($b['tanggal_penilaian']) - strtotime($a['tanggal_penilaian']);
-    });
-
-    // Ambil yang pertama (terbaru)
-    $penilaian_paling_baru = $penilaian_terbaru[0];
-
-    $statistik['skor_terbaru'] = $penilaian_paling_baru['total_score'];
-    $statistik['kategori_terbaru'] = $penilaian_paling_baru['kategori'];
-    $statistik['tanggal_terbaru'] = $penilaian_paling_baru['tanggal_format'];
-    $statistik['pelajaran_terbaru'] = $penilaian_paling_baru['nama_pelajaran'];
-} else {
-    $statistik['skor_terbaru'] = 0;
-    $statistik['kategori_terbaru'] = '-';
-    $statistik['tanggal_terbaru'] = '-';
-    $statistik['pelajaran_terbaru'] = '-';
-}
-
-// AMBIL DATA DARI VIEW UNTUK DASHBOARD
-$dashboard_data = [];
-if ($orangtua_id > 0) {
-    try {
-        $sql_dashboard = "SELECT * FROM view_dashboard_orangtua_new WHERE orangtua_id = ?";
-        $stmt = $conn->prepare($sql_dashboard);
-        $stmt->bind_param("i", $orangtua_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        while ($row = $result->fetch_assoc()) {
-            $dashboard_data[] = $row;
-        }
-        $stmt->close();
-    } catch (Exception $e) {
-        error_log("Error fetching dashboard data: " . $e->getMessage());
-    }
+    $statistik['total_penilaian'] = count($penilaian_terbaru);
+    $statistik['skor_terbaru'] = $penilaian_terbaru[0]['total_score'] ?? 0;
+    $statistik['kategori_terbaru'] = $penilaian_terbaru[0]['kategori'] ?? '-';
+    $statistik['tanggal_terbaru'] = $penilaian_terbaru[0]['tanggal_format'] ?? '-';
+    $statistik['pelajaran_terbaru'] = $penilaian_terbaru[0]['nama_pelajaran'] ?? '-';
 }
 
 // FUNGSI UNTUK HANDLE AJAX REQUEST
@@ -254,14 +290,16 @@ function getDetailAnak($conn, $anak_id, $orangtua_id)
     header('Content-Type: application/json');
 
     try {
-        // Update query untuk include siswa_orangtua
-        $sql = "SELECT s.*, 
-                       DATE_FORMAT(s.tanggal_lahir, '%d %M %Y') as tgl_lahir_format
+        $sql = "SELECT s.* 
                 FROM siswa s 
                 INNER JOIN siswa_orangtua so ON s.id = so.siswa_id
                 WHERE s.id = ? AND so.orangtua_id = ? AND s.status = 'aktif'";
 
         $stmt = $conn->prepare($sql);
+        if (!$stmt) {
+            throw new Exception("Prepare error: " . $conn->error);
+        }
+
         $stmt->bind_param("ii", $anak_id, $orangtua_id);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -269,63 +307,49 @@ function getDetailAnak($conn, $anak_id, $orangtua_id)
         if ($result->num_rows > 0) {
             $data = $result->fetch_assoc();
 
-            // Ambil data pendaftaran aktif
+            // Format tanggal lahir
+            if (!empty($data['tanggal_lahir'])) {
+                $data['tgl_lahir_format'] = date('d F Y', strtotime($data['tanggal_lahir']));
+            } else {
+                $data['tgl_lahir_format'] = '-';
+            }
+
+            // Ambil data pendaftaran
             $sql_pendaftaran = "SELECT ps.*
-                         FROM pendaftaran_siswa ps
-                         WHERE ps.siswa_id = ? AND ps.status = 'aktif'
-                         LIMIT 1";
+                               FROM pendaftaran_siswa ps
+                               WHERE ps.siswa_id = ? AND ps.status = 'aktif'
+                               LIMIT 1";
 
             $stmt_pendaftaran = $conn->prepare($sql_pendaftaran);
-            $stmt_pendaftaran->bind_param("i", $anak_id);
-            $stmt_pendaftaran->execute();
-            $result_pendaftaran = $stmt_pendaftaran->get_result();
-            if ($row_pendaftaran = $result_pendaftaran->fetch_assoc()) {
-                $data['pendaftaran'] = $row_pendaftaran;
+            if ($stmt_pendaftaran) {
+                $stmt_pendaftaran->bind_param("i", $anak_id);
+                $stmt_pendaftaran->execute();
+                $result_pendaftaran = $stmt_pendaftaran->get_result();
+                if ($row_pendaftaran = $result_pendaftaran->fetch_assoc()) {
+                    $data['pendaftaran'] = $row_pendaftaran;
 
-                // Ambil data pelajaran untuk pendaftaran ini
-                $sql_pelajaran = "SELECT sp.*, u.full_name as nama_guru
-                                 FROM siswa_pelajaran sp
-                                 LEFT JOIN guru g ON sp.guru_id = g.id
-                                 LEFT JOIN users u ON g.user_id = u.id
-                                 WHERE sp.pendaftaran_id = ? AND sp.status = 'aktif'";
+                    // Ambil data pelajaran
+                    $sql_pelajaran = "SELECT sp.*, COALESCE(u.full_name, '-') as nama_guru
+                                    FROM siswa_pelajaran sp
+                                    LEFT JOIN guru g ON sp.guru_id = g.id
+                                    LEFT JOIN users u ON g.user_id = u.id
+                                    WHERE sp.pendaftaran_id = ? AND sp.status = 'aktif'";
 
-                $stmt_pelajaran = $conn->prepare($sql_pelajaran);
-                $stmt_pelajaran->bind_param("i", $row_pendaftaran['id']);
-                $stmt_pelajaran->execute();
-                $result_pelajaran = $stmt_pelajaran->get_result();
-                $pelajaran_list = [];
-                while ($row_pelajaran = $result_pelajaran->fetch_assoc()) {
-                    $pelajaran_list[] = $row_pelajaran;
+                    $stmt_pelajaran = $conn->prepare($sql_pelajaran);
+                    if ($stmt_pelajaran) {
+                        $stmt_pelajaran->bind_param("i", $row_pendaftaran['id']);
+                        $stmt_pelajaran->execute();
+                        $result_pelajaran = $stmt_pelajaran->get_result();
+                        $pelajaran_list = [];
+                        while ($row_pelajaran = $result_pelajaran->fetch_assoc()) {
+                            $pelajaran_list[] = $row_pelajaran;
+                        }
+                        $data['pelajaran'] = $pelajaran_list;
+                        $stmt_pelajaran->close();
+                    }
                 }
-                $data['pelajaran'] = $pelajaran_list;
-                $stmt_pelajaran->close();
+                $stmt_pendaftaran->close();
             }
-            $stmt_pendaftaran->close();
-
-            // Ambil statistik penilaian
-            $sql_stat = "SELECT 
-                        COUNT(*) as total_penilaian,
-                        AVG(total_score) as rata_skor,
-                        AVG(persentase) as rata_persentase,
-                        (SELECT kategori FROM penilaian_siswa WHERE siswa_id = ? ORDER BY tanggal_penilaian DESC LIMIT 1) as kategori_terakhir
-                        FROM penilaian_siswa 
-                        WHERE siswa_id = ?";
-
-            $stmt_stat = $conn->prepare($sql_stat);
-            $stmt_stat->bind_param("ii", $anak_id, $anak_id);
-            $stmt_stat->execute();
-            $result_stat = $stmt_stat->get_result();
-            if ($row_stat = $result_stat->fetch_assoc()) {
-                $data['statistik'] = $row_stat;
-            } else {
-                $data['statistik'] = [
-                    'total_penilaian' => 0,
-                    'rata_skor' => 0,
-                    'rata_persentase' => 0,
-                    'kategori_terakhir' => 'Belum ada penilaian'
-                ];
-            }
-            $stmt_stat->close();
 
             echo json_encode(['success' => true, 'data' => $data]);
         } else {
@@ -344,38 +368,33 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
     header('Content-Type: application/json');
 
     try {
-        // Update query untuk include siswa_orangtua
         $sql = "SELECT pn.*, 
                        s.nama_lengkap as nama_siswa,
-                       u.full_name as nama_guru,
-                       sp.nama_pelajaran,
+                       COALESCE(u.full_name, '-') as nama_guru,
+                       COALESCE(sp.nama_pelajaran, '-') as nama_pelajaran,
                        ps.jenis_kelas as kelas_bimbel,
                        ps.tingkat as tingkat_bimbel,
                        DATE_FORMAT(pn.tanggal_penilaian, '%d %M %Y') as tanggal_format
                 FROM penilaian_siswa pn
-                JOIN siswa s ON pn.siswa_id = s.id
-                JOIN siswa_orangtua so ON s.id = so.siswa_id
-                JOIN pendaftaran_siswa ps ON pn.pendaftaran_id = ps.id
-                JOIN siswa_pelajaran sp ON pn.siswa_pelajaran_id = sp.id
-                JOIN guru g ON pn.guru_id = g.id
-                JOIN users u ON g.user_id = u.id
-                WHERE pn.id = ? AND so.orangtua_id = ?";
+                INNER JOIN siswa s ON pn.siswa_id = s.id
+                INNER JOIN siswa_orangtua so ON s.id = so.siswa_id
+                INNER JOIN pendaftaran_siswa ps ON pn.pendaftaran_id = ps.id
+                LEFT JOIN siswa_pelajaran sp ON pn.siswa_pelajaran_id = sp.id
+                LEFT JOIN guru g ON pn.guru_id = g.id
+                LEFT JOIN users u ON g.user_id = u.id
+                WHERE pn.id = ? AND so.orangtua_id = ? ";
 
         $stmt = $conn->prepare($sql);
+        if (!$stmt) {
+            throw new Exception("Prepare error: " . $conn->error);
+        }
+
         $stmt->bind_param("ii", $penilaian_id, $orangtua_id);
         $stmt->execute();
         $result = $stmt->get_result();
 
         if ($result->num_rows > 0) {
             $data = $result->fetch_assoc();
-
-            // Set NIS default karena kolom tidak ada
-            $data['nis'] = '-';
-
-            // Hitung persentase jika belum ada
-            if (!isset($data['persentase']) || $data['persentase'] === null) {
-                $data['persentase'] = round(($data['total_score'] / 50) * 100);
-            }
 
             echo json_encode(['success' => true, 'data' => $data]);
         } else {
@@ -389,10 +408,8 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
     exit();
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="id">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -401,7 +418,7 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        /* ... (CSS tetap sama seperti sebelumnya) ... */
+        /* CSS yang sama seperti sebelumnya */
         .badge {
             display: inline-block;
             padding: 0.25rem 0.75rem;
@@ -409,222 +426,34 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
             font-size: 0.875rem;
             font-weight: 600;
         }
-
-        .badge-sangat-baik {
-            background-color: #10B981;
-            color: white;
-        }
-
-        .badge-baik {
-            background-color: #3B82F6;
-            color: white;
-        }
-
-        .badge-cukup {
-            background-color: #F59E0B;
-            color: white;
-        }
-
-        .badge-kurang {
-            background-color: #EF4444;
-            color: white;
-        }
-
-        .card {
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        .card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-        }
-
-        /* Modal Styling */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            overflow-y: auto;
-        }
-
-        .modal-content {
-            background-color: #fff;
-            margin: 2% auto;
-            padding: 0;
-            border-radius: 8px;
-            width: 90%;
-            max-width: 700px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-            animation: modalFadeIn 0.3s;
-        }
-
-        @keyframes modalFadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(-20px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .modal-header {
-            padding: 16px 24px;
-            color: white;
-            border-radius: 8px 8px 0 0;
-            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-        }
-
-        .modal-body {
-            padding: 24px;
-            max-height: 70vh;
-            overflow-y: auto;
-        }
-
-        .modal-footer {
-            padding: 16px 24px;
-            border-top: 1px solid #e5e7eb;
-            background-color: #f9fafb;
-            border-radius: 0 0 8px 8px;
-        }
-
-        .dropdown-submenu {
-            display: none;
-            max-height: 500px;
-            overflow: hidden;
-            transition: max-height 0.3s ease;
-        }
-
-        .dropdown-submenu[style*="display: block"] {
-            display: block;
-        }
-
-        .dropdown-toggle.open .arrow {
-            transform: rotate(90deg);
-        }
-
-        .close {
-            color: #fff;
-            float: right;
-            font-size: 28px;
-            font-weight: bold;
-            cursor: pointer;
-            line-height: 1;
-        }
-
-        .close:hover {
-            opacity: 0.8;
-        }
-
-        #mobileMenu {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 280px;
-            height: 100%;
-            z-index: 1100;
-            transform: translateX(-100%);
-            transition: transform 0.3s ease-in-out;
-            box-shadow: 5px 0 25px rgba(0, 0, 0, 0.2);
-        }
-
-        #mobileMenu.menu-open {
-            transform: translateX(0);
-        }
-
-        .menu-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            z-index: 1099;
-        }
-
-        .menu-overlay.active {
-            display: block;
-        }
-
-        .desktop-sidebar {
-            display: none;
-        }
-
-        @media (min-width: 768px) {
-            .desktop-sidebar {
-                display: block;
-            }
-
-            .mobile-header {
-                display: none;
-            }
-
-            #mobileMenu {
-                display: none;
-            }
-
-            .menu-overlay {
-                display: none !important;
-            }
-        }
-
-        @media (max-width: 767px) {
-            .modal-content {
-                width: 95%;
-                margin: 10% auto;
-            }
-
-            .grid {
-                grid-template-columns: 1fr !important;
-            }
-
-            .stat-cards {
-                grid-template-columns: repeat(2, 1fr) !important;
-            }
-
-            .info-cards {
-                grid-template-columns: 1fr !important;
-            }
-        }
-
-        .menu-item.active {
-            background-color: rgba(255, 255, 255, 0.1);
-            border-left: 4px solid #60A5FA;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-
-        .fa-spinner {
-            animation: spin 1s linear infinite;
-        }
-
-        .stat-card {
-            transition: transform 0.3s, box-shadow 0.3s;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-        }
+        .badge-sangat-baik { background-color: #10B981; color: white; }
+        .badge-baik { background-color: #3B82F6; color: white; }
+        .badge-cukup { background-color: #F59E0B; color: white; }
+        .badge-kurang { background-color: #EF4444; color: white; }
+        .card { transition: transform 0.2s, box-shadow 0.2s; }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); overflow-y: auto; }
+        .modal-content { background-color: #fff; margin: 2% auto; padding: 0; border-radius: 8px; width: 90%; max-width: 700px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); animation: modalFadeIn 0.3s; }
+        @keyframes modalFadeIn { from { opacity:0; transform: translateY(-20px); } to { opacity:1; transform: translateY(0); } }
+        .modal-header { padding: 16px 24px; color: white; border-radius: 8px 8px 0 0; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); }
+        .modal-body { padding: 24px; max-height: 70vh; overflow-y: auto; }
+        .modal-footer { padding: 16px 24px; border-top: 1px solid #e5e7eb; background-color: #f9fafb; border-radius: 0 0 8px 8px; }
+        .close { color: #fff; float: right; font-size: 28px; font-weight: bold; cursor: pointer; line-height: 1; }
+        .close:hover { opacity: 0.8; }
+        #mobileMenu { position: fixed; top: 0; left: 0; width: 280px; height: 100%; z-index: 1100; transform: translateX(-100%); transition: transform 0.3s ease-in-out; box-shadow: 5px 0 25px rgba(0,0,0,0.2); background-color: #1e40af; }
+        #mobileMenu.menu-open { transform: translateX(0); }
+        .menu-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 1099; }
+        .menu-overlay.active { display: block; }
+        .desktop-sidebar { display: none; }
+        @media (min-width: 768px) { .desktop-sidebar { display: block; } .mobile-header { display: none; } #mobileMenu { display: none; } .menu-overlay { display: none !important; } }
+        @media (max-width: 767px) { .modal-content { width: 95%; margin: 10% auto; } .grid { grid-template-columns: 1fr !important; } .stat-cards { grid-template-columns: repeat(2, 1fr) !important; } .info-cards { grid-template-columns: 1fr !important; } }
+        .menu-item.active { background-color: rgba(255,255,255,0.1); border-left: 4px solid #60A5FA; }
+        .fa-spinner { animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .stat-card { transition: transform 0.3s, box-shadow 0.3s; }
+        .stat-card:hover { transform: translateY(-5px); box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
     </style>
 </head>
-
 <body class="bg-gray-100">
     <!-- Desktop Sidebar -->
     <div class="desktop-sidebar w-64 bg-blue-800 text-white fixed h-full z-40">
@@ -728,6 +557,19 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
 
         <!-- Content -->
         <div class="container mx-auto p-4 md:p-6">
+            <?php if ($total_anak == 0): ?>
+                <!-- Alert jika tidak ada data anak -->
+                <div class="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-6">
+                    <div class="flex items-center">
+                        <i class="fas fa-exclamation-triangle mr-3"></i>
+                        <div>
+                            <p class="font-bold">Perhatian!</p>
+                            <p class="text-sm">Belum ada data anak yang terdaftar. Hubungi admin untuk mendaftarkan anak Anda.</p>
+                        </div>
+                    </div>
+                </div>
+            <?php endif; ?>
+
             <!-- Statistik Ringkas -->
             <div class="grid stat-cards grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
                 <div class="stat-card bg-white rounded-lg shadow p-3 md:p-6">
@@ -747,24 +589,20 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                             <i class="fas fa-clipboard-check text-green-600 text-lg md:text-xl"></i>
                         </div>
                         <div>
-                            <div class="grid grid-cols-1">
-                                <p class="text-xs md:text-sm text-gray-600">Penilaian Terbaru</p>
-                                 <p class="text-green-500 text-xs">(1 minggu)</p>
-                            </div>
+                            <p class="text-xs md:text-sm text-gray-600">Penilaian Terbaru</p>
                             <p class="text-xl md:text-2xl font-bold text-gray-800">
                                 <?php echo $statistik['total_penilaian']; ?>
                             </p>
                         </div>
                     </div>
                 </div>
-                <!-- GANTI kode card skor ini: -->
                 <div class="stat-card bg-white rounded-lg shadow p-3 md:p-6">
                     <div class="flex items-center">
                         <div class="p-2 md:p-3 bg-purple-100 rounded-lg mr-3 md:mr-4">
                             <i class="fas fa-star text-purple-600 text-lg md:text-xl"></i>
                         </div>
                         <div>
-                            <p class="text-xs md:text-sm text-gray-600"> Skor Terbaru </p>
+                            <p class="text-xs md:text-sm text-gray-600">Skor Terbaru</p>
                             <p class="text-xl md:text-2xl font-bold text-gray-800">
                                 <?php echo $statistik['skor_terbaru']; ?>/50
                             </p>
@@ -777,7 +615,7 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                             <i class="fas fa-trophy text-yellow-600 text-lg md:text-xl"></i>
                         </div>
                         <div>
-                            <p class="text-xs md:text-sm text-gray-600">Kategori Nilai</p>
+                            <p class="text-xs md:text-sm text-gray-600">Kategori</p>
                             <p class="text-xl md:text-2xl font-bold text-gray-800">
                                 <?php echo $statistik['kategori_terbaru'] ?: '-'; ?>
                             </p>
@@ -797,85 +635,65 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                     </div>
                     <div class="p-3 md:p-6">
                         <?php if ($total_anak == 0): ?>
-                            <div class="text-center py-6 md:py-8">
-                                <i class="fas fa-child text-4xl md:text-5xl text-gray-400 mb-4"></i>
-                                <h4 class="text-base md:text-lg font-medium text-gray-700 mb-2">Belum ada data anak</h4>
-                                <p class="text-gray-500 text-sm md:text-base">Hubungi admin untuk mendaftarkan anak Anda.
-                                </p>
-                            </div>
+                                <div class="text-center py-6 md:py-8">
+                                    <i class="fas fa-child text-4xl md:text-5xl text-gray-400 mb-4"></i>
+                                    <h4 class="text-base md:text-lg font-medium text-gray-700 mb-2">Belum ada data anak</h4>
+                                    <p class="text-gray-500 text-sm md:text-base">Hubungi admin untuk mendaftarkan anak Anda.
+                                    </p>
+                                </div>
                         <?php else: ?>
-                            <div class="space-y-3">
-                                <?php foreach ($anak_data as $anak):
-                                    $anak_dashboard = null;
-                                    foreach ($dashboard_data as $data) {
-                                        if ($data['siswa_id'] == $anak['id']) {
-                                            $anak_dashboard = $data;
-                                            break;
-                                        }
-                                    }
-
-                                    $pendaftaran = $pendaftaran_data[$anak['id']] ?? null;
-                                    $pelajaran_list = $pelajaran_data[$anak['id']] ?? [];
-                                    ?>
-                                    <div class="flex items-center p-3 bg-gray-50 rounded-lg hover:bg-blue-50 transition">
-                                        <div
-                                            class="w-10 h-10 md:w-12 md:h-12 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                                            <span class="text-blue-800 font-bold text-sm md:text-base">
-                                                <?php echo strtoupper(substr($anak['nama_lengkap'], 0, 1)); ?>
-                                            </span>
-                                        </div>
-                                        <div class="ml-3 flex-1 min-w-0">
-                                            <h4 class="font-medium text-gray-900 text-sm md:text-base truncate">
-                                                <?php echo htmlspecialchars($anak['nama_lengkap']); ?>
-                                            </h4>
-                                            <div class="text-xs text-gray-600 flex flex-wrap gap-1 md:gap-2">
-                                                <span class="inline-block">
-                                                    <i class="fas fa-school mr-1"></i>
-                                                    <?php echo htmlspecialchars($anak['sekolah_asal'] ?: '-'); ?>
-                                                </span>
-                                                <span class="inline-block">
-                                                    <i class="fas fa-graduation-cap mr-1"></i>
-                                                    <?php echo htmlspecialchars($anak['kelas']); ?>
-                                                </span>
+                                <div class="space-y-3">
+                                    <?php foreach ($anak_data as $anak):
+                                        $pendaftaran = $pendaftaran_data[$anak['id']] ?? null;
+                                        $pelajaran_list = $pelajaran_data[$anak['id']] ?? [];
+                                        ?>
+                                            <div class="flex items-center p-3 bg-gray-50 rounded-lg hover:bg-blue-50 transition">
+                                                <div
+                                                    class="w-10 h-10 md:w-12 md:h-12 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                                    <span class="text-blue-800 font-bold text-sm md:text-base">
+                                                        <?php echo strtoupper(substr($anak['nama_lengkap'], 0, 1)); ?>
+                                                    </span>
+                                                </div>
+                                                <div class="ml-3 flex-1 min-w-0">
+                                                    <h4 class="font-medium text-gray-900 text-sm md:text-base truncate">
+                                                        <?php echo htmlspecialchars($anak['nama_lengkap']); ?>
+                                                    </h4>
+                                                    <div class="text-xs text-gray-600 flex flex-wrap gap-1 md:gap-2">
+                                                        <span class="inline-block">
+                                                            <i class="fas fa-school mr-1"></i>
+                                                            <?php echo htmlspecialchars($anak['sekolah_asal'] ?: '-'); ?>
+                                                        </span>
+                                                        <span class="inline-block">
+                                                            <i class="fas fa-graduation-cap mr-1"></i>
+                                                            <?php echo htmlspecialchars($anak['kelas']); ?>
+                                                        </span>
+                                                    </div>
+                                                    <?php if ($pendaftaran): ?>
+                                                            <div class="text-xs text-blue-600 mt-1 truncate">
+                                                                <i class="fas fa-chalkboard-teacher mr-1"></i>
+                                                                <?php echo htmlspecialchars($pendaftaran['jenis_kelas']); ?>
+                                                                (<?php echo htmlspecialchars($pendaftaran['tingkat']); ?>)
+                                                            </div>
+                                                    <?php endif; ?>
+                                                    <?php if (!empty($pelajaran_list)): ?>
+                                                            <div class="text-xs text-green-600 mt-1 truncate">
+                                                                <i class="fas fa-book mr-1"></i>
+                                                                <?php
+                                                                $pelajaran_names = array_map(function ($p) {
+                                                                    return htmlspecialchars($p['nama_pelajaran']);
+                                                                }, $pelajaran_list);
+                                                                echo implode(', ', $pelajaran_names);
+                                                                ?>
+                                                            </div>
+                                                    <?php endif; ?>
+                                                </div>
+                                                <button onclick="showDetailAnak(<?php echo $anak['id']; ?>)"
+                                                    class="text-blue-600 hover:text-blue-800 p-1 md:p-2 flex-shrink-0">
+                                                    <i class="fas fa-eye text-sm md:text-base"></i>
+                                                </button>
                                             </div>
-                                            <?php if ($pendaftaran): ?>
-                                                <div class="text-xs text-blue-600 mt-1 truncate">
-                                                    <i class="fas fa-chalkboard-teacher mr-1"></i>
-                                                    <?php echo htmlspecialchars($pendaftaran['jenis_kelas']); ?>
-                                                    (<?php echo htmlspecialchars($pendaftaran['tingkat']); ?>)
-                                                </div>
-                                            <?php endif; ?>
-                                            <?php if (!empty($pelajaran_list)): ?>
-                                                <div class="text-xs text-green-600 mt-1 truncate">
-                                                    <i class="fas fa-book mr-1"></i>
-                                                    <?php
-                                                    $pelajaran_names = array_map(function ($p) {
-                                                        return htmlspecialchars($p['nama_pelajaran']);
-                                                    }, $pelajaran_list);
-                                                    echo implode(', ', $pelajaran_names);
-                                                    ?>
-                                                </div>
-                                            <?php endif; ?>
-                                            <?php if ($anak_dashboard && $anak_dashboard['kategori_terkini']):
-                                                $badge_class = '';
-                                                if ($anak_dashboard['kategori_terkini'] == 'Sangat Baik')
-                                                    $badge_class = 'badge-sangat-baik';
-                                                elseif ($anak_dashboard['kategori_terkini'] == 'Baik')
-                                                    $badge_class = 'badge-baik';
-                                                elseif ($anak_dashboard['kategori_terkini'] == 'Cukup')
-                                                    $badge_class = 'badge-cukup';
-                                                else
-                                                    $badge_class = 'badge-kurang';
-                                                ?>
-                                            <?php endif; ?>
-                                        </div>
-                                        <button onclick="showDetailAnak(<?php echo $anak['id']; ?>)"
-                                            class="text-blue-600 hover:text-blue-800 p-1 md:p-2 flex-shrink-0">
-                                            <i class="fas fa-eye text-sm md:text-base"></i>
-                                        </button>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
+                                    <?php endforeach; ?>
+                                </div>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -889,83 +707,69 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                     </div>
                     <div class="p-3 md:p-6">
                         <?php if (empty($penilaian_terbaru)): ?>
-                            <div class="text-center py-6 md:py-8">
-                                <i class="fas fa-clipboard-list text-4xl md:text-5xl text-gray-400 mb-4"></i>
-                                <h4 class="text-base md:text-lg font-medium text-gray-700 mb-2">Belum ada penilaian</h4>
-                                <p class="text-gray-500 text-sm md:text-base">Belum ada penilaian untuk anak Anda.</p>
-                            </div>
+                                <div class="text-center py-6 md:py-8">
+                                    <i class="fas fa-clipboard-list text-4xl md:text-5xl text-gray-400 mb-4"></i>
+                                    <h4 class="text-base md:text-lg font-medium text-gray-700 mb-2">Belum ada penilaian</h4>
+                                    <p class="text-gray-500 text-sm md:text-base">Belum ada penilaian untuk anak Anda.</p>
+                                </div>
                         <?php else: ?>
-                            <div class="space-y-3">
-                                <?php foreach ($penilaian_terbaru as $penilaian):
-                                    $badge_class = '';
-                                    if ($penilaian['kategori'] == 'Sangat Baik')
-                                        $badge_class = 'badge-sangat-baik';
-                                    elseif ($penilaian['kategori'] == 'Baik')
-                                        $badge_class = 'badge-baik';
-                                    elseif ($penilaian['kategori'] == 'Cukup')
-                                        $badge_class = 'badge-cukup';
-                                    else
-                                        $badge_class = 'badge-kurang';
-                                    ?>
-                                    <div class="border border-gray-200 rounded-lg p-3 hover:border-blue-300 transition">
-                                        <div class="flex justify-between items-start mb-2">
-                                            <h4 class="font-medium text-gray-900 text-sm md:text-base">
-                                                <?php echo htmlspecialchars($penilaian['nama_siswa']); ?>
-                                            </h4>
-                                            <span class="badge <?php echo $badge_class; ?> text-xs">
-                                                <?php echo htmlspecialchars($penilaian['kategori']); ?>
-                                            </span>
-                                        </div>
-                                        <div class="text-xs text-gray-600 mb-2">
-                                            <span>
-                                                <i class="fas fa-book mr-1"></i>
-                                                <?php echo htmlspecialchars($penilaian['nama_pelajaran']); ?>
-                                            </span>
-                                            <span class="mx-2">•</span>
-                                            <span>
-                                                <i class="fas fa-calendar-alt mr-1"></i>
-                                                <?php echo htmlspecialchars($penilaian['tanggal_format']); ?>
-                                            </span>
-                                        </div>
-                                        <div class="text-xs text-gray-600 mb-2">
-                                            <span>
-                                                <i class="fas fa-user-tie mr-1"></i>
-                                                <?php echo htmlspecialchars($penilaian['nama_guru']); ?>
-                                            </span>
-                                        </div>
-                                        <div class="flex justify-between items-center">
-                                            <div class="text-lg md:text-2xl font-bold text-gray-800">
-                                                <?php echo $penilaian['total_score']; ?>/50
-                                                <span class="text-xs md:text-sm font-normal text-gray-500">
-                                                    (<?php echo $penilaian['persentase']; ?>%)
-                                                </span>
+                                <div class="space-y-3">
+                                    <?php foreach ($penilaian_terbaru as $penilaian):
+                                        $badge_class = '';
+                                        if ($penilaian['kategori'] == 'Sangat Baik')
+                                            $badge_class = 'badge-sangat-baik';
+                                        elseif ($penilaian['kategori'] == 'Baik')
+                                            $badge_class = 'badge-baik';
+                                        elseif ($penilaian['kategori'] == 'Cukup')
+                                            $badge_class = 'badge-cukup';
+                                        else
+                                            $badge_class = 'badge-kurang';
+                                        ?>
+                                            <div class="border border-gray-200 rounded-lg p-3 hover:border-blue-300 transition">
+                                                <div class="flex justify-between items-start mb-2">
+                                                    <h4 class="font-medium text-gray-900 text-sm md:text-base">
+                                                        <?php echo htmlspecialchars($penilaian['nama_siswa']); ?>
+                                                    </h4>
+                                                    <span class="badge <?php echo $badge_class; ?> text-xs">
+                                                        <?php echo htmlspecialchars($penilaian['kategori']); ?>
+                                                    </span>
+                                                </div>
+                                                <div class="text-xs text-gray-600 mb-2">
+                                                    <span>
+                                                        <i class="fas fa-book mr-1"></i>
+                                                        <?php echo htmlspecialchars($penilaian['nama_pelajaran']); ?>
+                                                    </span>
+                                                    <span class="mx-2">•</span>
+                                                    <span>
+                                                        <i class="fas fa-calendar-alt mr-1"></i>
+                                                        <?php echo htmlspecialchars($penilaian['tanggal_format']); ?>
+                                                    </span>
+                                                </div>
+                                                <div class="text-xs text-gray-600 mb-2">
+                                                    <span>
+                                                        <i class="fas fa-user-tie mr-1"></i>
+                                                        <?php echo htmlspecialchars($penilaian['nama_guru']); ?>
+                                                    </span>
+                                                </div>
+                                                <div class="flex justify-between items-center">
+                                                    <div class="text-lg md:text-2xl font-bold text-gray-800">
+                                                        <?php echo $penilaian['total_score']; ?>/50
+                                                        <span class="text-xs md:text-sm font-normal text-gray-500">
+                                                            (<?php echo $penilaian['persentase']; ?>%)
+                                                        </span>
+                                                    </div>
+                                                    <button onclick="showDetailPenilaian(<?php echo $penilaian['id']; ?>)"
+                                                        class="text-blue-600 hover:text-blue-800 text-xs md:text-sm font-medium">
+                                                        Detail <i class="fas fa-arrow-right ml-1 hidden md:inline"></i>
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <button onclick="showDetailPenilaian(<?php echo $penilaian['id']; ?>)"
-                                                class="text-blue-600 hover:text-blue-800 text-xs md:text-sm font-medium">
-                                                Detail <i class="fas fa-arrow-right ml-1 hidden md:inline"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
+                                    <?php endforeach; ?>
+                                </div>
                         <?php endif; ?>
                     </div>
                 </div>
             </div>
-
-            <!-- Grafik Perkembangan -->
-            <!--<?php if (!empty($penilaian_terbaru)): ?>-->
-                <!--    <div class="card bg-white rounded-lg shadow p-4 md:p-6 mb-6">-->
-                <!--        <h3 class="text-base md:text-lg font-semibold text-gray-800 mb-3 md:mb-4">-->
-                <!--            <i class="fas fa-chart-line mr-2"></i> Grafik Perkembangan-->
-                <!--        </h3>-->
-                <!--        <div class="h-48 md:h-64">-->
-                <!--            <canvas id="perkembanganChart"></canvas>-->
-                <!--        </div>-->
-                <!--    </div>-->
-                <!--<?php endif; ?>-->
-
-
 
             <!-- Informasi Cards -->
             <div class="grid info-cards grid-cols-1 md:grid-cols-3 gap-3 md:gap-6">
@@ -977,18 +781,9 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                         <h4 class="font-semibold text-gray-800 text-sm md:text-base">Tips Belajar</h4>
                     </div>
                     <ul class="space-y-1 md:space-y-2 text-xs md:text-sm text-gray-700">
-                        <li class="flex items-start">
-                            <i class="fas fa-check text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                            <span>Buat jadwal belajar rutin</span>
-                        </li>
-                        <li class="flex items-start">
-                            <i class="fas fa-check text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                            <span>Lingkungan belajar yang nyaman</span>
-                        </li>
-                        <li class="flex items-start">
-                            <i class="fas fa-check text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                            <span>Istirahat cukup di sela belajar</span>
-                        </li>
+                        <li class="flex items-start"><i class="fas fa-check text-green-500 mt-0.5 mr-1 md:mr-2"></i><span>Buat jadwal belajar rutin</span></li>
+                        <li class="flex items-start"><i class="fas fa-check text-green-500 mt-0.5 mr-1 md:mr-2"></i><span>Lingkungan belajar yang nyaman</span></li>
+                        <li class="flex items-start"><i class="fas fa-check text-green-500 mt-0.5 mr-1 md:mr-2"></i><span>Istirahat cukup di sela belajar</span></li>
                     </ul>
                 </div>
                 <div class="card bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg shadow p-3 md:p-6">
@@ -1001,13 +796,14 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                     <div class="space-y-2 md:space-y-3 text-xs md:text-sm text-gray-700">
                         <div>
                             <p class="font-medium">Jam Operasional:</p>
-                            <p>Senin-Jumat: 08:00-18:00</p>
-                            <p>Sabtu: 08:00-13:00</p>
+                            <p>Senin-Jumat: 09:00-18:00</p>
+                            <p>Kamis: 10:00-18:00</p>
+                            <p>Sabtu: 09:00-13:00</p>
                         </div>
                         <div>
                             <p class="font-medium">Kontak:</p>
-                            <p><i class="fas fa-phone mr-1 md:mr-2 text-xs md:text-sm"></i> 08xxxxx</p>
-                            <p><i class="fas fa-envelope mr-1 md:mr-2 text-xs md:text-sm"></i> info@bimbelesc.com</p>
+                            <p><i class="fas fa-phone mr-1 md:mr-2"></i> 0811890600</p>
+                            <p><i class="fas fa-envelope mr-1 md:mr-2"></i> educationsolutionscenter@gmail.com</p>
                         </div>
                     </div>
                 </div>
@@ -1020,23 +816,13 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                     </div>
                     <div class="space-y-2 md:space-y-3">
                         <div>
-                            <p class="text-xs md:text-sm text-gray-600">Penilaian Baru</p>
-                            <p class="text-lg md:text-xl font-bold text-gray-800">
-                                <?php echo $statistik['total_penilaian']; ?>
-                            </p>
+                            <p class="text-xs md:text-sm text-gray-600">Penilaian Terbaru</p>
+                            <p class="text-lg md:text-xl font-bold text-gray-800"><?php echo $statistik['total_penilaian']; ?></p>
                         </div>
                         <div>
-                            <p class="text-xs md:text-sm text-gray-600">Saran</p>
+                            <p class="text-xs md:text-sm text-gray-600">Info</p>
                             <p class="text-xs md:text-sm text-gray-700">
-                                <?php
-                                if ($statistik['rata_total_skor'] >= 40) {
-                                    echo "Pertahankan prestasi anak Anda!";
-                                } elseif ($statistik['rata_total_skor'] >= 30) {
-                                    echo "Tingkatkan fokus pada indikator yang rendah.";
-                                } else {
-                                    echo "Komunikasikan dengan guru untuk bimbingan khusus.";
-                                }
-                                ?>
+                                Pantau terus perkembangan anak Anda melalui menu "Nilai Anak" untuk melihat detail.
                             </p>
                         </div>
                     </div>
@@ -1050,9 +836,7 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                 <div class="md:flex md:items-center md:justify-between">
                     <div class="text-sm text-gray-500">
                         <p>© <?php echo date('Y'); ?> Bimbel Esc - Dashboard Orang Tua</p>
-                        <p class="mt-1 text-xs text-gray-400">
-                            Login sebagai: <?php echo htmlspecialchars($nama_ortu ?: $full_name); ?>
-                        </p>
+                        <p class="mt-1 text-xs text-gray-400">Login sebagai: <?php echo htmlspecialchars($nama_ortu ?: $full_name); ?></p>
                     </div>
                     <div class="mt-3 md:mt-0">
                         <div class="flex items-center space-x-4">
@@ -1076,8 +860,7 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
             </div>
             <div class="modal-body" id="detailAnakContent"></div>
             <div class="modal-footer">
-                <button onclick="closeModal('detailAnakModal')"
-                    class="px-3 md:px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm md:text-base">
+                <button onclick="closeModal('detailAnakModal')" class="px-3 md:px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm md:text-base">
                     Tutup
                 </button>
             </div>
@@ -1093,8 +876,7 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
             </div>
             <div class="modal-body" id="detailPenilaianContent"></div>
             <div class="modal-footer">
-                <button onclick="closeModal('detailPenilaianModal')"
-                    class="px-3 md:px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm md:text-base">
+                <button onclick="closeModal('detailPenilaianModal')" class="px-3 md:px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm md:text-base">
                     Tutup
                 </button>
             </div>
@@ -1141,66 +923,50 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
             });
         });
 
-        // Chart.js
-        <?php if (!empty($penilaian_terbaru)): ?>
-            document.addEventListener('DOMContentLoaded', function () {
-                const ctx = document.getElementById('perkembanganChart').getContext('2d');
-                const labels = [];
-                const dataScores = [];
-                const backgroundColors = [];
+        // Dropdown functionality
+        document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
+            toggle.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
 
-                <?php foreach ($penilaian_terbaru as $penilaian): ?>
-                    labels.push("<?php echo htmlspecialchars($penilaian['nama_siswa']); ?>");
-                    dataScores.push(<?php echo $penilaian['total_score']; ?>);
+                const dropdownGroup = this.closest('.mb-1');
+                const submenu = dropdownGroup.querySelector('.dropdown-submenu');
+                const arrow = this.querySelector('.arrow');
 
-                    <?php
-                    $color = '';
-                    if ($penilaian['kategori'] == 'Sangat Baik')
-                        $color = '#10B981';
-                    elseif ($penilaian['kategori'] == 'Baik')
-                        $color = '#3B82F6';
-                    elseif ($penilaian['kategori'] == 'Cukup')
-                        $color = '#F59E0B';
-                    else
-                        $color = '#EF4444';
-                    ?>
-                    backgroundColors.push("<?php echo $color; ?>");
-                <?php endforeach; ?>
+                if (submenu.style.display === 'block') {
+                    submenu.style.display = 'none';
+                    arrow.style.transform = 'rotate(0deg)';
+                    this.classList.remove('open');
+                } else {
+                    document.querySelectorAll('.dropdown-submenu').forEach(sm => {
+                        sm.style.display = 'none';
+                    });
+                    document.querySelectorAll('.dropdown-toggle').forEach(t => {
+                        t.classList.remove('open');
+                        t.querySelector('.arrow').style.transform = 'rotate(0deg)';
+                    });
 
-                new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: 'Total Skor',
-                            data: dataScores,
-                            backgroundColor: backgroundColors,
-                            borderWidth: 1,
-                            borderRadius: 5
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        scales: {
-                            y: {
-                                beginAtZero: true,
-                                max: 50,
-                                title: {
-                                    display: true,
-                                    text: 'Total Skor (max 50)'
-                                }
-                            }
-                        },
-                        plugins: {
-                            legend: { display: false }
-                        }
-                    }
-                });
+                    submenu.style.display = 'block';
+                    arrow.style.transform = 'rotate(-90deg)';
+                    this.classList.add('open');
+                }
             });
-        <?php endif; ?>
+        });
 
-        // FUNGSI UTAMA UNTUK DETAIL ANAK
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', function (e) {
+            if (!e.target.closest('.mb-1')) {
+                document.querySelectorAll('.dropdown-submenu').forEach(submenu => {
+                    submenu.style.display = 'none';
+                });
+                document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
+                    toggle.classList.remove('open');
+                    toggle.querySelector('.arrow').style.transform = 'rotate(0deg)';
+                });
+            }
+        });
+
+        // FUNGSI UNTUK DETAIL ANAK
         function showDetailAnak(anakId) {
             const modal = document.getElementById('detailAnakModal');
             const content = document.getElementById('detailAnakContent');
@@ -1224,16 +990,10 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
 
             modal.style.display = 'block';
 
-            // Gunakan URL yang sama dengan halaman saat ini
             const url = window.location.href.split('?')[0] + `?action=get_detail_anak&id=${anakId}`;
 
             fetch(url)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                    }
-                    return response.json();
-                })
+                .then(response => response.json())
                 .then(data => {
                     if (data.success && data.data) {
                         displayAnakData(data.data);
@@ -1272,19 +1032,9 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                     `;
                 });
 
-            // Fungsi untuk menampilkan data anak
             function displayAnakData(d) {
-                const stat = d.statistik || {};
-                const kategori = stat.kategori_terakhir || 'Belum dinilai';
                 const pendaftaran = d.pendaftaran || {};
                 const pelajaran = d.pelajaran || [];
-
-                // Tentukan warna badge
-                let badgeClass = 'bg-gray-500';
-                if (kategori.includes('Sangat Baik')) badgeClass = 'bg-green-500';
-                else if (kategori.includes('Baik')) badgeClass = 'bg-blue-500';
-                else if (kategori.includes('Cukup')) badgeClass = 'bg-yellow-500';
-                else if (kategori.includes('Kurang')) badgeClass = 'bg-red-500';
 
                 content.innerHTML = `
                     <div class="space-y-4 md:space-y-6">
@@ -1377,7 +1127,7 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
             }
         }
 
-        // FUNGSI UTAMA UNTUK DETAIL PENILAIAN
+        // FUNGSI UNTUK DETAIL PENILAIAN
         function showDetailPenilaian(penilaianId) {
             const modal = document.getElementById('detailPenilaianModal');
             const content = document.getElementById('detailPenilaianContent');
@@ -1403,12 +1153,7 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
             const url = window.location.href.split('?')[0] + `?action=get_detail_penilaian&id=${penilaianId}`;
 
             fetch(url)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                    }
-                    return response.json();
-                })
+                .then(response => response.json())
                 .then(data => {
                     if (data.success && data.data) {
                         displayPenilaianData(data.data);
@@ -1447,7 +1192,6 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                     `;
                 });
 
-            // Fungsi untuk menampilkan data penilaian
             function displayPenilaianData(d) {
                 const kategori = d.kategori || 'Belum dinilai';
                 let kategoriClass = 'bg-gray-500';
@@ -1456,13 +1200,12 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                 else if (kategori.includes('Cukup')) kategoriClass = 'bg-yellow-500';
                 else if (kategori.includes('Kurang')) kategoriClass = 'bg-red-500';
 
-                // List indikator (hanya 5 indikator)
                 const indicators = [
-                    { name: 'Kemauan Belajar', key: 'willingness_learn', value: d.willingness_learn || 0 },
-                    { name: 'Konsentrasi', key: 'concentration', value: d.concentration || 0 },
-                    { name: 'Berpikir Kritis', key: 'critical_thinking', value: d.critical_thinking || 0 },
-                    { name: 'Kemandirian', key: 'independence', value: d.independence || 0 },
-                    { name: 'Pemecahan Masalah', key: 'problem_solving', value: d.problem_solving || 0 }
+                    { name: 'Kemauan Belajar', value: d.willingness_learn || 0 },
+                    { name: 'Konsentrasi', value: d.concentration || 0 },
+                    { name: 'Berpikir Kritis', value: d.critical_thinking || 0 },
+                    { name: 'Kemandirian', value: d.independence || 0 },
+                    { name: 'Pemecahan Masalah', value: d.problem_solving || 0 }
                 ];
 
                 content.innerHTML = `
@@ -1475,7 +1218,6 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                                 <p class="text-sm md:text-base"><i class="fas fa-calendar-alt mr-2 md:mr-3"></i> ${d.tanggal_format || 'Tanggal tidak tersedia'}</p>
                                 <p class="text-sm md:text-base"><i class="fas fa-user-tie mr-2 md:mr-3"></i> ${d.nama_guru || 'Guru tidak tersedia'}</p>
                                 ${d.nama_pelajaran ? `<p class="text-sm md:text-base"><i class="fas fa-book mr-2 md:mr-3"></i> ${d.nama_pelajaran}</p>` : ''}
-                                ${d.kelas_bimbel ? `<p class="text-sm md:text-base"><i class="fas fa-chalkboard-teacher mr-2 md:mr-3"></i> ${d.kelas_bimbel}</p>` : ''}
                             </div>
                         </div>
                         
@@ -1493,13 +1235,13 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                             <h3 class="text-lg md:text-xl font-semibold text-gray-800 mb-3 md:mb-4">Detail Indikator</h3>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
                                 ${indicators.map(ind => {
-                    const value = ind.value || 0;
-                    const percentage = (value / 10) * 100;
-                    let barColor = 'bg-green-500';
-                    if (percentage < 40) barColor = 'bg-red-500';
-                    else if (percentage < 70) barColor = 'bg-yellow-500';
+                                    const value = ind.value || 0;
+                                    const percentage = (value / 10) * 100;
+                                    let barColor = 'bg-green-500';
+                                    if (percentage < 40) barColor = 'bg-red-500';
+                                    else if (percentage < 70) barColor = 'bg-yellow-500';
 
-                    return `
+                                    return `
                                         <div class="bg-white border border-gray-200 rounded-lg p-3 md:p-4 hover:shadow-md transition">
                                             <div class="flex justify-between items-center mb-1 md:mb-2">
                                                 <span class="font-medium text-gray-700 text-sm md:text-base">${ind.name}</span>
@@ -1509,8 +1251,8 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                                                 <div class="h-2 md:h-2.5 rounded-full ${barColor}" style="width: ${percentage}%"></div>
                                             </div>
                                         </div>
-                                        `;
-                }).join('')}
+                                    `;
+                                }).join('')}
                             </div>
                         </div>
                         
@@ -1541,52 +1283,6 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
             }
         }
 
-        // Dropdown functionality
-        document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-            toggle.addEventListener('click', function (e) {
-                e.preventDefault();
-                e.stopPropagation();
-
-                const dropdownGroup = this.closest('.mb-1');
-                const submenu = dropdownGroup.querySelector('.dropdown-submenu');
-                const arrow = this.querySelector('.arrow');
-
-                // Toggle current dropdown
-                if (submenu.style.display === 'block') {
-                    submenu.style.display = 'none';
-                    arrow.style.transform = 'rotate(0deg)';
-                    this.classList.remove('open');
-                } else {
-                    // Close other dropdowns
-                    document.querySelectorAll('.dropdown-submenu').forEach(sm => {
-                        sm.style.display = 'none';
-                    });
-                    document.querySelectorAll('.dropdown-toggle').forEach(t => {
-                        t.classList.remove('open');
-                        t.querySelector('.arrow').style.transform = 'rotate(0deg)';
-                    });
-
-                    // Open this dropdown
-                    submenu.style.display = 'block';
-                    arrow.style.transform = 'rotate(-90deg)';
-                    this.classList.add('open');
-                }
-            });
-        });
-
-        // Close dropdowns when clicking outside
-        document.addEventListener('click', function (e) {
-            if (!e.target.closest('.mb-1')) {
-                document.querySelectorAll('.dropdown-submenu').forEach(submenu => {
-                    submenu.style.display = 'none';
-                });
-                document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-                    toggle.classList.remove('open');
-                    toggle.querySelector('.arrow').style.transform = 'rotate(0deg)';
-                });
-            }
-        });
-
         // Fungsi untuk menutup modal
         function closeModal(modalId) {
             document.getElementById(modalId).style.display = 'none';
@@ -1615,5 +1311,4 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
         updateServerTime();
     </script>
 </body>
-
 </html>

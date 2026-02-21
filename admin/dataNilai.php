@@ -1644,9 +1644,6 @@ $tahun_list = getTahunList();
                                                 <div class="text-sm font-medium text-gray-900">
                                                     <?php echo $penilaian['total_score'] ?? 0; ?>/50
                                                 </div>
-                                                <div class="text-xs text-gray-500">
-                                                    <?php echo $penilaian['persentase'] ?? 0; ?>%
-                                                </div>
                                             </td>
                                             <td class="px-4 py-3 whitespace-nowrap">
                                                 <?php

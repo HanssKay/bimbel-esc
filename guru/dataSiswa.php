@@ -18,9 +18,26 @@ if ($_SESSION['user_role'] != 'guru') {
     exit();
 }
 
-$guru_id = $_SESSION['role_id'] ?? 0;
+// Dapatkan guru_id dari session atau database
+$user_id = $_SESSION['user_id'] ?? 0;
 $full_name = $_SESSION['full_name'] ?? 'Guru';
 $currentPage = basename($_SERVER['PHP_SELF']);
+
+// Ambil guru_id dari tabel guru
+$guru_id = 0;
+try {
+    $sql = "SELECT id FROM guru WHERE user_id = ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("i", $user_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($row = $result->fetch_assoc()) {
+        $guru_id = $row['id'];
+    }
+    $stmt->close();
+} catch (Exception $e) {
+    error_log("Error getting guru_id: " . $e->getMessage());
+}
 
 // VARIABEL UNTUK NOTIFIKASI
 $success_message = '';
@@ -45,22 +62,25 @@ if (isset($_SESSION['error_message'])) {
     unset($_SESSION['error_message']);
 }
 
-// Fungsi untuk cek hak akses guru ke siswa
-// Fungsi untuk cek hak akses guru ke siswa
+// Fungsi untuk cek hak akses guru ke siswa (berdasarkan jadwal)
 function guruBolehAksesSiswa($conn, $guru_id, $siswa_id)
 {
     try {
         $sql = "SELECT 1 
-                FROM siswa_pelajaran sp 
-                INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                WHERE sp.siswa_id = ? 
-                AND sp.guru_id = ? 
-                AND sp.status = 'aktif'
+                FROM jadwal_belajar jb
+                INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                INNER JOIN pendaftaran_siswa ps ON jb.pendaftaran_id = ps.id
+                WHERE smg.guru_id = ? 
+                AND ps.siswa_id = ?
+                AND jb.status = 'aktif'
                 AND ps.status = 'aktif'
+                AND smg.status != 'tidak_aktif'
                 LIMIT 1";
 
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("ii", $siswa_id, $guru_id);
+        if (!$stmt) return false;
+        
+        $stmt->bind_param("ii", $guru_id, $siswa_id);
         $stmt->execute();
         $result = $stmt->get_result();
         $has_access = $result->num_rows > 0;
@@ -84,14 +104,18 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                         s.*,
                         ps.tingkat,
                         ps.jenis_kelas,
-                        ps.tanggal_mulai
+                        ps.tanggal_mulai,
+                        ps.id as pendaftaran_id
                     FROM siswa s
-                    INNER JOIN siswa_pelajaran sp ON s.id = sp.siswa_id
-                    INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                    INNER JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
+                    INNER JOIN jadwal_belajar jb ON ps.id = jb.pendaftaran_id
+                    INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
                     WHERE s.id = ? 
-                    AND sp.guru_id = ? 
-                    AND sp.status = 'aktif'
+                    AND smg.guru_id = ?
+                    AND jb.status = 'aktif'
                     AND ps.status = 'aktif'
+                    AND smg.status != 'tidak_aktif'
+                    GROUP BY s.id
                     LIMIT 1";
 
             $stmt = $conn->prepare($sql_main);
@@ -105,41 +129,76 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
             if ($row = $result->fetch_assoc()) {
                 $siswa_detail = $row;
 
-                // QUERY 2: Hitung total program
-                $sql_total_program = "SELECT COUNT(DISTINCT sp.id) as total_program
-                                     FROM siswa_pelajaran sp
-                                     WHERE sp.siswa_id = ?
-                                     AND sp.guru_id = ?
-                                     AND sp.status = 'aktif'";
+                // QUERY 2: Ambil data program/mata pelajaran yang diajar guru ini
+                $sql_program_guru = "SELECT DISTINCT sp.nama_pelajaran
+                                    FROM siswa_pelajaran sp
+                                    INNER JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id
+                                    INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                                    WHERE sp.siswa_id = ?
+                                    AND smg.guru_id = ?
+                                    AND jb.status = 'aktif'
+                                    AND sp.status = 'aktif'
+                                    AND smg.status != 'tidak_aktif'
+                                    GROUP BY sp.nama_pelajaran";
 
-                $stmt2 = $conn->prepare($sql_total_program);
-                $stmt2->bind_param("ii", $siswa_id, $guru_id);
-                $stmt2->execute();
-                $result2 = $stmt2->get_result();
-                if ($row2 = $result2->fetch_assoc()) {
-                    $siswa_detail['total_program'] = $row2['total_program'];
+                $stmt2 = $conn->prepare($sql_program_guru);
+                if ($stmt2) {
+                    $stmt2->bind_param("ii", $siswa_id, $guru_id);
+                    $stmt2->execute();
+                    $result2 = $stmt2->get_result();
+                    $program_guru = [];
+                    while ($row2 = $result2->fetch_assoc()) {
+                        $program_guru[] = $row2['nama_pelajaran'];
+                    }
+                    $siswa_detail['program_guru'] = implode(', ', $program_guru);
+                    $stmt2->close();
                 }
-                $stmt2->close();
 
-                // QUERY 3: Hitung total jadwal
+                // QUERY 3: Hitung total program yang diajar guru ini
+                $sql_total_program = "SELECT COUNT(DISTINCT sp.nama_pelajaran) as total_program
+                                     FROM siswa_pelajaran sp
+                                     INNER JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id
+                                     INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                                     WHERE sp.siswa_id = ?
+                                     AND smg.guru_id = ?
+                                     AND jb.status = 'aktif'
+                                     AND sp.status = 'aktif'
+                                     AND smg.status != 'tidak_aktif'";
+
+                $stmt3 = $conn->prepare($sql_total_program);
+                if ($stmt3) {
+                    $stmt3->bind_param("ii", $siswa_id, $guru_id);
+                    $stmt3->execute();
+                    $result3 = $stmt3->get_result();
+                    if ($row3 = $result3->fetch_assoc()) {
+                        $siswa_detail['total_program_guru'] = $row3['total_program'];
+                    }
+                    $stmt3->close();
+                }
+
+                // QUERY 4: Hitung total jadwal per minggu
                 $sql_total_jadwal = "SELECT COUNT(DISTINCT jb.id) as total_jadwal
                                     FROM jadwal_belajar jb
-                                    INNER JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
-                                    WHERE sp.siswa_id = ?
-                                    AND sp.guru_id = ?
+                                    INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                                    INNER JOIN pendaftaran_siswa ps ON jb.pendaftaran_id = ps.id
+                                    WHERE ps.siswa_id = ?
+                                    AND smg.guru_id = ?
                                     AND jb.status = 'aktif'
-                                    AND sp.status = 'aktif'";
+                                    AND ps.status = 'aktif'
+                                    AND smg.status != 'tidak_aktif'";
 
-                $stmt3 = $conn->prepare($sql_total_jadwal);
-                $stmt3->bind_param("ii", $siswa_id, $guru_id);
-                $stmt3->execute();
-                $result3 = $stmt3->get_result();
-                if ($row3 = $result3->fetch_assoc()) {
-                    $siswa_detail['total_jadwal'] = $row3['total_jadwal'];
+                $stmt4 = $conn->prepare($sql_total_jadwal);
+                if ($stmt4) {
+                    $stmt4->bind_param("ii", $siswa_id, $guru_id);
+                    $stmt4->execute();
+                    $result4 = $stmt4->get_result();
+                    if ($row4 = $result4->fetch_assoc()) {
+                        $siswa_detail['total_jadwal'] = $row4['total_jadwal'];
+                    }
+                    $stmt4->close();
                 }
-                $stmt3->close();
 
-                // QUERY 4: Ambil data orangtua (bisa lebih dari satu)
+                // QUERY 5: Ambil data orangtua
                 $sql_ortu = "SELECT 
                             o.id,
                             o.nama_ortu,
@@ -152,22 +211,20 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                         INNER JOIN orangtua o ON so.orangtua_id = o.id
                         WHERE so.siswa_id = ?";
 
-                $stmt4 = $conn->prepare($sql_ortu);
-                if ($stmt4 === false) {
-                    error_log("Prepare orangtua failed: " . $conn->error);
-                } else {
-                    $stmt4->bind_param("i", $siswa_id);
-                    $stmt4->execute();
-                    $ortu_result = $stmt4->get_result();
+                $stmt5 = $conn->prepare($sql_ortu);
+                if ($stmt5) {
+                    $stmt5->bind_param("i", $siswa_id);
+                    $stmt5->execute();
+                    $ortu_result = $stmt5->get_result();
                     $orangtua_data = [];
                     while ($ortu_row = $ortu_result->fetch_assoc()) {
                         $orangtua_data[] = $ortu_row;
                     }
                     $siswa_detail['orangtua'] = $orangtua_data;
-                    $stmt4->close();
+                    $stmt5->close();
                 }
 
-                // QUERY 5: Ambil saudara kandung (anak lain dari orangtua yang sama)
+                // QUERY 6: Ambil saudara kandung
                 if (!empty($orangtua_data)) {
                     $orangtua_ids = array_column($orangtua_data, 'id');
                     $placeholders = implode(',', array_fill(0, count($orangtua_ids), '?'));
@@ -179,78 +236,76 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                                     AND s2.id != ?
                                     ORDER BY s2.nama_lengkap";
 
-                    $stmt5 = $conn->prepare($sql_saudara);
-                    if ($stmt5) {
-                        // Bind parameters
+                    $stmt6 = $conn->prepare($sql_saudara);
+                    if ($stmt6) {
                         $bind_types = str_repeat('i', count($orangtua_ids)) . 'i';
                         $bind_params = array_merge($orangtua_ids, [$siswa_id]);
-
-                        // Bind parameters secara manual
-                        $stmt5->bind_param($bind_types, ...$bind_params);
-                        $stmt5->execute();
-                        $saudara_result = $stmt5->get_result();
+                        $stmt6->bind_param($bind_types, ...$bind_params);
+                        $stmt6->execute();
+                        $saudara_result = $stmt6->get_result();
                         $saudara_list = [];
                         while ($saudara_row = $saudara_result->fetch_assoc()) {
                             $saudara_list[] = $saudara_row['nama_lengkap'];
                         }
                         $siswa_detail['saudara_kandung'] = implode(', ', $saudara_list);
-                        $stmt5->close();
+                        $stmt6->close();
                     }
                 }
 
-                // QUERY 6: Ambil program bimbel
-                $sql_program = "SELECT DISTINCT sp.nama_pelajaran
-                               FROM siswa_pelajaran sp
-                               INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                               WHERE sp.siswa_id = ?
-                               AND sp.guru_id = ?
-                               AND sp.status = 'aktif'
-                               AND ps.status = 'aktif'";
-
-                $stmt6 = $conn->prepare($sql_program);
-                $stmt6->bind_param("ii", $siswa_id, $guru_id);
-                $stmt6->execute();
-                $program_result = $stmt6->get_result();
-                $program_list = [];
-                while ($program_row = $program_result->fetch_assoc()) {
-                    $program_list[] = $program_row['nama_pelajaran'] . ' (' . $siswa_detail['tingkat'] . ' - ' . $siswa_detail['jenis_kelas'] . ')';
-                }
-                $siswa_detail['program_bimbel'] = implode(', ', $program_list);
-                $stmt6->close();
-
-                // QUERY 7: Ambil jadwal belajar - DIPERBAIKI
+                // QUERY 7: Ambil jadwal belajar detail
                 $sql_jadwal = "SELECT DISTINCT 
-              smg.hari,
-              smg.jam_mulai, 
-              TIME_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai_format,
-              TIME_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai_format,
-              sp.nama_pelajaran
-              FROM jadwal_belajar jb
-              INNER JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
-              INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
-              WHERE sp.siswa_id = ?
-              AND sp.guru_id = ?
-              AND jb.status = 'aktif'
-              AND sp.status = 'aktif'
-              ORDER BY FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'), 
-                       smg.jam_mulai";  // PAKAI NAMA KOLOM ASLI
+                              smg.hari,
+                              DATE_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai,
+                              DATE_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai,
+                              sp.nama_pelajaran,
+                              smg.kapasitas_maks,
+                              smg.kapasitas_terisi
+                              FROM jadwal_belajar jb
+                              INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                              LEFT JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
+                              INNER JOIN pendaftaran_siswa ps ON jb.pendaftaran_id = ps.id
+                              WHERE ps.siswa_id = ?
+                              AND smg.guru_id = ?
+                              AND jb.status = 'aktif'
+                              AND ps.status = 'aktif'
+                              AND smg.status != 'tidak_aktif'
+                              ORDER BY FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'), 
+                                       smg.jam_mulai";
 
                 $stmt7 = $conn->prepare($sql_jadwal);
-                if ($stmt7 === false) {
-                    error_log("Prepare jadwal failed: " . $conn->error);
-                } else {
+                if ($stmt7) {
                     $stmt7->bind_param("ii", $siswa_id, $guru_id);
                     $stmt7->execute();
                     $jadwal_result = $stmt7->get_result();
                     $jadwal_list = [];
                     while ($jadwal_row = $jadwal_result->fetch_assoc()) {
-                        $jadwal_list[] = $jadwal_row['hari'] . ' ' .
-                            $jadwal_row['jam_mulai_format'] . '-' .
-                            $jadwal_row['jam_selesai_format'] . ' (' .
-                            $jadwal_row['nama_pelajaran'] . ')';
+                        $jadwal_list[] = $jadwal_row;
                     }
-                    $siswa_detail['jadwal_belajar'] = implode(', ', $jadwal_list);
+                    $siswa_detail['jadwal_detail'] = $jadwal_list;
                     $stmt7->close();
+                }
+
+                // QUERY 8: Ambil riwayat penilaian
+                $sql_penilaian = "SELECT ps.*, 
+                                  DATE_FORMAT(ps.tanggal_penilaian, '%d %M %Y') as tgl_format,
+                                  ps.kategori
+                                  FROM penilaian_siswa ps
+                                  WHERE ps.siswa_id = ? 
+                                  AND ps.guru_id = ?
+                                  ORDER BY ps.tanggal_penilaian DESC
+                                  LIMIT 5";
+
+                $stmt8 = $conn->prepare($sql_penilaian);
+                if ($stmt8) {
+                    $stmt8->bind_param("ii", $siswa_id, $guru_id);
+                    $stmt8->execute();
+                    $penilaian_result = $stmt8->get_result();
+                    $penilaian_list = [];
+                    while ($penilaian_row = $penilaian_result->fetch_assoc()) {
+                        $penilaian_list[] = $penilaian_row;
+                    }
+                    $siswa_detail['penilaian'] = $penilaian_list;
+                    $stmt8->close();
                 }
             }
             $stmt->close();
@@ -271,12 +326,15 @@ if (isset($_GET['action']) && $_GET['action'] == 'edit_form' && isset($_GET['sis
     if (guruBolehAksesSiswa($conn, $guru_id, $siswa_id)) {
         try {
             $sql = "SELECT s.* FROM siswa s
-                    INNER JOIN siswa_pelajaran sp ON s.id = sp.siswa_id
-                    INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                    INNER JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
+                    INNER JOIN jadwal_belajar jb ON ps.id = jb.pendaftaran_id
+                    INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
                     WHERE s.id = ? 
-                    AND sp.guru_id = ? 
-                    AND sp.status = 'aktif'
+                    AND smg.guru_id = ?
+                    AND jb.status = 'aktif'
                     AND ps.status = 'aktif'
+                    AND smg.status != 'tidak_aktif'
+                    GROUP BY s.id
                     LIMIT 1";
 
             $stmt = $conn->prepare($sql);
@@ -351,7 +409,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_siswa'])) {
         $stmt->close();
 
         $_SESSION['success_message'] = "✅ Data siswa berhasil diperbarui!";
-        header('Location: dataSiswa.php?action=edit_form&siswa_id=' . $siswa_id . '&success=1');
+        header('Location: dataSiswa.php?action=detail&siswa_id=' . $siswa_id);
         exit();
 
     } catch (Exception $e) {
@@ -361,69 +419,69 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_siswa'])) {
     }
 }
 
-// AMBIL DATA SISWA YANG DIAJAR - DENGAN PENCARIAN LENGKAP
+// AMBIL DATA SISWA YANG DIAJAR - VERSI BARU
 $siswa_data = [];
 if ($guru_id > 0) {
     try {
-        // Query dasar dengan JOIN ke orangtua untuk pencarian lebih luas
+        // Query dasar dengan struktur baru
         $sql = "SELECT DISTINCT 
                     s.id,
                     s.nama_lengkap,
                     s.jenis_kelamin,
-                    s.kelas,
+                    s.kelas as kelas_sekolah,
                     s.sekolah_asal,
                     s.alamat,
                     s.tempat_lahir,
                     s.tanggal_lahir,
                     s.agama,
-                    ps.tingkat,
+                    s.status as status_siswa,
+                    ps.tingkat as tingkat_bimbel,
                     ps.jenis_kelas,
                     ps.tanggal_mulai,
-                    o.nama_ortu,
-                    o.no_hp as no_hp_ortu
-                FROM siswa_pelajaran sp
-                INNER JOIN siswa s ON sp.siswa_id = s.id
-                INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                LEFT JOIN siswa_orangtua so ON s.id = so.siswa_id
-                LEFT JOIN orangtua o ON so.orangtua_id = o.id
-                WHERE sp.guru_id = ?
-                AND sp.status = 'aktif'
+                    ps.status as status_pendaftaran,
+                    COUNT(DISTINCT jb.id) as total_jadwal,
+                    COUNT(DISTINCT smg.id) as total_sesi,
+                    GROUP_CONCAT(DISTINCT sp.nama_pelajaran ORDER BY sp.nama_pelajaran SEPARATOR ', ') as mata_pelajaran
+                FROM jadwal_belajar jb
+                INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                INNER JOIN pendaftaran_siswa ps ON jb.pendaftaran_id = ps.id
+                INNER JOIN siswa s ON ps.siswa_id = s.id
+                LEFT JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
+                WHERE smg.guru_id = ?
+                AND jb.status = 'aktif'
                 AND ps.status = 'aktif'
-                AND s.status = 'aktif'";
+                AND s.status = 'aktif'
+                AND smg.status != 'tidak_aktif'";
 
-        // Parameter untuk prepared statement
         $params = array($guru_id);
         $types = "i";
 
-        // Tambahkan kondisi pencarian jika ada
+        // Tambahkan kondisi pencarian
         if (!empty($search)) {
             $sql .= " AND (s.nama_lengkap LIKE ? 
                     OR s.sekolah_asal LIKE ? 
-                    OR o.nama_ortu LIKE ? 
-                    OR o.no_hp LIKE ?)";
+                    OR sp.nama_pelajaran LIKE ?)";
             $params[] = "%$search%";
             $params[] = "%$search%";
             $params[] = "%$search%";
-            $params[] = "%$search%";
-            $types .= "ssss";
+            $types .= "sss";
         }
 
-        // Tambahkan filter tingkat jika ada
+        // Tambahkan filter tingkat
         if (!empty($filter_tingkat)) {
             $sql .= " AND ps.tingkat = ?";
             $params[] = $filter_tingkat;
             $types .= "s";
         }
 
-        $sql .= " ORDER BY s.nama_lengkap ASC";
+        $sql .= " GROUP BY s.id, ps.id
+                  ORDER BY s.nama_lengkap ASC";
 
         $stmt = $conn->prepare($sql);
-
         if ($stmt === false) {
             throw new Exception("Prepare failed: " . $conn->error);
         }
 
-        // Bind parameters secara dinamis
         if (!empty($params)) {
             $stmt->bind_param($types, ...$params);
         }
@@ -431,67 +489,40 @@ if ($guru_id > 0) {
         $stmt->execute();
         $result = $stmt->get_result();
 
-        $siswa_data_temp = [];
         while ($row = $result->fetch_assoc()) {
-            $siswa_data_temp[] = $row;
+            // Format program bimbel
+            if (!empty($row['mata_pelajaran'])) {
+                $row['program_bimbel'] = $row['mata_pelajaran'] . ' (' . $row['tingkat_bimbel'] . ')';
+            } else {
+                $row['program_bimbel'] = $row['tingkat_bimbel'] . ' - ' . $row['jenis_kelas'];
+            }
+            
+            // Tambahkan info jadwal
+            $row['info_jadwal'] = $row['total_jadwal'] . ' jadwal di ' . $row['total_sesi'] . ' sesi';
+            
+            $siswa_data[] = $row;
         }
         $stmt->close();
 
-        // Ambil data program untuk setiap siswa
-        foreach ($siswa_data_temp as $row) {
-            $siswa_id = $row['id'];
-
-            // Ambil mata pelajaran yang diajar oleh guru ini
-            $sql_pelajaran = "SELECT GROUP_CONCAT(DISTINCT sp2.nama_pelajaran ORDER BY sp2.nama_pelajaran SEPARATOR ', ') as program_guru
-                             FROM siswa_pelajaran sp2 
-                             WHERE sp2.siswa_id = ? 
-                             AND sp2.guru_id = ?
-                             AND sp2.status = 'aktif'";
-
-            $stmt_pelajaran = $conn->prepare($sql_pelajaran);
-            $program_guru = '';
-            if ($stmt_pelajaran) {
-                $stmt_pelajaran->bind_param("ii", $siswa_id, $guru_id);
-                $stmt_pelajaran->execute();
-                $pelajaran_result = $stmt_pelajaran->get_result();
-                if ($pelajaran_row = $pelajaran_result->fetch_assoc()) {
-                    $program_guru = $pelajaran_row['program_guru'];
+        // Ambil data orangtua untuk setiap siswa (optional)
+        foreach ($siswa_data as &$siswa) {
+            $sql_ortu = "SELECT o.nama_ortu, o.no_hp
+                        FROM siswa_orangtua so
+                        INNER JOIN orangtua o ON so.orangtua_id = o.id
+                        WHERE so.siswa_id = ?
+                        LIMIT 1";
+            
+            $stmt_ortu = $conn->prepare($sql_ortu);
+            if ($stmt_ortu) {
+                $stmt_ortu->bind_param("i", $siswa['id']);
+                $stmt_ortu->execute();
+                $ortu_result = $stmt_ortu->get_result();
+                if ($ortu_row = $ortu_result->fetch_assoc()) {
+                    $siswa['nama_ortu'] = $ortu_row['nama_ortu'];
+                    $siswa['no_hp_ortu'] = $ortu_row['no_hp'];
                 }
-                $stmt_pelajaran->close();
+                $stmt_ortu->close();
             }
-
-            // Format program bimbel
-            if (!empty(trim($program_guru))) {
-                $row['program_bimbel'] = $program_guru . ' (' . $row['tingkat'] . ' - ' . $row['jenis_kelas'] . ')';
-            } else {
-                // Cek jika ada pelajaran lain
-                $sql_other = "SELECT GROUP_CONCAT(DISTINCT sp3.nama_pelajaran ORDER BY sp3.nama_pelajaran SEPARATOR ', ') as other_programs
-                             FROM siswa_pelajaran sp3
-                             INNER JOIN pendaftaran_siswa ps3 ON sp3.pendaftaran_id = ps3.id
-                             WHERE sp3.siswa_id = ?
-                             AND sp3.status = 'aktif'
-                             AND ps3.status = 'aktif'";
-
-                $stmt_other = $conn->prepare($sql_other);
-                if ($stmt_other) {
-                    $stmt_other->bind_param("i", $siswa_id);
-                    $stmt_other->execute();
-                    $other_result = $stmt_other->get_result();
-
-                    if ($other_row = $other_result->fetch_assoc()) {
-                        if (!empty(trim($other_row['other_programs'] ?? ''))) {
-                            $row['program_bimbel'] = $other_row['other_programs'] . ' (' . $row['tingkat'] . ' - ' . $row['jenis_kelas'] . ')*';
-                        } else {
-                            $row['program_bimbel'] = 'Belum ada program bimbel';
-                        }
-                    } else {
-                        $row['program_bimbel'] = 'Belum ada program bimbel';
-                    }
-                    $stmt_other->close();
-                }
-            }
-
-            $siswa_data[] = $row;
         }
 
     } catch (Exception $e) {
@@ -511,7 +542,7 @@ if ($guru_id > 0) {
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        /* ... (CSS styles tetap sama seperti sebelumnya) ... */
+        /* CSS styles tetap sama seperti sebelumnya */
         .modal {
             display: none;
             position: fixed;
@@ -530,7 +561,7 @@ if ($guru_id > 0) {
             padding: 0;
             border-radius: 8px;
             width: 90%;
-            max-width: 700px;
+            max-width: 800px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
             animation: modalFadeIn 0.3s;
         }
@@ -539,7 +570,6 @@ if ($guru_id > 0) {
             max-width: 500px;
         }
 
-        /* Dropdown styles */
         .dropdown-submenu {
             display: none;
             max-height: 500px;
@@ -555,7 +585,6 @@ if ($guru_id > 0) {
             transform: rotate(90deg);
         }
 
-        /* Active menu item */
         .menu-item.active {
             background-color: rgba(255, 255, 255, 0.1);
             border-left: 4px solid #60A5FA;
@@ -566,7 +595,6 @@ if ($guru_id > 0) {
                 opacity: 0;
                 transform: translateY(-20px);
             }
-
             to {
                 opacity: 1;
                 transform: translateY(0);
@@ -646,6 +674,14 @@ if ($guru_id > 0) {
             gap: 16px;
         }
 
+        .jadwal-card {
+            transition: all 0.2s;
+        }
+        
+        .jadwal-card:hover {
+            transform: translateX(5px);
+        }
+
         /* Mobile menu styles */
         #mobileMenu {
             position: fixed;
@@ -679,43 +715,17 @@ if ($guru_id > 0) {
             display: block;
         }
 
-        /* Responsive */
         @media (min-width: 768px) {
-            .desktop-sidebar {
-                display: block;
-            }
-
-            .mobile-header {
-                display: none;
-            }
-
-            #mobileMenu {
-                display: none;
-            }
-
-            .menu-overlay {
-                display: none !important;
-            }
+            .desktop-sidebar { display: block; }
+            .mobile-header { display: none; }
+            #mobileMenu { display: none; }
+            .menu-overlay { display: none !important; }
         }
 
         @media (max-width: 767px) {
-            .desktop-sidebar {
-                display: none;
-            }
-
-            .modal-content {
-                width: 95%;
-                margin: 5% auto;
-            }
-
-            .grid-2 {
-                grid-template-columns: 1fr;
-            }
-
-            .form-input {
-                padding: 8px 10px;
-                font-size: 0.9rem;
-            }
+            .desktop-sidebar { display: none; }
+            .modal-content { width: 95%; margin: 5% auto; }
+            .grid-2 { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -732,7 +742,7 @@ if ($guru_id > 0) {
         <div class="p-4 bg-blue-900">
             <div class="flex items-center">
                 <div class="w-10 h-10 bg-white text-blue-800 rounded-full flex items-center justify-center">
-                    <i class="fas fa-user"></i>
+                    <i class="fas fa-chalkboard-teacher"></i>
                 </div>
                 <div class="ml-3">
                     <p class="font-medium"><?php echo htmlspecialchars($full_name); ?></p>
@@ -762,7 +772,7 @@ if ($guru_id > 0) {
                     <p class="text-xs text-blue-300">Guru</p>
                 </div>
                 <div class="w-8 h-8 bg-white text-blue-800 rounded-full flex items-center justify-center">
-                    <i class="fas fa-user"></i>
+                    <i class="fas fa-chalkboard-teacher"></i>
                 </div>
             </div>
         </div>
@@ -785,7 +795,7 @@ if ($guru_id > 0) {
             <div class="p-4 bg-blue-800">
                 <div class="flex items-center">
                     <div class="w-12 h-12 bg-white text-blue-800 rounded-full flex items-center justify-center">
-                        <i class="fas fa-user text-lg"></i>
+                        <i class="fas fa-chalkboard-teacher text-lg"></i>
                     </div>
                     <div class="ml-3">
                         <p class="font-medium"><?php echo htmlspecialchars($full_name); ?></p>
@@ -808,8 +818,10 @@ if ($guru_id > 0) {
         <div class="bg-white shadow p-4">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
                 <div>
-                    <h1 class="text-2xl font-bold text-gray-800">Data Siswa</h1>
-                    <p class="text-gray-600">Total <?php echo count($siswa_data); ?> siswa aktif</p>
+                    <h1 class="text-2xl font-bold text-gray-800">
+                        <i class="fas fa-users mr-2"></i> Data Siswa
+                    </h1>
+                    <p class="text-gray-600">Total <?php echo count($siswa_data); ?> siswa aktif dalam jadwal Anda</p>
                 </div>
             </div>
         </div>
@@ -818,33 +830,29 @@ if ($guru_id > 0) {
         <div class="container mx-auto p-4 md:p-6">
             <!-- NOTIFICATION MESSAGES -->
             <?php if ($success_message): ?>
-                <div class="mb-4">
-                    <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-lg">
-                        <div class="flex items-center">
-                            <i class="fas fa-check-circle mr-2"></i>
-                            <span><?php echo htmlspecialchars($success_message); ?></span>
-                        </div>
+                <div class="mb-4 bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-lg">
+                    <div class="flex items-center">
+                        <i class="fas fa-check-circle mr-2"></i>
+                        <span><?php echo htmlspecialchars($success_message); ?></span>
                     </div>
                 </div>
             <?php endif; ?>
 
             <?php if ($error_message): ?>
-                <div class="mb-4">
-                    <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg">
-                        <div class="flex items-center">
-                            <i class="fas fa-exclamation-circle mr-2"></i>
-                            <span><?php echo htmlspecialchars($error_message); ?></span>
-                        </div>
+                <div class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg">
+                    <div class="flex items-center">
+                        <i class="fas fa-exclamation-circle mr-2"></i>
+                        <span><?php echo htmlspecialchars($error_message); ?></span>
                     </div>
                 </div>
             <?php endif; ?>
 
-            <!-- Di bagian Form Search, ganti menjadi: -->
+            <!-- Form Search dan Filter -->
             <div class="bg-white shadow rounded-lg p-6 mb-6">
                 <form method="GET" action="dataSiswa.php" class="flex flex-col md:flex-row gap-4">
                     <div class="flex-1">
                         <input type="text" name="search"
-                            placeholder="Cari nama siswa, sekolah asal, atau nama orangtua..."
+                            placeholder="Cari nama siswa, sekolah asal, atau mata pelajaran..."
                             class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                             value="<?php echo htmlspecialchars($search); ?>">
                     </div>
@@ -856,10 +864,8 @@ if ($guru_id > 0) {
                             <option value="SD" <?php echo ($filter_tingkat == 'SD') ? 'selected' : ''; ?>>SD</option>
                             <option value="SMP" <?php echo ($filter_tingkat == 'SMP') ? 'selected' : ''; ?>>SMP</option>
                             <option value="SMA" <?php echo ($filter_tingkat == 'SMA') ? 'selected' : ''; ?>>SMA</option>
-                            <option value="Alumni" <?php echo ($filter_tingkat == 'Alumni') ? 'selected' : ''; ?>>Alumni
-                            </option>
-                            <option value="Umum" <?php echo ($filter_tingkat == 'Umum') ? 'selected' : ''; ?>>Umum
-                            </option>
+                            <option value="Alumni" <?php echo ($filter_tingkat == 'Alumni') ? 'selected' : ''; ?>>Alumni</option>
+                            <option value="Umum" <?php echo ($filter_tingkat == 'Umum') ? 'selected' : ''; ?>>Umum</option>
                         </select>
                     </div>
                     <div class="flex gap-2">
@@ -887,6 +893,39 @@ if ($guru_id > 0) {
                 <?php endif; ?>
             </div>
 
+            <!-- Statistik Singkat -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div class="bg-white rounded-lg shadow p-4">
+                    <div class="flex items-center">
+                        <div class="p-3 bg-blue-100 rounded-full mr-4">
+                            <i class="fas fa-users text-blue-600"></i>
+                        </div>
+                        <div class="mt-1">
+                            <p class="text-gray-600 text-sm">Total Siswa</p>
+                            <p class="text-2xl font-bold"><?php echo count($siswa_data); ?></p>
+                        </div>
+                    </div>
+                </div>
+                
+                <?php
+                $total_jadwal = array_sum(array_column($siswa_data, 'total_jadwal'));
+                $total_sesi = array_sum(array_column($siswa_data, 'total_sesi'));
+                ?>
+                <div class="bg-white rounded-lg shadow p-4">
+                    <div class="flex items-center">
+                        <div class="p-3 bg-green-100 rounded-full mr-4">
+                            <i class="fas fa-calendar-alt text-green-600"></i>
+                        </div>
+                        <div class="mt-1">
+                            <p class="text-gray-600 text-sm">Total Jadwal</p>
+                            <p class="text-2xl font-bold"><?php echo $total_jadwal; ?></p>
+                            <!-- <p class="text-xs text-gray-500"> Jadwal</p> -->
+                        </div>
+                    </div>
+                </div>
+                
+            </div>
+
             <!-- Table Siswa -->
             <div class="bg-white shadow rounded-lg overflow-hidden">
                 <?php if (count($siswa_data) > 0): ?>
@@ -894,24 +933,13 @@ if ($guru_id > 0) {
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th
-                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        No</th>
-                                    <th
-                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Nama Siswa</th>
-                                    <th
-                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Kelas Sekolah</th>
-                                    <th
-                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Kelas Bimbel</th>
-                                    <th
-                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Orang Tua</th>
-                                    <th
-                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Aksi</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama Siswa</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kelas</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Program</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Jadwal</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Orang Tua</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
@@ -922,8 +950,7 @@ if ($guru_id > 0) {
                                         </td>
                                         <td class="px-6 py-4">
                                             <div class="flex items-center">
-                                                <div
-                                                    class="flex-shrink-0 h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center">
+                                                <div class="flex-shrink-0 h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center">
                                                     <i class="fas fa-user-graduate text-blue-600"></i>
                                                 </div>
                                                 <div class="ml-4">
@@ -932,47 +959,37 @@ if ($guru_id > 0) {
                                                     </div>
                                                     <div class="text-sm text-gray-500">
                                                         <?php echo htmlspecialchars($siswa['sekolah_asal'] ?? '-'); ?>
-                                                        |
-                                                        <?php echo $siswa['jenis_kelamin'] == 'L' ? 'Laki-laki' : 'Perempuan'; ?>
                                                     </div>
                                                 </div>
                                             </div>
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap">
-                                            <span
-                                                class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                                                <?php echo htmlspecialchars($siswa['kelas']); ?>
+                                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                                                <?php echo htmlspecialchars($siswa['kelas_sekolah']); ?>
                                             </span>
                                         </td>
+                                        <td class="px-6 py-4">
+                                            <div class="text-sm text-gray-900">
+                                                <?php echo htmlspecialchars($siswa['program_bimbel']); ?>
+                                            </div>
+                                            <div class="text-xs text-gray-500">
+                                                <?php echo htmlspecialchars($siswa['tingkat_bimbel']); ?>
+                                            </div>
+                                        </td>
                                         <td class="px-6 py-4 whitespace-nowrap">
-                                            <?php if (!empty($siswa['program_bimbel'])): ?>
-                                                <div class="text-sm text-gray-700">
-                                                    <?php echo htmlspecialchars($siswa['program_bimbel']); ?>
-                                                </div>
-                                                <div class="text-xs text-gray-500 mt-1">
-                                                    <?php if (!empty($siswa['tingkat'])): ?>
-                                                        Tingkat: <?php echo htmlspecialchars($siswa['tingkat']); ?>
-                                                        <?php if (!empty($siswa['jenis_kelas'])): ?>
-                                                            (<?php echo htmlspecialchars($siswa['jenis_kelas']); ?>)
-                                                        <?php endif; ?>
-                                                    <?php endif; ?>
-                                                </div>
-                                            <?php else: ?>
-                                                <span class="text-gray-400">-</span>
-                                            <?php endif; ?>
+                                            <div class="text-sm text-gray-900">
+                                                <?php echo $siswa['total_jadwal']; ?> jadwal
+                                            </div>
+                                            <div class="text-xs text-gray-500">
+                                                <?php echo $siswa['total_sesi']; ?> sesi
+                                            </div>
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm">
                                             <?php if (!empty($siswa['nama_ortu'])): ?>
-                                                <div>
-                                                    <div class="font-medium text-gray-900">
-                                                        <?php echo htmlspecialchars($siswa['nama_ortu']); ?>
-                                                    </div>
-                                                    <?php if (!empty($siswa['no_hp_ortu'])): ?>
-                                                        <div class="text-xs text-gray-500">
-                                                            <?php echo htmlspecialchars($siswa['no_hp_ortu']); ?>
-                                                        </div>
-                                                    <?php endif; ?>
-                                                </div>
+                                                <div class="text-gray-900"><?php echo htmlspecialchars($siswa['nama_ortu']); ?></div>
+                                                <?php if (!empty($siswa['no_hp_ortu'])): ?>
+                                                    <div class="text-xs text-gray-500"><?php echo htmlspecialchars($siswa['no_hp_ortu']); ?></div>
+                                                <?php endif; ?>
                                             <?php else: ?>
                                                 <span class="text-gray-400">-</span>
                                             <?php endif; ?>
@@ -993,7 +1010,7 @@ if ($guru_id > 0) {
                 <?php else: ?>
                     <div class="px-6 py-12 text-center">
                         <div class="text-gray-500">
-                            <i class="fas fa-users text-4xl mb-4 text-gray-400"></i>
+                            <i class="fas fa-users text-5xl mb-4 text-gray-300"></i>
                             <p class="text-lg font-medium text-gray-700 mb-2">
                                 <?php if (!empty($search) || !empty($filter_tingkat)): ?>
                                     Tidak ditemukan siswa dengan kriteria pencarian
@@ -1005,7 +1022,7 @@ if ($guru_id > 0) {
                                 <?php if (!empty($search) || !empty($filter_tingkat)): ?>
                                     Coba ubah kata kunci pencarian atau hapus filter
                                 <?php else: ?>
-                                    Siswa akan muncul di sini setelah didaftarkan ke jadwal Anda
+                                    Siswa akan muncul setelah Anda memiliki jadwal mengajar
                                 <?php endif; ?>
                             </p>
                         </div>
@@ -1019,10 +1036,10 @@ if ($guru_id > 0) {
                     <i class="fas fa-info-circle mr-2"></i> Informasi Data Siswa
                 </h3>
                 <ul class="text-blue-700 space-y-1 text-sm">
-                    <li>• Total siswa bimbingan Anda: <strong><?php echo count($siswa_data); ?></strong> siswa</li>
-                    <li>• Klik <strong class="text-blue-600">Detail</strong> untuk melihat informasi lengkap termasuk
-                        jadwal belajar</li>
-                    <li>• Data diambil dari pendaftaran siswa yang aktif di jadwal Anda</li>
+                    <li>• Total siswa dengan jadwal aktif: <strong><?php echo count($siswa_data); ?></strong> siswa</li>
+                    <li>• Total jadwal mengajar: <strong><?php echo $total_jadwal; ?></strong> pertemuan per minggu</li>
+                    <li>• Klik <strong class="text-blue-600">Detail</strong> untuk melihat informasi lengkap siswa</li>
+                    <li>• Data diambil dari jadwal mengajar Anda yang aktif</li>
                 </ul>
             </div>
         </div>
@@ -1068,8 +1085,7 @@ if ($guru_id > 0) {
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <span class="block font-semibold text-gray-700">Nama Lengkap</span>
-                                    <span
-                                        class="text-gray-600"><?= htmlspecialchars($siswa_detail['nama_lengkap']) ?></span>
+                                    <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['nama_lengkap']) ?></span>
                                 </div>
                                 <div>
                                     <span class="block font-semibold text-gray-700">Jenis Kelamin</span>
@@ -1103,8 +1119,7 @@ if ($guru_id > 0) {
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <span class="block font-semibold text-gray-700">Sekolah Asal</span>
-                                    <span
-                                        class="text-gray-600"><?= htmlspecialchars($siswa_detail['sekolah_asal']) ?></span>
+                                    <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['sekolah_asal']) ?></span>
                                 </div>
                                 <div>
                                     <span class="block font-semibold text-gray-700">Kelas Sekolah</span>
@@ -1119,130 +1134,161 @@ if ($guru_id > 0) {
                                 <i class="fas fa-chalkboard-teacher mr-2"></i> Data Bimbingan Belajar
                             </h3>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <span class="block font-semibold text-gray-700">Tingkat Bimbel</span>
+                                    <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['tingkat']) ?></span>
+                                </div>
+                                <div>
+                                    <span class="block font-semibold text-gray-700">Jenis Kelas</span>
+                                    <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['jenis_kelas']) ?></span>
+                                </div>
+                                <?php if (!empty($siswa_detail['program_guru'])): ?>
                                 <div class="md:col-span-2">
-                                    <span class="block font-semibold text-gray-700">Program Bimbel</span>
+                                    <span class="block font-semibold text-gray-700">Program yang Anda Ajar</span>
                                     <div class="mt-2 p-3 bg-white rounded border">
-                                        <?php if (!empty($siswa_detail['program_bimbel'])): ?>
-                                            <?php
-                                            $program_list = explode(', ', $siswa_detail['program_bimbel']);
-                                            foreach ($program_list as $program):
-                                                ?>
-                                                <div class="py-1">
-                                                    <i class="fas fa-book text-blue-500 mr-2"></i>
-                                                    <span class="text-gray-700"><?= htmlspecialchars(trim($program)) ?></span>
-                                                </div>
-                                            <?php endforeach; ?>
-                                            <?php if (!empty($siswa_detail['tanggal_mulai'])): ?>
-                                                <div class="mt-2 text-sm text-gray-500">
-                                                    <i class="fas fa-calendar-day mr-1"></i>
-                                                    Mulai: <?= date('d/m/Y', strtotime($siswa_detail['tanggal_mulai'])) ?>
-                                                </div>
-                                            <?php endif; ?>
-                                        <?php else: ?>
-                                            <span class="text-gray-500">Belum ada program bimbel</span>
+                                        <?php 
+                                        $program_list = explode(', ', $siswa_detail['program_guru']);
+                                        foreach ($program_list as $program):
+                                        ?>
+                                            <div class="py-1">
+                                                <i class="fas fa-book text-purple-500 mr-2"></i>
+                                                <span class="text-gray-700"><?= htmlspecialchars(trim($program)) ?></span>
+                                            </div>
+                                        <?php endforeach; ?>
+                                        <?php if (!empty($siswa_detail['total_program_guru'])): ?>
+                                            <div class="mt-2 text-xs text-gray-500">
+                                                Total: <?= $siswa_detail['total_program_guru'] ?> program
+                                            </div>
                                         <?php endif; ?>
                                     </div>
                                 </div>
-
-                                <!-- JADWAL BELAJAR -->
-                                <?php if (!empty($siswa_detail['jadwal_belajar'])): ?>
-                                    <div class="md:col-span-2 mt-4">
-                                        <h4 class="font-bold text-gray-800 mb-3 flex items-center">
-                                            <i class="fas fa-calendar-alt mr-2 text-blue-600"></i> Jadwal Belajar
-                                        </h4>
-                                        <div class="bg-white p-3 rounded border">
-                                            <?php
-                                            $jadwal_list = explode(', ', $siswa_detail['jadwal_belajar']);
-                                            foreach ($jadwal_list as $jadwal):
-                                                ?>
-                                                <div class="flex items-center py-2 border-b last:border-b-0">
-                                                    <i class="fas fa-clock text-gray-400 mr-3"></i>
-                                                    <span class="text-gray-700"><?= htmlspecialchars(trim($jadwal)) ?></span>
-                                                </div>
-                                            <?php endforeach; ?>
-                                            <?php if ($siswa_detail['total_jadwal'] > 0): ?>
-                                                <div class="mt-3 text-sm text-gray-500">
-                                                    <i class="fas fa-info-circle mr-1"></i>
-                                                    Total: <?= $siswa_detail['total_jadwal'] ?> sesi per minggu
-                                                </div>
-                                            <?php endif; ?>
-                                        </div>
-                                    </div>
-                                <?php elseif ($siswa_detail['total_program'] > 0): ?>
-                                    <div class="md:col-span-2">
-                                        <div class="p-3 bg-yellow-50 border border-yellow-200 rounded">
-                                            <div class="flex items-center">
-                                                <i class="fas fa-exclamation-triangle text-yellow-500 mr-2"></i>
-                                                <span class="text-yellow-700">Belum ada jadwal belajar yang ditetapkan</span>
-                                            </div>
-                                        </div>
-                                    </div>
                                 <?php endif; ?>
                             </div>
                         </div>
 
-                        <!-- Data Orang Tua -->
-                        <?php if (!empty($siswa_detail['orangtua'])): ?>
-                            <div class="bg-yellow-50 p-4 rounded-lg">
-                                <h3 class="font-bold text-lg text-yellow-800 mb-4 flex items-center">
-                                    <i class="fas fa-user-friends mr-2"></i> Data Orang Tua/Wali
-                                </h3>
-
-                                <?php foreach ($siswa_detail['orangtua'] as $index => $ortu): ?>
-                                    <div
-                                        class="mb-4 pb-4 <?php echo $index < count($siswa_detail['orangtua']) - 1 ? 'border-b border-yellow-200' : ''; ?>">
-                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Jadwal Belajar -->
+                        <?php if (!empty($siswa_detail['jadwal_detail'])): ?>
+                        <div class="bg-orange-50 p-4 rounded-lg">
+                            <h3 class="font-bold text-lg text-orange-800 mb-4 flex items-center">
+                                <i class="fas fa-calendar-alt mr-2"></i> Jadwal Belajar
+                            </h3>
+                            <div class="space-y-3">
+                                <?php foreach ($siswa_detail['jadwal_detail'] as $jadwal): ?>
+                                    <div class="bg-white p-3 rounded-lg border-l-4 border-orange-400 shadow-sm jadwal-card">
+                                        <div class="flex justify-between items-start">
                                             <div>
-                                                <span class="block font-semibold text-gray-700">Nama</span>
-                                                <span class="text-gray-600"><?= htmlspecialchars($ortu['nama_ortu']) ?></span>
-                                            </div>
-                                            <div>
-                                                <span class="block font-semibold text-gray-700">Hubungan</span>
-                                                <span class="text-gray-600">
-                                                    <?php
-                                                    $hubungan = $ortu['hubungan_dengan_siswa'] ?? '';
-                                                    echo $hubungan == 'ayah' ? 'Ayah' :
-                                                        ($hubungan == 'ibu' ? 'Ibu' :
-                                                            ($hubungan == 'wali' ? 'Wali' : '-'));
-                                                    ?>
-                                                </span>
-                                            </div>
-                                            <div>
-                                                <span class="block font-semibold text-gray-700">No. HP</span>
-                                                <span class="text-gray-600">
-                                                    <?= htmlspecialchars($ortu['no_hp_ortu'] ?? '-') ?>
-                                                </span>
-                                            </div>
-                                            <div>
-                                                <span class="block font-semibold text-gray-700">Email</span>
-                                                <span class="text-gray-600">
-                                                    <?= htmlspecialchars($ortu['email_ortu'] ?? '-') ?>
-                                                </span>
-                                            </div>
-                                            <?php if (!empty($ortu['pekerjaan'])): ?>
-                                                <div>
-                                                    <span class="block font-semibold text-gray-700">Pekerjaan</span>
-                                                    <span class="text-gray-600"><?= htmlspecialchars($ortu['pekerjaan']) ?></span>
+                                                <div class="font-medium text-gray-900">
+                                                    <?= htmlspecialchars($jadwal['hari']) ?>, 
+                                                    <?= $jadwal['jam_mulai'] ?> - <?= $jadwal['jam_selesai'] ?>
                                                 </div>
-                                            <?php endif; ?>
-                                            <?php if (!empty($ortu['perusahaan'])): ?>
-                                                <div>
-                                                    <span class="block font-semibold text-gray-700">Perusahaan</span>
-                                                    <span class="text-gray-600"><?= htmlspecialchars($ortu['perusahaan']) ?></span>
-                                                </div>
-                                            <?php endif; ?>
+                                                <!-- <div class="text-sm text-gray-600 mt-1">
+                                                    <i class="fas fa-book mr-1 text-orange-500"></i>
+                                                    <?= htmlspecialchars($jadwal['nama_pelajaran'] ?? 'Belum ada mata pelajaran') ?>
+                                                </div> -->
+                                            </div>
                                         </div>
                                     </div>
                                 <?php endforeach; ?>
-
-                                <!-- Tampilkan saudara kandung jika ada -->
-                                <?php if (!empty($siswa_detail['saudara_kandung'])): ?>
-                                    <div class="mt-4 pt-4 border-t border-yellow-200">
-                                        <span class="block font-semibold text-gray-700">Saudara Kandung di Bimbel</span>
-                                        <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['saudara_kandung']) ?></span>
+                                <?php if ($siswa_detail['total_jadwal'] > 0): ?>
+                                    <div class="text-sm text-gray-500 mt-2">
+                                        <i class="fas fa-info-circle mr-1"></i>
+                                        Total: <?= $siswa_detail['total_jadwal'] ?> jadwal per minggu
                                     </div>
                                 <?php endif; ?>
                             </div>
+                        </div>
+                        <?php endif; ?>
+
+                        <!-- Data Orang Tua -->
+                        <?php if (!empty($siswa_detail['orangtua'])): ?>
+                        <div class="bg-yellow-50 p-4 rounded-lg">
+                            <h3 class="font-bold text-lg text-yellow-800 mb-4 flex items-center">
+                                <i class="fas fa-user-friends mr-2"></i> Data Orang Tua/Wali
+                            </h3>
+                            <?php foreach ($siswa_detail['orangtua'] as $index => $ortu): ?>
+                                <div class="<?php echo $index < count($siswa_detail['orangtua']) - 1 ? 'mb-4 pb-4 border-b border-yellow-200' : ''; ?>">
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <span class="block font-semibold text-gray-700">Nama</span>
+                                            <span class="text-gray-600"><?= htmlspecialchars($ortu['nama_ortu']) ?></span>
+                                        </div>
+                                        <div>
+                                            <span class="block font-semibold text-gray-700">Hubungan</span>
+                                            <span class="text-gray-600">
+                                                <?php
+                                                $hubungan = $ortu['hubungan_dengan_siswa'] ?? '';
+                                                echo $hubungan == 'ayah' ? 'Ayah' : ($hubungan == 'ibu' ? 'Ibu' : ($hubungan == 'wali' ? 'Wali' : '-'));
+                                                ?>
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <span class="block font-semibold text-gray-700">No. HP</span>
+                                            <span class="text-gray-600"><?= htmlspecialchars($ortu['no_hp_ortu'] ?? '-') ?></span>
+                                        </div>
+                                        <div>
+                                            <span class="block font-semibold text-gray-700">Email</span>
+                                            <span class="text-gray-600"><?= htmlspecialchars($ortu['email_ortu'] ?? '-') ?></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+
+                            <?php if (!empty($siswa_detail['saudara_kandung'])): ?>
+                                <div class="mt-4 pt-4 border-t border-yellow-200">
+                                    <span class="block font-semibold text-gray-700">Saudara Kandung di Bimbel</span>
+                                    <span class="text-gray-600"><?= htmlspecialchars($siswa_detail['saudara_kandung']) ?></span>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+
+                        <!-- Riwayat Penilaian -->
+                        <?php if (!empty($siswa_detail['penilaian'])): ?>
+                        <div class="bg-indigo-50 p-4 rounded-lg">
+                            <h3 class="font-bold text-lg text-indigo-800 mb-4 flex items-center">
+                                <i class="fas fa-clipboard-list mr-2"></i> Riwayat Penilaian
+                            </h3>
+                            <div class="space-y-3">
+                                <?php foreach ($siswa_detail['penilaian'] as $penilaian): ?>
+                                    <div class="bg-white p-3 rounded-lg border">
+                                        <div class="flex justify-between items-center">
+                                            <div>
+                                                <div class="font-medium text-gray-900">
+                                                    <?= date('d M Y', strtotime($penilaian['tanggal_penilaian'])) ?>
+                                                </div>
+                                                <div class="text-sm text-gray-600">
+                                                    Total Score: <?= $penilaian['total_score'] ?>/50
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <span class="px-2 py-1 text-xs rounded-full 
+                                                    <?php
+                                                    $kategori = $penilaian['kategori'] ?? '';
+                                                    if ($kategori == 'Sangat Baik') echo 'bg-green-100 text-green-800';
+                                                    elseif ($kategori == 'Baik') echo 'bg-blue-100 text-blue-800';
+                                                    elseif ($kategori == 'Cukup') echo 'bg-yellow-100 text-yellow-800';
+                                                    else echo 'bg-red-100 text-red-800';
+                                                    ?>">
+                                                    <?= $kategori ?>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <?php if (!empty($penilaian['catatan_guru'])): ?>
+                                            <div class="mt-2 text-sm text-gray-600 border-t pt-2">
+                                                <i class="fas fa-quote-left text-gray-400 mr-1"></i>
+                                                <?= htmlspecialchars($penilaian['catatan_guru']) ?>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
+                                <?php endforeach; ?>
+                                <div class="text-center mt-3">
+                                    <a href="riwayat.php?siswa_id=<?= $siswa_detail['id'] ?>" 
+                                       class="inline-flex items-center text-sm text-indigo-600 hover:text-indigo-800">
+                                        <i class="fas fa-history mr-1"></i> Lihat semua penilaian
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
                         <?php endif; ?>
                     </div>
                 <?php else: ?>
@@ -1257,6 +1303,12 @@ if ($guru_id > 0) {
                     class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
                     Tutup
                 </button>
+                <?php if ($siswa_detail): ?>
+                <a href="inputNilai.php?siswa_id=<?= $siswa_detail['id'] ?>"
+                    class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 ml-2">
+                    <i class="fas fa-plus-circle mr-2"></i> Input Nilai
+                </a>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -1278,8 +1330,7 @@ if ($guru_id > 0) {
                             <div class="form-group">
                                 <label class="form-label">Nama Lengkap *</label>
                                 <input type="text" name="nama_lengkap"
-                                    value="<?= htmlspecialchars($siswa_edit['nama_lengkap']) ?>" class="form-input"
-                                    required>
+                                    value="<?= htmlspecialchars($siswa_edit['nama_lengkap']) ?>" class="form-input" required>
                             </div>
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1288,91 +1339,60 @@ if ($guru_id > 0) {
                                     <input type="text" name="tempat_lahir"
                                         value="<?= htmlspecialchars($siswa_edit['tempat_lahir']) ?>" class="form-input">
                                 </div>
-
                                 <div class="form-group">
                                     <label class="form-label">Tanggal Lahir</label>
                                     <input type="date" name="tanggal_lahir"
                                         value="<?= htmlspecialchars($siswa_edit['tanggal_lahir']) ?>" class="form-input">
                                 </div>
-
                                 <div class="form-group">
                                     <label class="form-label">Jenis Kelamin</label>
                                     <select name="jenis_kelamin" class="form-input">
-                                        <option value="L" <?= $siswa_edit['jenis_kelamin'] == 'L' ? 'selected' : '' ?>>
-                                            Laki-laki</option>
-                                        <option value="P" <?= $siswa_edit['jenis_kelamin'] == 'P' ? 'selected' : '' ?>>
-                                            Perempuan</option>
+                                        <option value="L" <?= $siswa_edit['jenis_kelamin'] == 'L' ? 'selected' : '' ?>>Laki-laki</option>
+                                        <option value="P" <?= $siswa_edit['jenis_kelamin'] == 'P' ? 'selected' : '' ?>>Perempuan</option>
                                     </select>
                                 </div>
-
                                 <div class="form-group">
                                     <label class="form-label">Agama</label>
                                     <select name="agama" class="form-input">
                                         <option value="">Pilih Agama</option>
-                                        <option value="Islam" <?= $siswa_edit['agama'] == 'Islam' ? 'selected' : '' ?>>Islam
-                                        </option>
-                                        <option value="Kristen" <?= $siswa_edit['agama'] == 'Kristen' ? 'selected' : '' ?>>
-                                            Kristen</option>
-                                        <option value="Katolik" <?= $siswa_edit['agama'] == 'Katolik' ? 'selected' : '' ?>>
-                                            Katolik</option>
-                                        <option value="Hindu" <?= $siswa_edit['agama'] == 'Hindu' ? 'selected' : '' ?>>Hindu
-                                        </option>
-                                        <option value="Buddha" <?= $siswa_edit['agama'] == 'Buddha' ? 'selected' : '' ?>>Buddha
-                                        </option>
-                                        <option value="Konghucu" <?= $siswa_edit['agama'] == 'Konghucu' ? 'selected' : '' ?>>
-                                            Konghucu</option>
+                                        <option value="Islam" <?= $siswa_edit['agama'] == 'Islam' ? 'selected' : '' ?>>Islam</option>
+                                        <option value="Kristen" <?= $siswa_edit['agama'] == 'Kristen' ? 'selected' : '' ?>>Kristen</option>
+                                        <option value="Katolik" <?= $siswa_edit['agama'] == 'Katolik' ? 'selected' : '' ?>>Katolik</option>
+                                        <option value="Hindu" <?= $siswa_edit['agama'] == 'Hindu' ? 'selected' : '' ?>>Hindu</option>
+                                        <option value="Buddha" <?= $siswa_edit['agama'] == 'Buddha' ? 'selected' : '' ?>>Buddha</option>
                                     </select>
                                 </div>
-
-                                <div class="form-group">
+                                <div class="form-group md:col-span-2">
                                     <label class="form-label">Kelas Sekolah</label>
                                     <select name="kelas" class="form-input">
                                         <option value="">Pilih Kelas</option>
-                                        <option value="Paud" <?= $siswa_edit['kelas'] == 'Paud' ? 'selected' : '' ?>>Paud
-                                        </option>
+                                        <option value="Paud" <?= $siswa_edit['kelas'] == 'Paud' ? 'selected' : '' ?>>Paud</option>
                                         <option value="TK" <?= $siswa_edit['kelas'] == 'TK' ? 'selected' : '' ?>>TK</option>
-                                        <option value="1 SD" <?= $siswa_edit['kelas'] == '1 SD' ? 'selected' : '' ?>>1 SD
-                                        </option>
-                                        <option value="2 SD" <?= $siswa_edit['kelas'] == '2 SD' ? 'selected' : '' ?>>2 SD
-                                        </option>
-                                        <option value="3 SD" <?= $siswa_edit['kelas'] == '3 SD' ? 'selected' : '' ?>>3 SD
-                                        </option>
-                                        <option value="4 SD" <?= $siswa_edit['kelas'] == '4 SD' ? 'selected' : '' ?>>4 SD
-                                        </option>
-                                        <option value="5 SD" <?= $siswa_edit['kelas'] == '5 SD' ? 'selected' : '' ?>>5 SD
-                                        </option>
-                                        <option value="6 SD" <?= $siswa_edit['kelas'] == '6 SD' ? 'selected' : '' ?>>6 SD
-                                        </option>
-                                        <option value="7 SMP" <?= $siswa_edit['kelas'] == '7 SMP' ? 'selected' : '' ?>>7 SMP
-                                        </option>
-                                        <option value="8 SMP" <?= $siswa_edit['kelas'] == '8 SMP' ? 'selected' : '' ?>>8 SMP
-                                        </option>
-                                        <option value="9 SMP" <?= $siswa_edit['kelas'] == '9 SMP' ? 'selected' : '' ?>>9 SMP
-                                        </option>
-                                        <option value="10 SMA" <?= $siswa_edit['kelas'] == '10 SMA' ? 'selected' : '' ?>>10 SMA
-                                        </option>
-                                        <option value="11 SMA" <?= $siswa_edit['kelas'] == '11 SMA' ? 'selected' : '' ?>>11 SMA
-                                        </option>
-                                        <option value="12 SMA" <?= $siswa_edit['kelas'] == '12 SMA' ? 'selected' : '' ?>>12 SMA
-                                        </option>
-                                        <option value="Alumni" <?= $siswa_edit['kelas'] == 'Alumni' ? 'selected' : '' ?>>Alumni
-                                        </option>
-                                        <option value="Umum" <?= $siswa_edit['kelas'] == 'Umum' ? 'selected' : '' ?>>Umum
-                                        </option>
+                                        <option value="1 SD" <?= $siswa_edit['kelas'] == '1 SD' ? 'selected' : '' ?>>1 SD</option>
+                                        <option value="2 SD" <?= $siswa_edit['kelas'] == '2 SD' ? 'selected' : '' ?>>2 SD</option>
+                                        <option value="3 SD" <?= $siswa_edit['kelas'] == '3 SD' ? 'selected' : '' ?>>3 SD</option>
+                                        <option value="4 SD" <?= $siswa_edit['kelas'] == '4 SD' ? 'selected' : '' ?>>4 SD</option>
+                                        <option value="5 SD" <?= $siswa_edit['kelas'] == '5 SD' ? 'selected' : '' ?>>5 SD</option>
+                                        <option value="6 SD" <?= $siswa_edit['kelas'] == '6 SD' ? 'selected' : '' ?>>6 SD</option>
+                                        <option value="7 SMP" <?= $siswa_edit['kelas'] == '7 SMP' ? 'selected' : '' ?>>7 SMP</option>
+                                        <option value="8 SMP" <?= $siswa_edit['kelas'] == '8 SMP' ? 'selected' : '' ?>>8 SMP</option>
+                                        <option value="9 SMP" <?= $siswa_edit['kelas'] == '9 SMP' ? 'selected' : '' ?>>9 SMP</option>
+                                        <option value="10 SMA" <?= $siswa_edit['kelas'] == '10 SMA' ? 'selected' : '' ?>>10 SMA</option>
+                                        <option value="11 SMA" <?= $siswa_edit['kelas'] == '11 SMA' ? 'selected' : '' ?>>11 SMA</option>
+                                        <option value="12 SMA" <?= $siswa_edit['kelas'] == '12 SMA' ? 'selected' : '' ?>>12 SMA</option>
+                                        <option value="Alumni" <?= $siswa_edit['kelas'] == 'Alumni' ? 'selected' : '' ?>>Alumni</option>
+                                        <option value="Umum" <?= $siswa_edit['kelas'] == 'Umum' ? 'selected' : '' ?>>Umum</option>
                                     </select>
                                 </div>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Alamat</label>
-                                <textarea name="alamat" class="form-input"
-                                    rows="3"><?= htmlspecialchars($siswa_edit['alamat']) ?></textarea>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Sekolah Asal</label>
-                                <input type="text" name="sekolah_asal"
-                                    value="<?= htmlspecialchars($siswa_edit['sekolah_asal']) ?>" class="form-input">
+                                <div class="form-group md:col-span-2">
+                                    <label class="form-label">Alamat</label>
+                                    <textarea name="alamat" class="form-input" rows="3"><?= htmlspecialchars($siswa_edit['alamat']) ?></textarea>
+                                </div>
+                                <div class="form-group md:col-span-2">
+                                    <label class="form-label">Sekolah Asal</label>
+                                    <input type="text" name="sekolah_asal"
+                                        value="<?= htmlspecialchars($siswa_edit['sekolah_asal']) ?>" class="form-input">
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1436,30 +1456,28 @@ if ($guru_id > 0) {
         // Close menu when clicking on menu items
         document.querySelectorAll('.menu-item').forEach(item => {
             item.addEventListener('click', () => {
-                mobileMenu.classList.remove('menu-open');
-                menuOverlay.classList.remove('active');
-                document.body.style.overflow = 'auto';
+                if (window.innerWidth < 768) {
+                    mobileMenu.classList.remove('menu-open');
+                    menuOverlay.classList.remove('active');
+                    document.body.style.overflow = 'auto';
+                }
             });
         });
 
-        // Tambahkan di bagian script, setelah DOMContentLoaded
-        document.addEventListener('DOMContentLoaded', function () {
-            // Auto-submit search dengan debounce
-            const searchInput = document.querySelector('input[name="search"]');
-            let searchTimeout;
+        // Search dengan debounce
+        const searchInput = document.querySelector('input[name="search"]');
+        let searchTimeout;
 
-            if (searchInput) {
-                searchInput.addEventListener('input', function () {
-                    clearTimeout(searchTimeout);
-                    searchTimeout = setTimeout(() => {
-                        // Submit form jika nilai berubah
-                        if (this.value.length === 0 || this.value.length >= 2) {
-                            this.form.submit();
-                        }
-                    }, 500); // Delay 500ms setelah mengetik
-                });
-            }
-        });
+        if (searchInput) {
+            searchInput.addEventListener('input', function () {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    if (this.value.length === 0 || this.value.length >= 2) {
+                        this.form.submit();
+                    }
+                }, 500);
+            });
+        }
 
         // Dropdown functionality
         document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
@@ -1471,13 +1489,11 @@ if ($guru_id > 0) {
                 const submenu = dropdownGroup.querySelector('.dropdown-submenu');
                 const arrow = this.querySelector('.arrow');
 
-                // Toggle current dropdown
                 if (submenu.style.display === 'block') {
                     submenu.style.display = 'none';
                     arrow.style.transform = 'rotate(0deg)';
                     this.classList.remove('open');
                 } else {
-                    // Close other dropdowns
                     document.querySelectorAll('.dropdown-submenu').forEach(sm => {
                         sm.style.display = 'none';
                     });
@@ -1486,7 +1502,6 @@ if ($guru_id > 0) {
                         t.querySelector('.arrow').style.transform = 'rotate(0deg)';
                     });
 
-                    // Open this dropdown
                     submenu.style.display = 'block';
                     arrow.style.transform = 'rotate(-90deg)';
                     this.classList.add('open');
@@ -1509,10 +1524,8 @@ if ($guru_id > 0) {
 
         // Fungsi Modal
         function openModal(modalId) {
-            // Close mobile menu if open
             mobileMenu.classList.remove('menu-open');
             menuOverlay.classList.remove('active');
-
             document.getElementById(modalId).style.display = 'block';
             document.body.style.overflow = 'hidden';
         }
@@ -1521,7 +1534,6 @@ if ($guru_id > 0) {
             document.getElementById(modalId).style.display = 'none';
             document.body.style.overflow = 'auto';
 
-            // Hapus parameter URL saat modal ditutup
             if (history.pushState) {
                 let url = new URL(window.location);
                 url.searchParams.delete('action');
@@ -1530,27 +1542,11 @@ if ($guru_id > 0) {
             }
         }
 
-        // Fungsi untuk menampilkan detail
         function showDetail(siswaId) {
-            // Update URL dengan parameter
             let url = new URL(window.location);
             url.searchParams.set('action', 'detail');
             url.searchParams.set('siswa_id', siswaId);
             window.history.pushState({}, '', url);
-
-            // Reload halaman untuk memuat data dari PHP
-            window.location.href = url;
-        }
-
-        // Fungsi untuk menampilkan edit
-        function showEdit(siswaId) {
-            // Update URL dengan parameter
-            let url = new URL(window.location);
-            url.searchParams.set('action', 'edit_form');
-            url.searchParams.set('siswa_id', siswaId);
-            window.history.pushState({}, '', url);
-
-            // Reload halaman untuk memuat data dari PHP
             window.location.href = url;
         }
 
@@ -1575,15 +1571,6 @@ if ($guru_id > 0) {
                 openModal('editModal');
             <?php endif; ?>
 
-            // Auto-focus pada input pertama di modal edit
-            const editModal = document.getElementById('editModal');
-            if (editModal && editModal.style.display === 'block') {
-                const firstInput = editModal.querySelector('input[name="nama_lengkap"]');
-                if (firstInput) {
-                    setTimeout(() => firstInput.focus(), 100);
-                }
-            }
-
             // Update server time
             function updateServerTime() {
                 const now = new Date();
@@ -1601,3 +1588,4 @@ if ($guru_id > 0) {
 </body>
 
 </html>
+<?php $conn->close(); ?>

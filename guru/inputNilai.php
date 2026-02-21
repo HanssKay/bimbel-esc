@@ -45,9 +45,8 @@ try {
 // VARIABEL
 $success_message = '';
 $error_message = '';
-$siswa_id = $_GET['siswa_id'] ?? 0;
+$siswa_id = isset($_GET['siswa_id']) ? (int)$_GET['siswa_id'] : 0;
 $siswa_data = null;
-$siswa_pelajaran_options = [];
 $siswa_options = [];
 
 // CEK SESSION NOTIFICATION
@@ -61,35 +60,83 @@ if (isset($_SESSION['error_message'])) {
     unset($_SESSION['error_message']);
 }
 
-// AMBIL DATA SISWA YANG DIAJAR OLEH GURU INI (untuk autocomplete)
+// AMBIL DATA SISWA YANG DIAJAR OLEH GURU INI (berdasarkan jadwal)
 if ($guru_id > 0) {
     try {
-        // Query untuk mengambil data siswa yang diajar guru ini (hanya nama)
+        // Ambil siswa yang memiliki jadwal dengan guru ini
         $sql_siswa_list = "SELECT DISTINCT 
                                 s.id, 
-                                s.nama_lengkap
+                                s.nama_lengkap,
+                                s.kelas,
+                                s.sekolah_asal
                           FROM siswa s
-                          INNER JOIN siswa_pelajaran sp ON s.id = sp.siswa_id 
-                          INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                          WHERE sp.guru_id = ? 
-                            AND sp.status = 'aktif'
+                          INNER JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
+                          INNER JOIN jadwal_belajar jb ON ps.id = jb.pendaftaran_id
+                          INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                          WHERE smg.guru_id = ? 
+                            AND jb.status = 'aktif'
                             AND ps.status = 'aktif'
                             AND s.status = 'aktif'
                           ORDER BY s.nama_lengkap";
 
         $stmt = $conn->prepare($sql_siswa_list);
-        if ($stmt) {
-            $stmt->bind_param("i", $guru_id);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            
-            while ($row = $result->fetch_assoc()) {
-                $siswa_options[] = $row;
-            }
-            $stmt->close();
+        $stmt->bind_param("i", $guru_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        while ($row = $result->fetch_assoc()) {
+            $siswa_options[] = $row;
         }
+        $stmt->close();
+        
+        error_log("Jumlah siswa untuk guru ID $guru_id: " . count($siswa_options));
     } catch (Exception $e) {
         $error_message = "❌ Error mengambil data siswa: " . $e->getMessage();
+    }
+}
+
+// AMBIL DATA MATA PELAJARAN SISWA BERDASARKAN JADWAL GURU
+$mata_pelajaran_list = [];
+if ($siswa_id > 0 && $guru_id > 0) {
+    try {
+        $sql_mapel = "SELECT DISTINCT
+                        sp.id as siswa_pelajaran_id,
+                        sp.nama_pelajaran,
+                        ps.tingkat,
+                        ps.jenis_kelas,
+                        ps.id as pendaftaran_id
+                      FROM siswa_pelajaran sp
+                      INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                      INNER JOIN jadwal_belajar jb ON ps.id = jb.pendaftaran_id
+                      INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                      WHERE ps.siswa_id = ?
+                        AND smg.guru_id = ?
+                        AND jb.status = 'aktif'
+                        AND sp.status = 'aktif'
+                        AND ps.status = 'aktif'
+                      ORDER BY sp.nama_pelajaran";
+        
+        $stmt = $conn->prepare($sql_mapel);
+        $stmt->bind_param("ii", $siswa_id, $guru_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        while ($row = $result->fetch_assoc()) {
+            $mata_pelajaran_list[] = $row;
+        }
+        $stmt->close();
+        
+        // Ambil data siswa
+        $sql_siswa = "SELECT * FROM siswa WHERE id = ?";
+        $stmt2 = $conn->prepare($sql_siswa);
+        $stmt2->bind_param("i", $siswa_id);
+        $stmt2->execute();
+        $result2 = $stmt2->get_result();
+        $siswa_data = $result2->fetch_assoc();
+        $stmt2->close();
+        
+    } catch (Exception $e) {
+        error_log("Error fetching mata pelajaran: " . $e->getMessage());
     }
 }
 
@@ -97,30 +144,43 @@ if ($guru_id > 0) {
 if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
     header('Content-Type: application/json');
     
-    $search = isset($_GET['search']) ? $conn->real_escape_string($_GET['search']) : '';
+    $search = isset($_GET['search']) ? trim($_GET['search']) : '';
     $filtered_siswa = [];
     
-    if (!empty($search) && $guru_id > 0) {
+    if ($guru_id > 0) {
         $sql_search = "SELECT DISTINCT 
-                            s.id, 
-                            s.nama_lengkap
-                      FROM siswa s
-                      INNER JOIN siswa_pelajaran sp ON s.id = sp.siswa_id 
-                      INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                      WHERE sp.guru_id = $guru_id 
-                        AND sp.status = 'aktif'
-                        AND ps.status = 'aktif'
-                        AND s.status = 'aktif'
-                        AND (s.nama_lengkap LIKE '%$search%')
-                      ORDER BY s.nama_lengkap
-                      LIMIT 20";
-        
-        $result_search = $conn->query($sql_search);
-        if ($result_search) {
-            $filtered_siswa = $result_search->fetch_all(MYSQLI_ASSOC);
+                    s.id, 
+                    s.nama_lengkap,
+                    s.kelas,
+                    s.sekolah_asal
+              FROM siswa s
+              INNER JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
+              INNER JOIN jadwal_belajar jb ON ps.id = jb.pendaftaran_id
+              INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+              WHERE smg.guru_id = ? 
+                AND jb.status = 'aktif'
+                AND ps.status = 'aktif'
+                AND s.status = 'aktif'";
+        if (!empty($search) && strlen($search) >= 2) {
+            $sql_search .= " AND s.nama_lengkap LIKE ?";
+            $search_param = "%" . $search . "%";
+            
+            $stmt = $conn->prepare($sql_search);
+            $stmt->bind_param("is", $guru_id, $search_param);
+        } else {
+            $sql_search .= " ORDER BY s.nama_lengkap LIMIT 20";
+            $stmt = $conn->prepare($sql_search);
+            $stmt->bind_param("i", $guru_id);
         }
-    } else {
-        $filtered_siswa = $siswa_options;
+        
+        if ($stmt) {
+            $stmt->execute();
+            $result_search = $stmt->get_result();
+            while ($row = $result_search->fetch_assoc()) {
+                $filtered_siswa[] = $row;
+            }
+            $stmt->close();
+        }
     }
     
     echo json_encode($filtered_siswa);
@@ -135,17 +195,19 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran_by_siswa' && isset($
     $pelajaran_data = [];
     
     if ($siswa_id > 0 && $guru_id > 0) {
-        $sql_pelajaran = "SELECT 
+        $sql_pelajaran = "SELECT DISTINCT
                             sp.id as siswa_pelajaran_id,
                             sp.nama_pelajaran,
                             ps.tingkat,
                             ps.jenis_kelas,
-                            s.nama_lengkap
+                            ps.id as pendaftaran_id
                           FROM siswa_pelajaran sp
                           INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                          INNER JOIN siswa s ON sp.siswa_id = s.id
-                          WHERE sp.siswa_id = ? 
-                            AND sp.guru_id = ?
+                          INNER JOIN jadwal_belajar jb ON ps.id = jb.pendaftaran_id
+                          INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                          WHERE ps.siswa_id = ?
+                            AND smg.guru_id = ?
+                            AND jb.status = 'aktif'
                             AND sp.status = 'aktif'
                             AND ps.status = 'aktif'
                           ORDER BY sp.nama_pelajaran";
@@ -167,31 +229,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran_by_siswa' && isset($
     exit();
 }
 
-// AMBIL DATA SISWA DETAIL JIKA ADA siswa_id DI URL
-if ($siswa_id > 0) {
-    try {
-        $sql_siswa = "SELECT s.*, 
-                             sp.id as siswa_pelajaran_id,
-                             sp.nama_pelajaran,
-                             ps.tingkat,
-                             ps.jenis_kelas
-                      FROM siswa s
-                      LEFT JOIN siswa_pelajaran sp ON s.id = sp.siswa_id AND sp.status = 'aktif'
-                      LEFT JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id AND ps.status = 'aktif'
-                      WHERE s.id = ? 
-                      LIMIT 1";
-
-        $stmt = $conn->prepare($sql_siswa);
-        $stmt->bind_param("i", $siswa_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $siswa_data = $result->fetch_assoc();
-        $stmt->close();
-    } catch (Exception $e) {
-        error_log("Error fetching siswa data: " . $e->getMessage());
-    }
-}
-
 // PROSES SIMPAN PENILAIAN
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
     
@@ -210,19 +247,41 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
     } else {
         try {
             // Ambil pendaftaran_id dari siswa_pelajaran
-            $sql_get_pendaftaran = "SELECT pendaftaran_id FROM siswa_pelajaran WHERE id = ? AND siswa_id = ? AND guru_id = ?";
+            $sql_get_pendaftaran = "SELECT pendaftaran_id, siswa_id 
+                                   FROM siswa_pelajaran 
+                                   WHERE id = ? AND siswa_id = ?";
             $stmt = $conn->prepare($sql_get_pendaftaran);
-            $stmt->bind_param("iii", $siswa_pelajaran_id, $siswa_id_post, $guru_id);
+            $stmt->bind_param("ii", $siswa_pelajaran_id, $siswa_id_post);
             $stmt->execute();
             $result = $stmt->get_result();
             
             if ($row = $result->fetch_assoc()) {
                 $pendaftaran_id = $row['pendaftaran_id'];
+                
+                // Verifikasi bahwa guru benar-benar mengajar siswa ini (berdasarkan jadwal)
+                $sql_verify = "SELECT COUNT(*) as jml 
+                              FROM jadwal_belajar jb
+                              INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                              WHERE jb.pendaftaran_id = ? 
+                                AND smg.guru_id = ?
+                                AND jb.status = 'aktif'";
+                
+                $stmt_verify = $conn->prepare($sql_verify);
+                $stmt_verify->bind_param("ii", $pendaftaran_id, $guru_id);
+                $stmt_verify->execute();
+                $result_verify = $stmt_verify->get_result();
+                $verify_data = $result_verify->fetch_assoc();
+                
+                if ($verify_data['jml'] == 0) {
+                    throw new Exception("Anda tidak memiliki jadwal mengajar untuk siswa ini.");
+                }
+                $stmt_verify->close();
+                
             } else {
                 throw new Exception("Data mata pelajaran tidak valid untuk siswa ini.");
             }
             $stmt->close();
-            
+
             // Lanjutkan dengan penyimpanan penilaian
             $nilai_fields = [
                 'willingness_learn',
@@ -260,7 +319,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             $catatan = trim($_POST['catatan_guru'] ?? '');
             $rekomendasi = trim($_POST['rekomendasi'] ?? '');
 
-            // Update query untuk menambahkan siswa_pelajaran_id
+            // Insert ke tabel penilaian_siswa
             $sql = "INSERT INTO penilaian_siswa (
                         siswa_id, pendaftaran_id, siswa_pelajaran_id, guru_id, tanggal_penilaian, periode_penilaian,
                         willingness_learn, problem_solving, critical_thinking, 
@@ -292,10 +351,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                 );
 
                 if ($stmt->execute()) {
-                    // SIMPAN NOTIFIKASI DI SESSION
                     $_SESSION['success_message'] = "✅ Penilaian berhasil disimpan!";
-                    
-                    // Redirect ke halaman SAMA (clear POST data)
                     header('Location: ' . $_SERVER['PHP_SELF'] . '?siswa_id=' . $siswa_id_post);
                     exit();
                 } else {
@@ -355,7 +411,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             background-color: #f8fafc;
         }
         
-        /* Dropdown styles */
         .dropdown-submenu {
             display: none;
             max-height: 500px;
@@ -398,7 +453,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             -moz-appearance: textfield;
         }
 
-        /* CSS untuk autocomplete */
         .autocomplete-container {
             position: relative;
             width: 100%;
@@ -472,7 +526,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
         .autocomplete-item .siswa-nama {
             font-weight: 600;
             color: #1f2937;
-            padding: 0.5rem;
         }
 
         .autocomplete-item .siswa-info {
@@ -488,7 +541,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             font-style: italic;
         }
 
-        /* Info siswa yang dipilih */
         .selected-siswa-info {
             border-left: 4px solid #3B82F6;
             background-color: #EFF6FF;
@@ -496,7 +548,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             border-radius: 0.5rem;
         }
 
-        /* Loading spinner */
         .spinner {
             border: 3px solid #f3f3f3;
             border-top: 3px solid #3b82f6;
@@ -511,7 +562,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             0% {
                 transform: rotate(0deg);
             }
-
             100% {
                 transform: rotate(360deg);
             }
@@ -580,16 +630,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             .indicator-box {
                 padding: 12px !important;
                 margin-bottom: 12px !important;
-            }
-
-            .autocomplete-dropdown {
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                width: 90%;
-                max-height: 80vh;
-                z-index: 1002;
             }
         }
 
@@ -702,7 +742,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
                 <div>
                     <h1 class="text-2xl font-bold text-gray-800">Input Penilaian Siswa</h1>
-                    <p class="text-gray-600">Isi form penilaian untuk siswa bimbel</p>
+                    <p class="text-gray-600">Isi form penilaian untuk mata pelajaran yang Anda ajar</p>
                 </div>
                 <div class="mt-2 md:mt-0 text-right">
                     <a href="riwayat.php" class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-800 hover:bg-blue-200">
@@ -747,31 +787,47 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                     <div>
                         <label class="block text-gray-700 font-medium mb-2">
                             Cari Siswa <span class="text-red-500">*</span>
-                            <span class="text-xs text-gray-500">(ketik nama siswa)</span>
                         </label>
 
                         <div class="autocomplete-container">
                             <input type="text" id="searchSiswa" class="autocomplete-input"
-                                placeholder="Ketik nama siswa..." autocomplete="off">
-                            <input type="hidden" name="siswa_id" id="selectedSiswaId">
-                            <button type="button" id="clearSearch" class="autocomplete-clear">
+                                placeholder="Ketik nama siswa..." autocomplete="off"
+                                value="<?php echo $siswa_data ? htmlspecialchars($siswa_data['nama_lengkap']) : ''; ?>">
+                            <input type="hidden" name="siswa_id" id="selectedSiswaId" value="<?php echo $siswa_id; ?>">
+                            <button type="button" id="clearSearch" class="autocomplete-clear" style="<?php echo $siswa_id ? 'display:block' : ''; ?>">
                                 <i class="fas fa-times"></i>
                             </button>
                             <div id="siswaDropdown" class="autocomplete-dropdown"></div>
                         </div>
 
                         <!-- Info siswa yang dipilih -->
-                        <div id="selectedSiswaInfo" class="selected-siswa-info mt-2 p-3 hidden">
+                        <?php if ($siswa_data): ?>
+                        <div id="selectedSiswaInfo" class="selected-siswa-info mt-2 p-3">
                             <div class="flex justify-between items-start">
                                 <div>
-                                    <div class="font-medium text-gray-900" id="selectedSiswaName"></div>
+                                    <div class="font-medium text-gray-900"><?php echo htmlspecialchars($siswa_data['nama_lengkap']); ?></div>
+                                    <div class="text-sm text-gray-600">
+                                        Kelas: <?php echo $siswa_data['kelas']; ?> | Sekolah: <?php echo $siswa_data['sekolah_asal'] ?? '-'; ?>
+                                    </div>
                                 </div>
-                                <button type="button" onclick="clearSelectedSiswa()"
-                                    class="text-gray-400 hover:text-gray-600">
+                                <button type="button" onclick="clearSelectedSiswa()" class="text-gray-400 hover:text-gray-600">
                                     <i class="fas fa-times"></i>
                                 </button>
                             </div>
                         </div>
+                        <?php else: ?>
+                        <div id="selectedSiswaInfo" class="selected-siswa-info mt-2 p-3 hidden">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <div class="font-medium text-gray-900" id="selectedSiswaName"></div>
+                                    <div class="text-sm text-gray-600" id="selectedSiswaDetail"></div>
+                                </div>
+                                <button type="button" onclick="clearSelectedSiswa()" class="text-gray-400 hover:text-gray-600">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <?php endif; ?>
                     </div>
 
                     <!-- Pilih Mata Pelajaran -->
@@ -780,11 +836,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                         <select name="siswa_pelajaran_id" required
                             class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                             id="selectPelajaran">
-                            <option value="">-- Pilih siswa terlebih dahulu --</option>
+                            <option value="">-- Pilih Mata Pelajaran --</option>
+                            <?php if (!empty($mata_pelajaran_list)): ?>
+                                <?php foreach ($mata_pelajaran_list as $mapel): ?>
+                                <option value="<?php echo $mapel['siswa_pelajaran_id']; ?>">
+                                    <?php echo htmlspecialchars($mapel['nama_pelajaran']); ?> - 
+                                    <?php echo $mapel['tingkat']; ?> (<?php echo $mapel['jenis_kelas']; ?>)
+                                </option>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
                         </select>
                         <div id="loadingPelajaran" class="hidden text-sm text-gray-500 mt-1">
                             <i class="fas fa-spinner fa-spin mr-1"></i> Memuat mata pelajaran...
                         </div>
+                        <p class="text-xs text-gray-500 mt-1">
+                            <i class="fas fa-info-circle"></i> Menampilkan mata pelajaran yang Anda ajar untuk siswa ini
+                        </p>
                     </div>
 
                     <div>
@@ -801,40 +868,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                     </div>
                 </div>
 
-                <!-- Info Siswa -->
-                <?php if ($siswa_data): ?>
+                <!-- Info Siswa jika sudah dipilih -->
+                <?php if ($siswa_data && !empty($mata_pelajaran_list)): ?>
                     <div class="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
                         <h3 class="text-lg font-semibold text-gray-800 mb-2">Data Siswa</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             <div>
                                 <p class="text-sm text-gray-600">Nama</p>
-                                <p class="font-medium">
-                                    <?php echo htmlspecialchars($siswa_data['nama_lengkap']); ?>
-                                </p>
+                                <p class="font-medium"><?php echo htmlspecialchars($siswa_data['nama_lengkap']); ?></p>
                             </div>
                             <div>
                                 <p class="text-sm text-gray-600">Kelas Sekolah</p>
-                                <p class="font-medium">
-                                    <?php echo htmlspecialchars($siswa_data['kelas']); ?>
-                                </p>
+                                <p class="font-medium"><?php echo htmlspecialchars($siswa_data['kelas']); ?></p>
                             </div>
                             <div>
-                                <p class="text-sm text-gray-600">Mata Pelajaran</p>
-                                <p class="font-medium">
-                                    <?php echo htmlspecialchars($siswa_data['nama_pelajaran'] ?? '-'); ?>
-                                </p>
-                            </div>
-                            <div>
-                                <p class="text-sm text-gray-600">Tingkat & Jenis</p>
-                                <p class="font-medium">
-                                    <?php 
-                                    if (isset($siswa_data['tingkat']) && isset($siswa_data['jenis_kelas'])) {
-                                        echo htmlspecialchars($siswa_data['tingkat'] . ' - ' . $siswa_data['jenis_kelas']);
-                                    } else {
-                                        echo '-';
-                                    }
-                                    ?>
-                                </p>
+                                <p class="text-sm text-gray-600">Sekolah Asal</p>
+                                <p class="font-medium"><?php echo htmlspecialchars($siswa_data['sekolah_asal'] ?? '-'); ?></p>
                             </div>
                         </div>
                     </div>
@@ -871,64 +920,61 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                 <div class="space-y-6">
                     <h2 class="text-xl font-bold text-gray-800 border-b pb-2">Indikator Penilaian</h2>
 
-                    <div>
-                        <h3 class="text-lg font-semibold text-gray-700 mb-4">Soft Skills</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <!-- Willingness to Learn -->
-                            <div class="indicator-box">
-                                <div class="indicator-label">Willingness to Learn</div>
-                                <div class="indicator-desc">Kemauan dan antusiasme untuk belajar hal baru</div>
-                                <div class="flex items-center justify-between">
-                                    <input type="number" name="willingness_learn" min="1" max="10" step="1" value="1"
-                                        class="rating-input" required oninput="validateInput(this)">
-                                    <div class="text-sm text-gray-500">Skala 1-10</div>
-                                </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Willingness to Learn -->
+                        <div class="indicator-box">
+                            <div class="indicator-label">Willingness to Learn</div>
+                            <div class="indicator-desc">Kemauan dan antusiasme untuk belajar hal baru</div>
+                            <div class="flex items-center justify-between">
+                                <input type="number" name="willingness_learn" min="1" max="10" step="1" value="0"
+                                    class="rating-input" required oninput="validateInput(this)">
+                                <div class="text-sm text-gray-500">Skala 1-10</div>
                             </div>
-
-                            <!-- Problem Solving -->
-                            <div class="indicator-box">
-                                <div class="indicator-label">Problem Solving</div>
-                                <div class="indicator-desc">Kemampuan menganalisis dan memecahkan masalah</div>
-                                <div class="flex items-center justify-between">
-                                    <input type="number" name="problem_solving" min="1" max="10" step="1" value="1"
-                                        class="rating-input" required oninput="validateInput(this)">
-                                    <div class="text-sm text-gray-500">Skala 1-10</div>
-                                </div>
-                            </div>
-
-                            <!-- Critical Thinking -->
-                            <div class="indicator-box">
-                                <div class="indicator-label">Critical Thinking</div>
-                                <div class="indicator-desc">Berpikir kritis, logis, dan analitis</div>
-                                <div class="flex items-center justify-between">
-                                    <input type="number" name="critical_thinking" min="1" max="10" step="1" value="1"
-                                        class="rating-input" required oninput="validateInput(this)">
-                                    <div class="text-sm text-gray-500">Skala 1-10</div>
-                                </div>
-                            </div>
-
-                            <!-- Concentration -->
-                            <div class="indicator-box">
-                                <div class="indicator-label">Concentration</div>
-                                <div class="indicator-desc">Fokus dan konsentrasi selama pembelajaran</div>
-                                <div class="flex items-center justify-between">
-                                    <input type="number" name="concentration" min="1" max="10" step="1" value="1"
-                                        class="rating-input" required oninput="validateInput(this)">
-                                    <div class="text-sm text-gray-500">Skala 1-10</div>
-                                </div>
-                            </div>
-                            
                         </div>
-                        <!-- Independence -->
-                            <div class="indicator-box">
-                                <div class="indicator-label">Independence</div>
-                                <div class="indicator-desc">Kemandirian dalam belajar dan menyelesaikan tugas</div>
-                                <div class="flex items-center justify-between">
-                                    <input type="number" name="independence" min="1" max="10" step="1" value="1"
-                                        class="rating-input" required oninput="validateInput(this)">
-                                    <div class="text-sm text-gray-500">Skala 1-10</div>
-                                </div>
+
+                        <!-- Problem Solving -->
+                        <div class="indicator-box">
+                            <div class="indicator-label">Problem Solving</div>
+                            <div class="indicator-desc">Kemampuan menganalisis dan memecahkan masalah</div>
+                            <div class="flex items-center justify-between">
+                                <input type="number" name="problem_solving" min="1" max="10" step="1" value="0"
+                                    class="rating-input" required oninput="validateInput(this)">
+                                <div class="text-sm text-gray-500">Skala 1-10</div>
                             </div>
+                        </div>
+
+                        <!-- Critical Thinking -->
+                        <div class="indicator-box">
+                            <div class="indicator-label">Critical Thinking</div>
+                            <div class="indicator-desc">Berpikir kritis, logis, dan analitis</div>
+                            <div class="flex items-center justify-between">
+                                <input type="number" name="critical_thinking" min="1" max="10" step="1" value="0"
+                                    class="rating-input" required oninput="validateInput(this)">
+                                <div class="text-sm text-gray-500">Skala 1-10</div>
+                            </div>
+                        </div>
+
+                        <!-- Concentration -->
+                        <div class="indicator-box">
+                            <div class="indicator-label">Concentration</div>
+                            <div class="indicator-desc">Fokus dan konsentrasi selama pembelajaran</div>
+                            <div class="flex items-center justify-between">
+                                <input type="number" name="concentration" min="1" max="10" step="1" value="0"
+                                    class="rating-input" required oninput="validateInput(this)">
+                                <div class="text-sm text-gray-500">Skala 1-10</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Independence -->
+                        <div class="indicator-box md:col-span-2">
+                            <div class="indicator-label">Independence</div>
+                            <div class="indicator-desc">Kemandirian dalam belajar dan menyelesaikan tugas</div>
+                            <div class="flex items-center justify-between">
+                                <input type="number" name="independence" min="1" max="10" step="1" value="0"
+                                    class="rating-input" required oninput="validateInput(this)">
+                                <div class="text-sm text-gray-500">Skala 1-10</div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Catatan dan Rekomendasi -->
@@ -979,7 +1025,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                             <i class="fas fa-redo mr-2"></i> Reset Form
                         </button>
                         
-                        <!-- Tombol submit utama -->
                         <button type="submit" name="simpan_penilaian" id="submitButton"
                             class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-300 flex items-center justify-center">
                             <i class="fas fa-save mr-2"></i> Simpan Penilaian
@@ -994,7 +1039,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                     <i class="fas fa-info-circle mr-2"></i> Informasi Sistem
                 </h3>
                 <ul class="text-sm text-blue-700 space-y-1">
-                    <li>• Sistem mengambil data siswa dari <strong>mata pelajaran</strong> yang Anda ajar</li>
+                    <li>• Sistem mengambil data siswa dari <strong>mata pelajaran</strong> yang Anda ajar (tabel siswa_pelajaran)</li>
                     <li>• Total maksimal skor: <strong>50</strong> (5 indikator × 10)</li>
                     <li>• Kategori: &lt;40% (Kurang), 40-59% (Cukup), 60-79% (Baik), ≥80% (Sangat Baik)</li>
                     <li>• Data penilaian dapat dilihat di menu "Riwayat"</li>
@@ -1029,28 +1074,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
         // ==================== VARIABEL GLOBAL ====================
         let searchTimeout;
         let searchCache = {};
+        let selectedIndex = -1;
 
-        // ==================== FUNGSI AUTOSEARCH ====================
-        // Inisialisasi autocomplete saat DOM ready
+        // ==================== FUNGSI AUTOCOMPLETE ====================
         $(document).ready(function () {
             initAutocomplete();
-            
-            // Jika ada siswa_id di URL, load data siswa
-            const urlParams = new URLSearchParams(window.location.search);
-            const siswaId = urlParams.get('siswa_id');
-            if (siswaId) {
-                // Cari data siswa dari options
-                const siswaOptions = <?php echo json_encode($siswa_options); ?>;
-                const siswa = siswaOptions.find(s => s.id == siswaId);
-                if (siswa) {
-                    setTimeout(() => {
-                        selectSiswa({
-                            id: siswa.id,
-                            nama: siswa.nama_lengkap
-                        });
-                    }, 500);
-                }
-            }
             
             // Update preview saat halaman dimuat
             updatePreview();
@@ -1061,16 +1089,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             const clearButton = document.getElementById('clearSearch');
             const dropdown = document.getElementById('siswaDropdown');
 
-            let selectedIndex = -1;
+            if (!searchInput || !clearButton || !dropdown) return;
 
-            // Tampilkan dropdown saat fokus
             searchInput.addEventListener('focus', function () {
                 if (this.value.length > 0) {
                     filterSiswa(this.value);
                 }
             });
 
-            // Filter siswa saat mengetik dengan debounce
             searchInput.addEventListener('input', function (e) {
                 clearTimeout(searchTimeout);
                 const query = this.value;
@@ -1088,7 +1114,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                 clearButton.style.display = query.length > 0 ? 'block' : 'none';
             });
 
-            // Clear search
             clearButton.addEventListener('click', function () {
                 searchInput.value = '';
                 searchInput.focus();
@@ -1097,7 +1122,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                 clearSelectedSiswa();
             });
 
-            // Navigasi dengan keyboard
             searchInput.addEventListener('keydown', function (e) {
                 const items = dropdown.querySelectorAll('.autocomplete-item');
 
@@ -1105,13 +1129,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                     case 'ArrowDown':
                         e.preventDefault();
                         selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
-                        updateSelectedItem();
+                        updateSelectedItem(items);
                         break;
 
                     case 'ArrowUp':
                         e.preventDefault();
                         selectedIndex = Math.max(selectedIndex - 1, -1);
-                        updateSelectedItem();
+                        updateSelectedItem(items);
                         break;
 
                     case 'Enter':
@@ -1128,7 +1152,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                 }
             });
 
-            // Close dropdown saat klik di luar
             document.addEventListener('click', function (e) {
                 if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
                     dropdown.style.display = 'none';
@@ -1136,11 +1159,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             });
         }
 
-        // Fungsi filter siswa dengan AJAX
         function filterSiswa(query) {
             const dropdown = document.getElementById('siswaDropdown');
             
-            // Tampilkan loading
             dropdown.innerHTML = '<div class="no-results"><span class="spinner"></span> Mencari...</div>';
             dropdown.style.display = 'block';
 
@@ -1161,7 +1182,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             });
         }
 
-        // Render dropdown - hanya nama
         function renderDropdown(data) {
             const dropdown = document.getElementById('siswaDropdown');
             dropdown.innerHTML = '';
@@ -1177,9 +1197,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                 item.className = 'autocomplete-item';
                 item.dataset.id = siswa.id;
                 item.dataset.nama = siswa.nama_lengkap;
+                item.dataset.kelas = siswa.kelas;
+                item.dataset.sekolah = siswa.sekolah_asal || '-';
 
                 item.innerHTML = `
                     <div class="siswa-nama">${siswa.nama_lengkap}</div>
+                    <div class="siswa-info">
+                        Kelas: ${siswa.kelas} | Sekolah: ${siswa.sekolah_asal || '-'}
+                    </div>
                 `;
 
                 item.addEventListener('click', function () {
@@ -1189,7 +1214,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                 item.addEventListener('mouseenter', function () {
                     const items = dropdown.querySelectorAll('.autocomplete-item');
                     selectedIndex = Array.from(items).indexOf(this);
-                    updateSelectedItem();
+                    updateSelectedItem(items);
                 });
 
                 dropdown.appendChild(item);
@@ -1199,15 +1224,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             selectedIndex = -1;
         }
 
-        // Update selected item style
-        function updateSelectedItem() {
-            const dropdown = document.getElementById('siswaDropdown');
-            const items = dropdown.querySelectorAll('.autocomplete-item');
-
+        function updateSelectedItem(items) {
             items.forEach((item, index) => {
                 if (index === selectedIndex) {
                     item.classList.add('active');
-                    // Scroll ke item yang dipilih
                     item.scrollIntoView({ block: 'nearest' });
                 } else {
                     item.classList.remove('active');
@@ -1215,72 +1235,68 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             });
         }
 
-        // Fungsi untuk load mata pelajaran berdasarkan siswa_id
-        function loadMataPelajaran(siswaId) {
-            const pelajaranSelect = document.getElementById('selectPelajaran');
-            const loadingElement = document.getElementById('loadingPelajaran');
-            
-            // Tampilkan loading
-            pelajaranSelect.innerHTML = '<option value="">Memuat mata pelajaran...</option>';
-            pelajaranSelect.disabled = true;
-            loadingElement.classList.remove('hidden');
-            
-            $.ajax({
-                url: '<?php echo $_SERVER['PHP_SELF']; ?>',
-                type: 'GET',
-                data: {
-                    ajax: 'get_pelajaran_by_siswa',
-                    siswa_id: siswaId
-                },
-                dataType: 'json',
-                success: function (data) {
-                    pelajaranSelect.innerHTML = '<option value="">Pilih Mata Pelajaran</option>';
-                    
-                    if (data.length === 0) {
-                        pelajaranSelect.innerHTML = '<option value="">Tidak ada mata pelajaran untuk siswa ini</option>';
-                    } else {
-                        data.forEach(function(pelajaran) {
-                            const option = document.createElement('option');
-                            option.value = pelajaran.siswa_pelajaran_id;
-                            option.textContent = pelajaran.nama_pelajaran + 
-                                                ' - ' + pelajaran.tingkat + 
-                                                ' (' + pelajaran.jenis_kelas + ')';
-                            pelajaranSelect.appendChild(option);
-                        });
-                    }
-                    
-                    pelajaranSelect.disabled = false;
-                    loadingElement.classList.add('hidden');
-                },
-                error: function () {
-                    pelajaranSelect.innerHTML = '<option value="">Gagal memuat mata pelajaran</option>';
-                    pelajaranSelect.disabled = false;
-                    loadingElement.classList.add('hidden');
-                }
-            });
-        }
-
-        // Fungsi pilih siswa
         function selectSiswa(data) {
             const selectedSiswaId = document.getElementById('selectedSiswaId');
             const searchInput = document.getElementById('searchSiswa');
             const dropdown = document.getElementById('siswaDropdown');
             const pelajaranSelect = document.getElementById('selectPelajaran');
+            const selectedInfo = document.getElementById('selectedSiswaInfo');
 
             selectedSiswaId.value = data.id;
             searchInput.value = data.nama;
             dropdown.style.display = 'none';
 
-            // Tampilkan info siswa yang dipilih
+            // Tampilkan info siswa
             document.getElementById('selectedSiswaName').textContent = data.nama;
-            document.getElementById('selectedSiswaInfo').classList.remove('hidden');
+            document.getElementById('selectedSiswaDetail').textContent = 
+                `Kelas: ${data.kelas} | Sekolah: ${data.sekolah}`;
+            selectedInfo.classList.remove('hidden');
             document.getElementById('clearSearch').style.display = 'none';
 
+            // Reset dan load mata pelajaran
+            pelajaranSelect.innerHTML = '<option value="">Memuat mata pelajaran...</option>';
+            pelajaranSelect.disabled = true;
+            document.getElementById('loadingPelajaran').classList.remove('hidden');
+
             // Load mata pelajaran via AJAX
-            loadMataPelajaran(data.id);
+            $.ajax({
+                url: '<?php echo $_SERVER['PHP_SELF']; ?>',
+                type: 'GET',
+                data: {
+                    ajax: 'get_pelajaran_by_siswa',
+                    siswa_id: data.id
+                },
+                dataType: 'json',
+                success: function (pelajaranData) {
+                    pelajaranSelect.innerHTML = '<option value="">-- Pilih Mata Pelajaran --</option>';
+                    
+                    if (pelajaranData.length === 0) {
+                        pelajaranSelect.innerHTML = '<option value="">Tidak ada mata pelajaran yang Anda ajar untuk siswa ini</option>';
+                    } else {
+                        pelajaranData.forEach(function(mapel) {
+                            const option = document.createElement('option');
+                            option.value = mapel.siswa_pelajaran_id;
+                            option.textContent = mapel.nama_pelajaran + 
+                                                ' - ' + mapel.tingkat + 
+                                                ' (' + mapel.jenis_kelas + ')';
+                            pelajaranSelect.appendChild(option);
+                        });
+                    }
+                    
+                    pelajaranSelect.disabled = false;
+                    document.getElementById('loadingPelajaran').classList.add('hidden');
+                },
+                error: function () {
+                    pelajaranSelect.innerHTML = '<option value="">Gagal memuat mata pelajaran</option>';
+                    pelajaranSelect.disabled = false;
+                    document.getElementById('loadingPelajaran').classList.add('hidden');
+                }
+            });
+            
+            // Redirect ke URL dengan parameter siswa_id
+            window.location.href = '<?php echo $_SERVER['PHP_SELF']; ?>?siswa_id=' + data.id;
         }
 
-        // Fungsi clear selected siswa
         function clearSelectedSiswa() {
             document.getElementById('searchSiswa').value = '';
             document.getElementById('selectedSiswaId').value = '';
@@ -1289,8 +1305,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             
             // Reset mata pelajaran
             const pelajaranSelect = document.getElementById('selectPelajaran');
-            pelajaranSelect.innerHTML = '<option value="">-- Pilih siswa terlebih dahulu --</option>';
+            pelajaranSelect.innerHTML = '<option value="">-- Pilih Mata Pelajaran --</option>';
             pelajaranSelect.disabled = false;
+            
+            // Redirect ke halaman tanpa parameter
+            window.location.href = '<?php echo $_SERVER['PHP_SELF']; ?>';
         }
 
         // ==================== FUNGSI PENILAIAN ====================
@@ -1396,6 +1415,26 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             }
         });
 
+        // Validasi form sebelum submit
+        document.getElementById('penilaianForm').addEventListener('submit', function(e) {
+            const siswaId = document.getElementById('selectedSiswaId').value;
+            const pelajaranId = document.getElementById('selectPelajaran').value;
+
+            if (!siswaId) {
+                e.preventDefault();
+                alert('Harap pilih siswa terlebih dahulu!');
+                document.getElementById('searchSiswa').focus();
+                return;
+            }
+
+            if (!pelajaranId) {
+                e.preventDefault();
+                alert('Harap pilih mata pelajaran terlebih dahulu!');
+                document.getElementById('selectPelajaran').focus();
+                return;
+            }
+        });
+
         // ==================== MOBILE MENU ====================
         const menuToggle = document.getElementById('menuToggle');
         const menuClose = document.getElementById('menuClose');
@@ -1436,27 +1475,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             }
         }
 
-        // Validasi form sebelum submit
-        document.getElementById('penilaianForm').addEventListener('submit', function(e) {
-            const siswaId = document.getElementById('selectedSiswaId').value;
-            const pelajaranId = document.getElementById('selectPelajaran').value;
-
-            if (!siswaId) {
-                e.preventDefault();
-                alert('Harap pilih siswa terlebih dahulu!');
-                document.getElementById('searchSiswa').focus();
-                return;
-            }
-
-            if (!pelajaranId) {
-                e.preventDefault();
-                alert('Harap pilih mata pelajaran terlebih dahulu!');
-                document.getElementById('selectPelajaran').focus();
-                return;
-            }
-        });
-
-        // Inisialisasi waktu server
         setInterval(updateServerTime, 1000);
 
         // Dropdown functionality
@@ -1469,13 +1487,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                 const submenu = dropdownGroup.querySelector('.dropdown-submenu');
                 const arrow = this.querySelector('.arrow');
                 
-                // Toggle current dropdown
                 if (submenu.style.display === 'block') {
                     submenu.style.display = 'none';
                     arrow.style.transform = 'rotate(0deg)';
                     this.classList.remove('open');
                 } else {
-                    // Close other dropdowns
                     document.querySelectorAll('.dropdown-submenu').forEach(sm => {
                         sm.style.display = 'none';
                     });
@@ -1484,7 +1500,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                         t.querySelector('.arrow').style.transform = 'rotate(0deg)';
                     });
                     
-                    // Open this dropdown
                     submenu.style.display = 'block';
                     arrow.style.transform = 'rotate(-90deg)';
                     this.classList.add('open');
@@ -1492,7 +1507,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             });
         });
 
-        // Close dropdowns when clicking outside
         document.addEventListener('click', function(e) {
             if (!e.target.closest('.mb-1')) {
                 document.querySelectorAll('.dropdown-submenu').forEach(submenu => {

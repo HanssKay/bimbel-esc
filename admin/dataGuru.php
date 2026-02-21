@@ -4,8 +4,8 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
 require_once '../includes/config.php';
-require_once '../config/menu.php'; 
-require_once '../includes/menu_functions.php'; 
+require_once '../config/menu.php';
+require_once '../includes/menu_functions.php';
 
 // CEK LOGIN & ROLE
 if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] != 'admin') {
@@ -58,43 +58,92 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['id']))
         header('Location: dataGuru.php');
         exit();
     }
-    
+
     $stmt->bind_param("i", $guru_id);
     $stmt->execute();
     $result = $stmt->get_result();
 
     if ($row = $result->fetch_assoc()) {
-        // Ambil data siswa yang diajar (melalui siswa_pelajaran)
-        $siswa_sql = "SELECT DISTINCT s.id, s.nama_lengkap, s.kelas, sp.nama_pelajaran, ps.tingkat
-                      FROM siswa_pelajaran sp
-                      JOIN siswa s ON sp.siswa_id = s.id
-                      JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                      WHERE sp.guru_id = ? AND sp.status = 'aktif' AND ps.status = 'aktif'
-                      ORDER BY s.nama_lengkap";
+        // AMBIL DATA JADWAL MENGAJAR GURU (LENGKAP DENGAN INFORMASI SISWA)
+        $jadwal_sql = "SELECT 
+                        smg.id as sesi_id,
+                        smg.hari,
+                        DATE_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai,
+                        DATE_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai,
+                        smg.status as status_sesi,
+                        jb.id as jadwal_belajar_id,
+                        jb.pendaftaran_id,
+                        ps.siswa_id,
+                        s.nama_lengkap as nama_siswa,
+                        s.kelas as kelas_siswa,
+                        ps.tingkat as tingkat_bimbel,
+                        jb.created_at as jadwal_dibuat
+                      FROM sesi_mengajar_guru smg
+                      LEFT JOIN jadwal_belajar jb ON smg.id = jb.sesi_guru_id AND jb.status = 'aktif'
+                      LEFT JOIN pendaftaran_siswa ps ON jb.pendaftaran_id = ps.id AND ps.status = 'aktif'
+                      LEFT JOIN siswa s ON ps.siswa_id = s.id AND s.status = 'aktif'
+                      WHERE smg.guru_id = ? 
+                        AND smg.status != 'tidak_aktif'
+                      ORDER BY 
+                        FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
+                        smg.jam_mulai";
 
-        $siswa_stmt = $conn->prepare($siswa_sql);
-        if ($siswa_stmt) {
-            $siswa_stmt->bind_param("i", $guru_id);
-            $siswa_stmt->execute();
-            $siswa_result = $siswa_stmt->get_result();
+        $jadwal_stmt = $conn->prepare($jadwal_sql);
+        if ($jadwal_stmt) {
+            $jadwal_stmt->bind_param("i", $guru_id);
+            $jadwal_stmt->execute();
+            $jadwal_result = $jadwal_stmt->get_result();
 
-            $siswa_mengajar = [];
-            while ($siswa_row = $siswa_result->fetch_assoc()) {
-                $siswa_mengajar[] = $siswa_row;
+            $jadwal_mengajar = [];
+            $daftar_siswa_per_sesi = [];
+
+            while ($jadwal_row = $jadwal_result->fetch_assoc()) {
+                $sesi_key = $jadwal_row['sesi_id'];
+
+                // Inisialisasi data sesi jika belum ada
+                if (!isset($jadwal_mengajar[$sesi_key])) {
+                    $jadwal_mengajar[$sesi_key] = [
+                        'sesi_id' => $jadwal_row['sesi_id'],
+                        'hari' => $jadwal_row['hari'],
+                        'jam_mulai' => $jadwal_row['jam_mulai'],
+                        'jam_selesai' => $jadwal_row['jam_selesai'],
+                        'status_sesi' => $jadwal_row['status_sesi'],
+                        'daftar_siswa' => []
+                    ];
+                }
+
+                // Tambahkan siswa ke daftar jika ada
+                if ($jadwal_row['siswa_id']) {
+                    $jadwal_mengajar[$sesi_key]['daftar_siswa'][] = [
+                        'siswa_id' => $jadwal_row['siswa_id'],
+                        'nama_siswa' => $jadwal_row['nama_siswa'],
+                        'kelas_siswa' => $jadwal_row['kelas_siswa'],
+                        'tingkat_bimbel' => $jadwal_row['tingkat_bimbel'],
+                        'jadwal_belajar_id' => $jadwal_row['jadwal_belajar_id']
+                    ];
+                }
             }
-            $siswa_stmt->close();
+
+            // Ubah dari array asosiatif ke indexed array
+            $jadwal_mengajar = array_values($jadwal_mengajar);
+
+            $jadwal_stmt->close();
         } else {
-            error_log("Error preparing siswa query: " . $conn->error);
-            $siswa_mengajar = [];
+            error_log("Error preparing jadwal query: " . $conn->error);
+            $jadwal_mengajar = [];
         }
 
-        // Ambil data penilaian yang diberikan
-        $penilaian_sql = "SELECT ps.*, s.nama_lengkap as nama_siswa, sp.nama_pelajaran
-                         FROM penilaian_siswa ps
-                         JOIN siswa s ON ps.siswa_id = s.id
-                         LEFT JOIN siswa_pelajaran sp ON ps.siswa_pelajaran_id = sp.id
-                         WHERE ps.guru_id = ?
-                         ORDER BY ps.tanggal_penilaian DESC LIMIT 5";
+        // AMBIL DATA SISWA YANG PERNAH DINILAI
+        $penilaian_sql = "SELECT ps.*, 
+                                 s.nama_lengkap as nama_siswa,
+                                 s.kelas as kelas_siswa,
+                                 psr.tingkat as tingkat_bimbel
+                          FROM penilaian_siswa ps
+                          INNER JOIN siswa s ON ps.siswa_id = s.id
+                          INNER JOIN pendaftaran_siswa psr ON ps.pendaftaran_id = psr.id
+                          WHERE ps.guru_id = ?
+                          ORDER BY ps.tanggal_penilaian DESC 
+                          LIMIT 10";
 
         $penilaian_stmt = $conn->prepare($penilaian_sql);
         if ($penilaian_stmt) {
@@ -112,43 +161,27 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['id']))
             $penilaian_diberikan = [];
         }
 
-        // Ambil data jadwal mengajar - PERBAIKAN BESAR DI SINI
-        $jadwal_sql = "SELECT 
-                        jb.id as jadwal_id,
-                        smg.hari,
-                        smg.jam_mulai,
-                        smg.jam_selesai,
-                        s.nama_lengkap,
-                        sp.nama_pelajaran,
-                        ps.tingkat,
-                        DATE_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai_format,
-                        DATE_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai_format
-                      FROM jadwal_belajar jb
-                      JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
-                      JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                      JOIN siswa s ON sp.siswa_id = s.id
-                      JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
-                      WHERE sp.guru_id = ? 
-                        AND jb.status = 'aktif'
-                        AND smg.guru_id = ?
-                      ORDER BY 
-                        FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
-                        smg.jam_mulai";
+        // FLATTEN SISWA UNTUK DITAMPILKAN DI TABEL SISWA
+        $siswa_mengajar = [];
+        $siswa_unique = [];
 
-        $jadwal_stmt = $conn->prepare($jadwal_sql);
-        if ($jadwal_stmt) {
-            $jadwal_stmt->bind_param("ii", $guru_id, $guru_id);
-            $jadwal_stmt->execute();
-            $jadwal_result = $jadwal_stmt->get_result();
-
-            $jadwal_mengajar = [];
-            while ($jadwal_row = $jadwal_result->fetch_assoc()) {
-                $jadwal_mengajar[] = $jadwal_row;
+        foreach ($jadwal_mengajar as $sesi) {
+            foreach ($sesi['daftar_siswa'] as $siswa) {
+                $unique_key = $siswa['siswa_id'] . '_' . $sesi['sesi_id'];
+                if (!isset($siswa_unique[$unique_key])) {
+                    $siswa_unique[$unique_key] = true;
+                    $siswa_mengajar[] = [
+                        'id' => $siswa['siswa_id'],
+                        'nama_lengkap' => $siswa['nama_siswa'],
+                        'kelas' => $siswa['kelas_siswa'],
+                        'tingkat' => $siswa['tingkat_bimbel'],
+                        'hari' => $sesi['hari'],
+                        'jam_mulai' => $sesi['jam_mulai'],
+                        'jam_selesai' => $sesi['jam_selesai'],
+                        'sesi_id' => $sesi['sesi_id']
+                    ];
+                }
             }
-            $jadwal_stmt->close();
-        } else {
-            error_log("Error preparing jadwal query: " . $conn->error);
-            $jadwal_mengajar = [];
         }
 
         $row['siswa_mengajar'] = $siswa_mengajar;
@@ -158,6 +191,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['id']))
     }
     $stmt->close();
 }
+
 
 // EDIT GURU - LOAD DATA
 if (isset($_GET['action']) && $_GET['action'] == 'edit' && isset($_GET['id'])) {
@@ -388,12 +422,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tambah_guru'])) {
 
     // Validasi
     $errors = [];
-    if (empty($username)) $errors[] = "Username harus diisi!";
-    if (empty($email)) $errors[] = "Email harus diisi!";
-    if (empty($full_name_input)) $errors[] = "Nama lengkap harus diisi!";
-    if (empty($password)) $errors[] = "Password harus diisi!";
-    if (strlen($password) < 6) $errors[] = "Password minimal 6 karakter!";
-    if (empty($bidang_keahlian)) $errors[] = "Bidang keahlian harus diisi!";
+    if (empty($username))
+        $errors[] = "Username harus diisi!";
+    if (empty($email))
+        $errors[] = "Email harus diisi!";
+    if (empty($full_name_input))
+        $errors[] = "Nama lengkap harus diisi!";
+    if (empty($password))
+        $errors[] = "Password harus diisi!";
+    if (strlen($password) < 6)
+        $errors[] = "Password minimal 6 karakter!";
+    if (empty($bidang_keahlian))
+        $errors[] = "Bidang keahlian harus diisi!";
 
     if (!empty($errors)) {
         $_SESSION['error_message'] = "❌ " . implode(" ", $errors);
@@ -485,14 +525,35 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['tambah_guru'])) {
     }
 }
 
-// AMBIL DATA GURU DENGAN FILTER
-$sql = "SELECT g.*, u.username, u.email, u.full_name, u.phone, u.is_active,
-               (SELECT COUNT(DISTINCT sp.siswa_id) 
-                FROM siswa_pelajaran sp 
-                WHERE sp.guru_id = g.id AND sp.status = 'aktif') as jumlah_siswa,
-               (SELECT COUNT(*) 
+// AMBIL DATA GURU DENGAN FILTER - VERSI BARU (tanpa siswa_pelajaran)
+$sql = "SELECT 
+            g.*, 
+            u.username, 
+            u.email, 
+            u.full_name, 
+            u.phone, 
+            u.is_active,
+            -- Hitung jumlah siswa unik dari jadwal_belajar
+            (
+                SELECT COUNT(DISTINCT ps.siswa_id)
+                FROM sesi_mengajar_guru smg
+                INNER JOIN jadwal_belajar jb ON smg.id = jb.sesi_guru_id AND jb.status = 'aktif'
+                INNER JOIN pendaftaran_siswa ps ON jb.pendaftaran_id = ps.id AND ps.status = 'aktif'
+                INNER JOIN siswa s ON ps.siswa_id = s.id AND s.status = 'aktif'
+                WHERE smg.guru_id = g.id AND smg.status != 'tidak_aktif'
+            ) as jumlah_siswa,
+            -- Hitung jumlah penilaian
+            (
+                SELECT COUNT(*) 
                 FROM penilaian_siswa ps 
-                WHERE ps.guru_id = g.id) as jumlah_penilaian
+                WHERE ps.guru_id = g.id
+            ) as jumlah_penilaian,
+            -- Hitung total jadwal aktif
+            (
+                SELECT COUNT(*)
+                FROM sesi_mengajar_guru smg
+                WHERE smg.guru_id = g.id AND smg.status != 'tidak_aktif'
+            ) as total_jadwal
         FROM guru g
         JOIN users u ON g.user_id = u.id
         WHERE 1=1";
@@ -552,8 +613,7 @@ $stmt->close();
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-    
-    /* Dropdown styles */
+        /* Dropdown styles */
         .dropdown-submenu {
             display: none;
             max-height: 500px;
@@ -568,6 +628,7 @@ $stmt->close();
         .dropdown-toggle.open .arrow {
             transform: rotate(90deg);
         }
+
         /* Modal Styles */
         .modal {
             display: none;
@@ -580,6 +641,7 @@ $stmt->close();
             background-color: rgba(0, 0, 0, 0.5);
             overflow-y: auto;
         }
+
         .modal-content {
             background-color: #fff;
             margin: 2% auto;
@@ -590,39 +652,62 @@ $stmt->close();
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
             animation: modalFadeIn 0.3s;
         }
+
         @keyframes modalFadeIn {
-            from { opacity: 0; transform: translateY(-20px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
+
         @keyframes modalFadeOut {
-            from { opacity: 1; transform: translateY(0); }
-            to { opacity: 0; transform: translateY(-20px); }
+            from {
+                opacity: 1;
+                transform: translateY(0);
+            }
+
+            to {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
         }
+
         .modal-header {
             padding: 16px 24px;
             color: white;
             border-radius: 8px 8px 0 0;
         }
+
         .modal-header.blue {
             background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
         }
+
         .modal-header.yellow {
             background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
         }
+
         .modal-header.green {
             background: linear-gradient(135deg, #10b981 0%, #059669 100%);
         }
+
         .modal-body {
             padding: 24px;
             max-height: 70vh;
             overflow-y: auto;
         }
+
         .modal-footer {
             padding: 16px 24px;
             border-top: 1px solid #e5e7eb;
             background-color: #f9fafb;
             border-radius: 0 0 8px 8px;
         }
+
         .close {
             color: #fff;
             float: right;
@@ -632,12 +717,15 @@ $stmt->close();
             line-height: 1;
             transition: color 0.2s;
         }
+
         .close:hover {
             color: #f0f0f0;
         }
+
         .form-group {
             margin-bottom: 16px;
         }
+
         .form-label {
             display: block;
             margin-bottom: 6px;
@@ -645,6 +733,7 @@ $stmt->close();
             color: #374151;
             font-size: 14px;
         }
+
         .form-input {
             width: 100%;
             padding: 10px 12px;
@@ -653,17 +742,19 @@ $stmt->close();
             font-size: 14px;
             transition: border-color 0.2s;
         }
+
         .form-input:focus {
             outline: none;
             border-color: #3b82f6;
             box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
         }
+
         .grid-2 {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 16px;
         }
-        
+
         /* Status badge */
         .status-badge {
             display: inline-flex;
@@ -673,15 +764,17 @@ $stmt->close();
             font-size: 12px;
             font-weight: 500;
         }
+
         .status-active {
             background-color: #d1fae5;
             color: #065f46;
         }
+
         .status-inactive {
             background-color: #fee2e2;
             color: #991b1b;
         }
-        
+
         /* Active menu item */
         .menu-item.active {
             background-color: rgba(255, 255, 255, 0.1);
@@ -701,11 +794,11 @@ $stmt->close();
             box-shadow: 5px 0 25px rgba(0, 0, 0, 0.2);
             background-color: #1e40af;
         }
-        
+
         #mobileMenu.menu-open {
             transform: translateX(0);
         }
-        
+
         /* Overlay for mobile menu */
         .menu-overlay {
             display: none;
@@ -717,70 +810,70 @@ $stmt->close();
             background-color: rgba(0, 0, 0, 0.5);
             z-index: 1099;
         }
-        
+
         .menu-overlay.active {
             display: block;
         }
-        
+
         /* Responsive untuk sidebar */
         @media (min-width: 768px) {
             .desktop-sidebar {
                 display: block;
             }
-            
+
             .mobile-header {
                 display: none;
             }
-            
+
             #mobileMenu {
                 display: none;
             }
-            
+
             .menu-overlay {
                 display: none !important;
             }
         }
-        
+
         @media (max-width: 767px) {
             .desktop-sidebar {
                 display: none;
             }
-            
+
             .mobile-header {
                 display: block;
             }
-            
+
             .modal-content {
                 width: 95%;
                 margin: 5% auto;
             }
-            
+
             .modal-body {
                 padding: 16px;
                 max-height: 80vh;
             }
-            
+
             .grid-2 {
                 grid-template-columns: 1fr;
                 gap: 12px;
             }
-            
+
             /* Table responsive */
             .table-responsive {
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
             }
-            
+
             .table-responsive table {
                 min-width: 640px;
             }
         }
-        
+
         /* Filter Section Styles */
         .filter-section {
             transition: all 0.3s ease;
         }
-        
+
         .filter-hidden {
             display: none;
         }
@@ -878,11 +971,12 @@ $stmt->close();
                     <h1 class="text-2xl font-bold text-gray-800">
                         <i class="fas fa-chalkboard-teacher mr-2"></i> Data Guru
                     </h1>
-                    <p class="text-gray-600">Kelola data guru bimbingan belajar. Total: <?php echo count($guru_data); ?> guru</p>
+                    <p class="text-gray-600">Kelola data guru bimbingan belajar. Total: <?php echo count($guru_data); ?>
+                        guru</p>
                 </div>
                 <div class="mt-2 md:mt-0">
-                    <a href="?action=tambah" 
-                       class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700">
+                    <a href="?action=tambah"
+                        class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700">
                         <i class="fas fa-user-plus mr-2"></i> Tambah Guru Baru
                     </a>
                 </div>
@@ -917,7 +1011,7 @@ $stmt->close();
                     </div>
                 </div>
             <?php endif; ?>
-            
+
             <div class="container mx-auto">
                 <!-- Statistik -->
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
@@ -940,9 +1034,12 @@ $stmt->close();
                     $non_aktif = 0;
                     $punya_siswa = 0;
                     foreach ($guru_data as $guru) {
-                        if ($guru['status'] == 'aktif') $aktif++;
-                        else $non_aktif++;
-                        if ($guru['jumlah_siswa'] > 0) $punya_siswa++;
+                        if ($guru['status'] == 'aktif')
+                            $aktif++;
+                        else
+                            $non_aktif++;
+                        if ($guru['jumlah_siswa'] > 0)
+                            $punya_siswa++;
                     }
                     ?>
                     <div class="bg-white border border-gray-200 rounded-lg p-4">
@@ -988,7 +1085,8 @@ $stmt->close();
             </div>
 
             <!-- Filter Section - SELALU TAMPIL -->
-            <div id="filterSection" class="mb-6 bg-white shadow overflow-hidden sm:rounded-md filter-section <?php echo (isset($_GET['action']) && in_array($_GET['action'], ['detail', 'edit', 'tambah'])) ? 'filter-hidden' : ''; ?>">
+            <div id="filterSection"
+                class="mb-6 bg-white shadow overflow-hidden sm:rounded-md filter-section <?php echo (isset($_GET['action']) && in_array($_GET['action'], ['detail', 'edit', 'tambah'])) ? 'filter-hidden' : ''; ?>">
                 <div class="px-4 py-5 sm:p-6">
                     <form method="GET" action="dataGuru.php" class="space-y-4">
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -999,43 +1097,46 @@ $stmt->close();
                                     <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                         <i class="fas fa-search text-gray-400"></i>
                                     </div>
-                                    <input type="text" name="search" id="search" 
-                                           class="focus:ring-blue-500 focus:border-blue-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md" 
-                                           placeholder="Nama, email, atau bidang..."
-                                           value="<?php echo htmlspecialchars($search); ?>">
+                                    <input type="text" name="search" id="search"
+                                        class="focus:ring-blue-500 focus:border-blue-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md"
+                                        placeholder="Nama, email, atau bidang..."
+                                        value="<?php echo htmlspecialchars($search); ?>">
                                 </div>
                             </div>
 
                             <!-- Filter Bidang Keahlian -->
                             <div>
-                                <label for="filter_bidang" class="block text-sm font-medium text-gray-700">Bidang Keahlian</label>
-                                <input type="text" name="filter_bidang" id="filter_bidang" 
-                                       class="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md" 
-                                       placeholder="Contoh: Matematika"
-                                       value="<?php echo htmlspecialchars($filter_bidang); ?>">
+                                <label for="filter_bidang" class="block text-sm font-medium text-gray-700">Bidang
+                                    Keahlian</label>
+                                <input type="text" name="filter_bidang" id="filter_bidang"
+                                    class="mt-1 focus:ring-blue-500 focus:border-blue-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md"
+                                    placeholder="Contoh: Matematika"
+                                    value="<?php echo htmlspecialchars($filter_bidang); ?>">
                             </div>
 
                             <!-- Filter Status -->
                             <div>
-                                <label for="filter_status" class="block text-sm font-medium text-gray-700">Status</label>
-                                <select id="filter_status" name="filter_status" 
-                                        class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                                <label for="filter_status"
+                                    class="block text-sm font-medium text-gray-700">Status</label>
+                                <select id="filter_status" name="filter_status"
+                                    class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
                                     <option value="">Semua Status</option>
-                                    <option value="aktif" <?php echo $filter_status == 'aktif' ? 'selected' : ''; ?>>Aktif</option>
+                                    <option value="aktif" <?php echo $filter_status == 'aktif' ? 'selected' : ''; ?>>Aktif
+                                    </option>
                                     <option value="non-aktif" <?php echo $filter_status == 'non-aktif' ? 'selected' : ''; ?>>Non-Aktif</option>
                                 </select>
                             </div>
                         </div>
 
                         <div class="flex justify-between">
-                            <button type="submit" 
-                                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                            <button type="submit"
+                                class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
                                 <i class="fas fa-filter mr-2"></i> Filter Data
                             </button>
-                            
+
                             <?php if (!empty($search) || !empty($filter_bidang) || !empty($filter_status)): ?>
-                                <a href="dataGuru.php" 
-                                   class="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                                <a href="dataGuru.php"
+                                    class="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
                                     <i class="fas fa-times mr-2"></i> Reset Filter
                                 </a>
                             <?php endif; ?>
@@ -1051,22 +1152,28 @@ $stmt->close();
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th scope="col"
+                                        class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         No
                                     </th>
-                                    <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th scope="col"
+                                        class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Nama Guru
                                     </th>
-                                    <th scope="col" class="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th scope="col"
+                                        class="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Bidang Keahlian
                                     </th>
-                                    <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th scope="col"
+                                        class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Status
                                     </th>
-                                    <th scope="col" class="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th scope="col"
+                                        class="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Data
                                     </th>
-                                    <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th scope="col"
+                                        class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Aksi
                                     </th>
                                 </tr>
@@ -1080,7 +1187,8 @@ $stmt->close();
                                         <td class="px-4 py-3 whitespace-nowrap">
                                             <div class="flex items-center">
                                                 <div class="flex-shrink-0 h-8 w-8">
-                                                    <div class="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
+                                                    <div
+                                                        class="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
                                                         <i class="fas fa-chalkboard-teacher text-blue-600 text-sm"></i>
                                                     </div>
                                                 </div>
@@ -1100,7 +1208,8 @@ $stmt->close();
                                             </div>
                                         </td>
                                         <td class="px-4 py-3 whitespace-nowrap">
-                                            <span class="status-badge <?php echo $guru['status'] == 'aktif' ? 'status-active' : 'status-inactive'; ?>">
+                                            <span
+                                                class="status-badge <?php echo $guru['status'] == 'aktif' ? 'status-active' : 'status-inactive'; ?>">
                                                 <?php echo ucfirst($guru['status']); ?>
                                             </span>
                                         </td>
@@ -1114,20 +1223,17 @@ $stmt->close();
                                         </td>
                                         <td class="px-4 py-3 whitespace-nowrap text-sm font-medium">
                                             <div class="flex space-x-2">
-                                                <a href="?action=detail&id=<?php echo $guru['id']; ?>" 
-                                                   class="text-blue-600 hover:text-blue-900 p-1" 
-                                                   title="Detail">
+                                                <a href="?action=detail&id=<?php echo $guru['id']; ?>"
+                                                    class="text-blue-600 hover:text-blue-900 p-1" title="Detail">
                                                     <i class="fas fa-eye"></i>
                                                 </a>
-                                                <a href="?action=edit&id=<?php echo $guru['id']; ?>" 
-                                                   class="text-yellow-600 hover:text-yellow-900 p-1" 
-                                                   title="Edit">
+                                                <a href="?action=edit&id=<?php echo $guru['id']; ?>"
+                                                    class="text-yellow-600 hover:text-yellow-900 p-1" title="Edit">
                                                     <i class="fas fa-edit"></i>
                                                 </a>
-                                                <a href="#" 
-                                                   onclick="confirmDelete(<?php echo $guru['id']; ?>, '<?php echo htmlspecialchars(addslashes($guru['full_name'])); ?>')"
-                                                   class="text-red-600 hover:text-red-900 p-1" 
-                                                   title="Hapus">
+                                                <a href="#"
+                                                    onclick="confirmDelete(<?php echo $guru['id']; ?>, '<?php echo htmlspecialchars(addslashes($guru['full_name'])); ?>')"
+                                                    class="text-red-600 hover:text-red-900 p-1" title="Hapus">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
                                             </div>
@@ -1149,8 +1255,8 @@ $stmt->close();
                             <?php endif; ?>
                             Tambahkan guru baru untuk memulai.
                         </p>
-                        <a href="?action=tambah" 
-                           class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700">
+                        <a href="?action=tambah"
+                            class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700">
                             <i class="fas fa-user-plus mr-2"></i> Tambah Guru
                         </a>
                     </div>
@@ -1187,7 +1293,8 @@ $stmt->close();
                             </div>
                             <div class="ml-4">
                                 <h3 class="text-lg font-bold text-gray-900">
-                                    <?php echo htmlspecialchars($guru_detail['full_name']); ?></h3>
+                                    <?php echo htmlspecialchars($guru_detail['full_name']); ?>
+                                </h3>
                                 <p class="text-sm text-gray-600"><?php echo htmlspecialchars($guru_detail['email']); ?></p>
                             </div>
                             <div class="ml-auto">
@@ -1204,12 +1311,14 @@ $stmt->close();
                             <div class="form-group">
                                 <label class="form-label">Bidang Keahlian</label>
                                 <div class="p-2 bg-gray-50 rounded">
-                                    <?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?></div>
+                                    <?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?>
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Pendidikan Terakhir</label>
                                 <div class="p-2 bg-gray-50 rounded">
-                                    <?php echo htmlspecialchars($guru_detail['pendidikan_terakhir']); ?></div>
+                                    <?php echo htmlspecialchars($guru_detail['pendidikan_terakhir']); ?>
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Pengalaman</label>
@@ -1219,17 +1328,20 @@ $stmt->close();
                             <div class="form-group">
                                 <label class="form-label">Telepon</label>
                                 <div class="p-2 bg-gray-50 rounded">
-                                    <?php echo htmlspecialchars($guru_detail['phone'] ?? '-'); ?></div>
+                                    <?php echo htmlspecialchars($guru_detail['phone'] ?? '-'); ?>
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Alamat</label>
                                 <div class="p-2 bg-gray-50 rounded">
-                                    <?php echo htmlspecialchars($guru_detail['address'] ?? '-'); ?></div>
+                                    <?php echo htmlspecialchars($guru_detail['address'] ?? '-'); ?>
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Username</label>
                                 <div class="p-2 bg-gray-50 rounded">
-                                    <?php echo htmlspecialchars($guru_detail['username']); ?></div>
+                                    <?php echo htmlspecialchars($guru_detail['username']); ?>
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Tanggal Bergabung</label>
@@ -1240,7 +1352,8 @@ $stmt->close();
                             <div class="form-group">
                                 <label class="form-label">Status Akun</label>
                                 <div class="p-2 bg-gray-50 rounded">
-                                    <span class="px-2 py-1 text-xs font-semibold rounded-full <?php echo $guru_detail['is_active'] ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'; ?>">
+                                    <span
+                                        class="px-2 py-1 text-xs font-semibold rounded-full <?php echo $guru_detail['is_active'] ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'; ?>">
                                         <?php echo $guru_detail['is_active'] ? 'Aktif' : 'Non-Aktif'; ?>
                                     </span>
                                 </div>
@@ -1255,40 +1368,66 @@ $stmt->close();
                     </div>
 
                     <!-- Siswa yang Diajar -->
+                    <!-- Siswa yang Diajar -->
                     <?php if (!empty($guru_detail['siswa_mengajar'])): ?>
                         <div class="mb-8">
                             <h4 class="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                                <i class="fas fa-users mr-2 text-blue-600"></i> Siswa yang Diajar (<?php echo count($guru_detail['siswa_mengajar']); ?> siswa)
+                                <i class="fas fa-users mr-2 text-blue-600"></i>
+                                Daftar Siswa yang Diajar (<?php echo count($guru_detail['siswa_mengajar']); ?> siswa)
                             </h4>
                             <div class="bg-gray-50 rounded-lg p-4">
                                 <div class="overflow-x-auto">
                                     <table class="min-w-full divide-y divide-gray-200">
-                                        <thead>
+                                        <thead class="bg-gray-100">
                                             <tr>
-                                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">No</th>
-                                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Siswa</th>
-                                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Kelas</th>
-                                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Mata Pelajaran</th>
-                                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tingkat</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">No
+                                                </th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Nama
+                                                    Siswa</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">
+                                                    Kelas</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">
+                                                    Tingkat</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">
+                                                    Jadwal</th>
                                             </tr>
                                         </thead>
-                                        <tbody class="divide-y divide-gray-200">
-                                            <?php foreach ($guru_detail['siswa_mengajar'] as $index => $siswa): ?>
-                                                <tr>
-                                                    <td class="px-4 py-3 text-sm text-gray-500"><?php echo $index + 1; ?></td>
-                                                    <td class="px-4 py-3 text-sm">
-                                                        <div class="font-medium text-gray-900">
-                                                            <?php echo htmlspecialchars($siswa['nama_lengkap']); ?>
+                                        <tbody class="bg-white divide-y divide-gray-200">
+                                            <?php
+                                            $no = 1;
+                                            foreach ($guru_detail['siswa_mengajar'] as $siswa):
+                                                ?>
+                                                <tr class="hover:bg-gray-50">
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                                                        <?php echo $no++; ?>
+                                                    </td>
+                                                    <td class="px-4 py-3 whitespace-nowrap">
+                                                        <div class="flex items-center">
+                                                            <div
+                                                                class="flex-shrink-0 h-8 w-8 bg-blue-100 rounded-full flex items-center justify-center">
+                                                                <i class="fas fa-user-graduate text-blue-600 text-xs"></i>
+                                                            </div>
+                                                            <div class="ml-3">
+                                                                <div class="text-sm font-medium text-gray-900">
+                                                                    <?php echo htmlspecialchars($siswa['nama_lengkap']); ?>
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     </td>
-                                                    <td class="px-4 py-3 text-sm text-gray-900">
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                                                         <?php echo htmlspecialchars($siswa['kelas']); ?>
                                                     </td>
-                                                    <td class="px-4 py-3 text-sm text-gray-900">
-                                                        <?php echo htmlspecialchars($siswa['nama_pelajaran']); ?>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                                                        <span class="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs">
+                                                            <?php echo htmlspecialchars($siswa['tingkat']); ?>
+                                                        </span>
                                                     </td>
-                                                    <td class="px-4 py-3 text-sm text-gray-900">
-                                                        <?php echo htmlspecialchars($siswa['tingkat']); ?>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                                                        <div class="flex items-center">
+                                                            <i class="far fa-calendar-alt text-gray-400 mr-1"></i>
+                                                            <span><?php echo $siswa['hari']; ?>, <?php echo $siswa['jam_mulai']; ?>
+                                                                - <?php echo $siswa['jam_selesai']; ?></span>
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             <?php endforeach; ?>
@@ -1298,58 +1437,12 @@ $stmt->close();
                             </div>
                         </div>
                     <?php else: ?>
-                        <div class="mb-8 text-center py-6 border border-gray-200 rounded-lg">
-                            <i class="fas fa-users text-gray-300 text-4xl mb-3"></i>
-                            <p class="text-gray-600">Guru ini belum mengajar siswa apapun.</p>
+                        <div class="mb-8 text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
+                            <i class="fas fa-users text-gray-300 text-5xl mb-3"></i>
+                            <p class="text-gray-500 text-lg">Belum ada siswa yang diajar</p>
+                            <p class="text-gray-400 text-sm mt-1">Guru ini belum memiliki jadwal mengajar</p>
                         </div>
                     <?php endif; ?>
-
-                    <!-- Jadwal Mengajar -->
-                    <!--<?php if (!empty($guru_detail['jadwal_mengajar'])): ?>-->
-                    <!--    <div class="mb-8">-->
-                    <!--        <h4 class="text-lg font-semibold text-gray-900 mb-4 flex items-center">-->
-                    <!--            <i class="fas fa-calendar-alt mr-2 text-blue-600"></i> Jadwal Mengajar-->
-                    <!--        </h4>-->
-                    <!--        <div class="bg-gray-50 rounded-lg p-4">-->
-                    <!--            <div class="overflow-x-auto">-->
-                    <!--                <table class="min-w-full divide-y divide-gray-200">-->
-                    <!--                    <thead>-->
-                    <!--                        <tr>-->
-                    <!--                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Hari</th>-->
-                    <!--                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Jam</th>-->
-                    <!--                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Siswa</th>-->
-                    <!--                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Mata Pelajaran</th>-->
-                    <!--                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tingkat</th>-->
-                    <!--                        </tr>-->
-                    <!--                    </thead>-->
-                    <!--                    <tbody class="divide-y divide-gray-200">-->
-                    <!--                        <?php foreach ($guru_detail['jadwal_mengajar'] as $jadwal): ?>-->
-                    <!--                            <tr>-->
-                    <!--                                <td class="px-4 py-3 text-sm font-medium text-gray-900">-->
-                    <!--                                    <?php echo htmlspecialchars($jadwal['hari']); ?>-->
-                    <!--                                </td>-->
-                    <!--                                <td class="px-4 py-3 text-sm text-gray-900">-->
-                    <!--                                    <?php echo date('H:i', strtotime($jadwal['jam_mulai'])); ?> - <?php echo date('H:i', strtotime($jadwal['jam_selesai'])); ?>-->
-                    <!--                                </td>-->
-                    <!--                                <td class="px-4 py-3 text-sm">-->
-                    <!--                                    <div class="font-medium text-gray-900">-->
-                    <!--                                        <?php echo htmlspecialchars($jadwal['nama_lengkap']); ?>-->
-                    <!--                                    </div>-->
-                    <!--                                </td>-->
-                    <!--                                <td class="px-4 py-3 text-sm text-gray-900">-->
-                    <!--                                    <?php echo htmlspecialchars($jadwal['nama_pelajaran']); ?>-->
-                    <!--                                </td>-->
-                    <!--                                <td class="px-4 py-3 text-sm text-gray-900">-->
-                    <!--                                    <?php echo htmlspecialchars($jadwal['tingkat']); ?>-->
-                    <!--                                </td>-->
-                    <!--                            </tr>-->
-                    <!--                        <?php endforeach; ?>-->
-                    <!--                    </tbody>-->
-                    <!--                </table>-->
-                    <!--            </div>-->
-                    <!--        </div>-->
-                    <!--    </div>-->
-                    <!--<?php endif; ?>-->
                 </div>
                 <div class="modal-footer">
                     <div class="flex justify-end space-x-3">
@@ -1634,7 +1727,7 @@ $stmt->close();
             if (modal) {
                 modal.style.display = 'block';
                 modal.style.animation = 'modalFadeIn 0.3s';
-                
+
                 // Sembunyikan filter section ketika modal terbuka
                 const filterSection = document.getElementById('filterSection');
                 if (filterSection) {
@@ -1644,33 +1737,33 @@ $stmt->close();
         }
 
         // Tambahkan event listener untuk klik di luar modal
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             const modals = document.querySelectorAll('.modal');
             modals.forEach(modal => {
-                modal.addEventListener('click', function(e) {
+                modal.addEventListener('click', function (e) {
                     if (e.target === this) {
                         closeModal();
                     }
                 });
             });
-            
+
             // Auto focus pada input pertama di modal
             <?php if (isset($_GET['action']) && ($_GET['action'] == 'tambah' || $_GET['action'] == 'edit' || $_GET['action'] == 'detail')): ?>
                 const firstInput = document.querySelector('.modal input:not([type="hidden"]), .modal select');
                 if (firstInput) {
                     firstInput.focus();
                 }
-                
+
                 // Sembunyikan filter section jika modal sudah terbuka
                 const filterSection = document.getElementById('filterSection');
                 if (filterSection) {
                     filterSection.classList.add('filter-hidden');
                 }
             <?php endif; ?>
-            
+
             // Event listener untuk link aksi (detail, edit)
             document.querySelectorAll('a[href*="action=detail"], a[href*="action=edit"]').forEach(link => {
-                link.addEventListener('click', function(e) {
+                link.addEventListener('click', function (e) {
                     // Jika ini adalah link modal, biarkan default behavior
                     // Hanya tangani jika ada parameter action
                     if (this.href.includes('action=')) {
@@ -1683,17 +1776,17 @@ $stmt->close();
                 });
             });
         });
-        
+
         // Dropdown functionality
         document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-            toggle.addEventListener('click', function(e) {
+            toggle.addEventListener('click', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
-                
+
                 const dropdownGroup = this.closest('.mb-1');
                 const submenu = dropdownGroup.querySelector('.dropdown-submenu');
                 const arrow = this.querySelector('.arrow');
-                
+
                 // Toggle current dropdown
                 if (submenu.style.display === 'block') {
                     submenu.style.display = 'none';
@@ -1708,7 +1801,7 @@ $stmt->close();
                         t.classList.remove('open');
                         t.querySelector('.arrow').style.transform = 'rotate(0deg)';
                     });
-                    
+
                     // Open this dropdown
                     submenu.style.display = 'block';
                     arrow.style.transform = 'rotate(-90deg)';
@@ -1718,7 +1811,7 @@ $stmt->close();
         });
 
         // Close dropdowns when clicking outside
-        document.addEventListener('click', function(e) {
+        document.addEventListener('click', function (e) {
             if (!e.target.closest('.mb-1')) {
                 document.querySelectorAll('.dropdown-submenu').forEach(submenu => {
                     submenu.style.display = 'none';
@@ -1738,7 +1831,7 @@ $stmt->close();
         }
 
         // Auto-close modals on ESC
-        document.addEventListener('keydown', function(event) {
+        document.addEventListener('keydown', function (event) {
             if (event.key === 'Escape') {
                 const modals = document.querySelectorAll('.modal[style="display: block;"]');
                 if (modals.length > 0) {
@@ -1748,10 +1841,10 @@ $stmt->close();
         });
 
         // Form validation
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             const forms = document.querySelectorAll('form');
             forms.forEach(form => {
-                form.addEventListener('submit', function(e) {
+                form.addEventListener('submit', function (e) {
                     const requiredFields = form.querySelectorAll('[required]');
                     let isValid = true;
 

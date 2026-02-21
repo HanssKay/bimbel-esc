@@ -27,7 +27,7 @@ $guru_id = 0;
 $guru_detail = [];
 try {
     $sql = "SELECT g.id, g.bidang_keahlian, g.pendidikan_terakhir, g.pengalaman_tahun, 
-                   g.status, g.tanggal_bergabung
+                   g.status, g.tanggal_bergabung, g.kapasitas_per_sesi
             FROM guru g 
             WHERE g.user_id = ?";
     $stmt = $conn->prepare($sql);
@@ -46,30 +46,33 @@ try {
     error_log("Error getting guru_id: " . $e->getMessage());
 }
 
-// Hitung statistik dengan error handling
+// Hitung statistik dengan struktur database baru
 $statistics = [
     'total_siswa' => 0,
-    'total_siswa_jadwal' => 0,
+    'siswa_dengan_jadwal' => 0,
+    'total_jadwal_sesi' => 0,
     'total_penilaian' => 0,
     'penilaian_bulan_ini' => 0,
     'rata_nilai' => '0.0',
-    'total_pelajaran' => 0,
-    'siswa_terbaik' => ['nama_lengkap' => '-', 'total_score' => 0, 'nama_pelajaran' => '-']
+    'total_sesi_mengajar' => 0,
+    'kapasitas_terisi' => 0,
+    'kapasitas_total' => 0,
+    'siswa_terbaik' => ['nama_lengkap' => '-', 'total_score' => 0]
 ];
 
 $penilaian_terbaru = [];
 $siswa_belum_dinilai = [];
-$jadwal_per_hari = [];
+$jadwal_hari_ini = [];
 
 try {
     if ($guru_id > 0) {
-        // 1. TOTAL SISWA YANG DIAJAR
-        $sql = "SELECT COUNT(DISTINCT sp.siswa_id) as total 
-                FROM siswa_pelajaran sp 
-                INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                WHERE sp.guru_id = ? 
-                AND sp.status = 'aktif' 
-                AND ps.status = 'aktif'";
+        // 1. TOTAL SISWA UNIK YANG DIAJAR (dari jadwal_belajar)
+        $sql = "SELECT COUNT(DISTINCT ps.siswa_id) as total 
+                FROM sesi_mengajar_guru smg
+                INNER JOIN jadwal_belajar jb ON smg.id = jb.sesi_guru_id AND jb.status = 'aktif'
+                INNER JOIN pendaftaran_siswa ps ON jb.pendaftaran_id = ps.id AND ps.status = 'aktif'
+                INNER JOIN siswa s ON ps.siswa_id = s.id AND s.status = 'aktif'
+                WHERE smg.guru_id = ? AND smg.status != 'tidak_aktif'";
         
         $stmt = $conn->prepare($sql);
         if ($stmt) {
@@ -83,34 +86,96 @@ try {
             $stmt->close();
         }
 
-        // 2. SISWA DENGAN JADWAL AKTIF
-        $sql = "SELECT COUNT(DISTINCT s.id) as total 
-                FROM siswa_pelajaran sp 
-                INNER JOIN siswa s ON sp.siswa_id = s.id
-                INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                INNER JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id
+        // 2. SISWA DENGAN JADWAL AKTIF (sama dengan total siswa sekarang)
+        $statistics['siswa_dengan_jadwal'] = $statistics['total_siswa'];
+
+        // 3. TOTAL JADWAL BELAJAR (jumlah pertemuan)
+        $sql = "SELECT COUNT(*) as total 
+                FROM jadwal_belajar jb
                 INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
-                WHERE sp.guru_id = ? 
-                AND sp.status = 'aktif' 
-                AND ps.status = 'aktif'
-                AND jb.status = 'aktif'
-                AND smg.guru_id = ?";
+                WHERE smg.guru_id = ? AND jb.status = 'aktif'";
         
         $stmt = $conn->prepare($sql);
         if ($stmt) {
-            $stmt->bind_param("ii", $guru_id, $guru_id);
+            $stmt->bind_param("i", $guru_id);
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result && $row = $result->fetch_assoc()) {
-                    $statistics['total_siswa_jadwal'] = (int)$row['total'];
+                    $statistics['total_jadwal_sesi'] = (int)$row['total'];
                 }
             }
             $stmt->close();
-        } 
+        }
 
-        // ============== PERBAIKAN DI SINI ==============
-        // 4. TOTAL PENILAIAN - DENGAN SQL_NO_CACHE
-        $sql = "SELECT SQL_NO_CACHE COUNT(*) as total FROM penilaian_siswa WHERE guru_id = ?";
+        // 4. TOTAL SESI MENGAJAR GURU
+        $sql = "SELECT COUNT(*) as total,
+                       SUM(kapasitas_terisi) as total_terisi,
+                       SUM(kapasitas_maks) as total_maks
+                FROM sesi_mengajar_guru 
+                WHERE guru_id = ? AND status != 'tidak_aktif'";
+        
+        $stmt = $conn->prepare($sql);
+        if ($stmt) {
+            $stmt->bind_param("i", $guru_id);
+            if ($stmt->execute()) {
+                $result = $stmt->get_result();
+                if ($result && $row = $result->fetch_assoc()) {
+                    $statistics['total_sesi_mengajar'] = (int)$row['total'];
+                    $statistics['kapasitas_terisi'] = (int)$row['total_terisi'];
+                    $statistics['kapasitas_total'] = (int)$row['total_maks'];
+                }
+            }
+            $stmt->close();
+        }
+
+        // 5. JADWAL HARI INI
+        $hari_ini = date('l');
+        // Konversi hari ke Bahasa Indonesia
+        $hari_map = [
+            'Monday' => 'Senin',
+            'Tuesday' => 'Selasa',
+            'Wednesday' => 'Rabu',
+            'Thursday' => 'Kamis',
+            'Friday' => 'Jumat',
+            'Saturday' => 'Sabtu',
+            'Sunday' => 'Minggu'
+        ];
+        $hari_ini_id = $hari_map[$hari_ini] ?? $hari_ini;
+
+        $sql = "SELECT 
+                    smg.hari,
+                    DATE_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai,
+                    DATE_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai,
+                    smg.kapasitas_terisi,
+                    smg.kapasitas_maks,
+                    COUNT(jb.id) as total_siswa_terjadwal,
+                    GROUP_CONCAT(DISTINCT CONCAT(s.nama_lengkap, ' (', ps.tingkat, ')') SEPARATOR '; ') as daftar_siswa
+                FROM sesi_mengajar_guru smg
+                LEFT JOIN jadwal_belajar jb ON smg.id = jb.sesi_guru_id AND jb.status = 'aktif'
+                LEFT JOIN pendaftaran_siswa ps ON jb.pendaftaran_id = ps.id AND ps.status = 'aktif'
+                LEFT JOIN siswa s ON ps.siswa_id = s.id AND s.status = 'aktif'
+                WHERE smg.guru_id = ? 
+                    AND smg.hari = ? 
+                    AND smg.status != 'tidak_aktif'
+                GROUP BY smg.id
+                ORDER BY smg.jam_mulai";
+        
+        $stmt = $conn->prepare($sql);
+        if ($stmt) {
+            $stmt->bind_param("is", $guru_id, $hari_ini_id);
+            if ($stmt->execute()) {
+                $result = $stmt->get_result();
+                if ($result) {
+                    while ($row = $result->fetch_assoc()) {
+                        $jadwal_hari_ini[] = $row;
+                    }
+                }
+            }
+            $stmt->close();
+        }
+
+        // 6. TOTAL PENILAIAN
+        $sql = "SELECT COUNT(*) as total FROM penilaian_siswa WHERE guru_id = ?";
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("i", $guru_id);
@@ -123,17 +188,15 @@ try {
             $stmt->close();
         }
 
-        // 5. PENILAIAN BULAN INI - DENGAN SQL_NO_CACHE
-        $current_month = date('Y-m');
-        $current_month_name = date('F Y'); // Contoh: February 2026
-        
-        $sql = "SELECT SQL_NO_CACHE COUNT(*) as total FROM penilaian_siswa 
-                WHERE guru_id = ? 
-                AND (periode_penilaian = ? OR DATE_FORMAT(tanggal_penilaian, '%Y-%m') = ?)";
+        // 7. PENILAIAN BULAN INI
+        $bulan_ini = date('Y-m');
+        $sql = "SELECT COUNT(*) as total 
+                FROM penilaian_siswa 
+                WHERE guru_id = ? AND DATE_FORMAT(tanggal_penilaian, '%Y-%m') = ?";
         
         $stmt = $conn->prepare($sql);
         if ($stmt) {
-            $stmt->bind_param("iss", $guru_id, $current_month_name, $current_month);
+            $stmt->bind_param("is", $guru_id, $bulan_ini);
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result && $row = $result->fetch_assoc()) {
@@ -143,7 +206,7 @@ try {
             $stmt->close();
         }
 
-        // 6. RATA-RATA NILAI
+        // 8. RATA-RATA NILAI
         $sql = "SELECT COALESCE(AVG(total_score), 0) as rata_nilai 
                 FROM penilaian_siswa 
                 WHERE guru_id = ?";
@@ -159,26 +222,10 @@ try {
             $stmt->close();
         }
 
-        // 7. JUMLAH PELAJARAN YANG DIAMPU
-        $sql = "SELECT COUNT(DISTINCT id) as total FROM siswa_pelajaran 
-                WHERE guru_id = ? AND status = 'aktif'";
-        $stmt = $conn->prepare($sql);
-        if ($stmt) {
-            $stmt->bind_param("i", $guru_id);
-            if ($stmt->execute()) {
-                $result = $stmt->get_result();
-                if ($result && $row = $result->fetch_assoc()) {
-                    $statistics['total_pelajaran'] = (int)$row['total'];
-                }
-            }
-            $stmt->close();
-        }
-
-        // 8. SISWA TERBAIK
-        $sql = "SELECT s.nama_lengkap, ps.total_score, sp.nama_pelajaran
+        // 9. SISWA TERBAIK
+        $sql = "SELECT s.nama_lengkap, ps.total_score
                 FROM penilaian_siswa ps 
                 INNER JOIN siswa s ON ps.siswa_id = s.id 
-                LEFT JOIN siswa_pelajaran sp ON ps.siswa_pelajaran_id = sp.id
                 WHERE ps.guru_id = ? 
                 ORDER BY ps.total_score DESC 
                 LIMIT 1";
@@ -190,20 +237,19 @@ try {
                 if ($result && $row = $result->fetch_assoc()) {
                     $statistics['siswa_terbaik'] = [
                         'nama_lengkap' => $row['nama_lengkap'] ?? '-',
-                        'total_score' => (int)($row['total_score'] ?? 0),
-                        'nama_pelajaran' => $row['nama_pelajaran'] ?? '-'
+                        'total_score' => (int)($row['total_score'] ?? 0)
                     ];
                 }
             }
             $stmt->close();
         }
 
-        // 9. PENILAIAN TERBARU - DENGAN SQL_NO_CACHE
-        $sql = "SELECT SQL_NO_CACHE ps.*, s.nama_lengkap as nama_siswa, s.kelas, 
-                       COALESCE(sp.nama_pelajaran, 'Tanpa Pelajaran') as nama_pelajaran
+        // 10. PENILAIAN TERBARU
+        $sql = "SELECT ps.*, s.nama_lengkap as nama_siswa, s.kelas, 
+                       ps.tingkat_bimbel,
+                       DATE_FORMAT(ps.tanggal_penilaian, '%d %M %Y') as tgl_format
                 FROM penilaian_siswa ps
                 INNER JOIN siswa s ON ps.siswa_id = s.id
-                LEFT JOIN siswa_pelajaran sp ON ps.siswa_pelajaran_id = sp.id
                 WHERE ps.guru_id = ?
                 ORDER BY ps.tanggal_penilaian DESC 
                 LIMIT 5";
@@ -222,26 +268,30 @@ try {
             $stmt->close();
         }
 
-        // 10. SISWA YANG BELUM DINILAI - TANPA BATASAN BULAN
-        $sql = "SELECT DISTINCT s.id, s.nama_lengkap, s.kelas, sp.nama_pelajaran
-                FROM siswa_pelajaran sp
-                INNER JOIN siswa s ON sp.siswa_id = s.id
-                INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                WHERE sp.guru_id = ? 
-                AND sp.status = 'aktif'
-                AND ps.status = 'aktif'
-                AND NOT EXISTS (
-                    SELECT 1 
-                    FROM penilaian_siswa pn 
-                    WHERE pn.siswa_id = sp.siswa_id 
-                    AND pn.siswa_pelajaran_id = sp.id
-                )
+        // 11. SISWA YANG BELUM DINILAI BULAN INI
+        $sql = "SELECT DISTINCT s.id, s.nama_lengkap, s.kelas,
+                       ps.tingkat as tingkat_bimbel
+                FROM jadwal_belajar jb
+                INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                INNER JOIN pendaftaran_siswa ps ON jb.pendaftaran_id = ps.id
+                INNER JOIN siswa s ON ps.siswa_id = s.id
+                WHERE smg.guru_id = ? 
+                    AND jb.status = 'aktif'
+                    AND ps.status = 'aktif'
+                    AND s.status = 'aktif'
+                    AND NOT EXISTS (
+                        SELECT 1 
+                        FROM penilaian_siswa pn 
+                        WHERE pn.siswa_id = s.id 
+                            AND pn.guru_id = ?
+                            AND DATE_FORMAT(pn.tanggal_penilaian, '%Y-%m') = ?
+                    )
                 ORDER BY s.nama_lengkap
                 LIMIT 5";
         
         $stmt = $conn->prepare($sql);
         if ($stmt) {
-            $stmt->bind_param("i", $guru_id);
+            $stmt->bind_param("iis", $guru_id, $guru_id, $bulan_ini);
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result) {
@@ -252,14 +302,18 @@ try {
             }
             $stmt->close();
         }
-        // ============== SELESAI PERBAIKAN ==============
     }
 
 } catch (Exception $e) {
     error_log("Error in dashboardGuru.php: " . $e->getMessage());
 }
-?>
 
+// Hitung persentase kapasitas
+$kapasitas_persen = 0;
+if ($statistics['kapasitas_total'] > 0) {
+    $kapasitas_persen = round(($statistics['kapasitas_terisi'] / $statistics['kapasitas_total']) * 100);
+}
+?>
 
 <!DOCTYPE html>
 <html lang="id">
@@ -274,35 +328,29 @@ try {
         .stat-card {
             transition: transform 0.3s, box-shadow 0.3s;
         }
-
         .stat-card:hover {
             transform: translateY(-5px);
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
         }
-
-        /* Dropdown styles */
+        .progress-bar {
+            transition: width 0.5s ease-in-out;
+        }
         .dropdown-submenu {
             display: none;
             max-height: 500px;
             overflow: hidden;
             transition: max-height 0.3s ease;
         }
-
         .dropdown-submenu[style*="display: block"] {
             display: block;
         }
-
         .dropdown-toggle.open .arrow {
             transform: rotate(90deg);
         }
-
-        /* Active menu item */
         .menu-item.active {
             background-color: rgba(255, 255, 255, 0.1);
             border-left: 4px solid #60A5FA;
         }
-
-        /* Mobile menu styles */
         #mobileMenu {
             position: fixed;
             top: 0;
@@ -315,11 +363,9 @@ try {
             box-shadow: 5px 0 25px rgba(0, 0, 0, 0.2);
             background-color: #1e40af;
         }
-
         #mobileMenu.menu-open {
             transform: translateX(0);
         }
-
         .menu-overlay {
             display: none;
             position: fixed;
@@ -330,50 +376,24 @@ try {
             background-color: rgba(0, 0, 0, 0.5);
             z-index: 1099;
         }
-
         .menu-overlay.active {
             display: block;
         }
-
-        /* Responsive */
         @media (min-width: 768px) {
-            .desktop-sidebar {
-                display: block;
-            }
-
-            .mobile-header {
-                display: none;
-            }
-
-            #mobileMenu {
-                display: none;
-            }
-
-            .menu-overlay {
-                display: none !important;
-            }
+            .desktop-sidebar { display: block; }
+            .mobile-header { display: none; }
+            #mobileMenu { display: none; }
+            .menu-overlay { display: none !important; }
         }
-
         @media (max-width: 767px) {
-            .desktop-sidebar {
-                display: none;
-            }
-
-            .stat-card {
-                padding: 1rem !important;
-            }
-
-            .quick-action-btn {
-                padding: 0.75rem !important;
-            }
+            .desktop-sidebar { display: none; }
+            .stat-card { padding: 1rem !important; }
+            .quick-action-btn { padding: 0.75rem !important; }
         }
     </style>
 </head>
 
 <body class="bg-gray-100">
-    <!-- Hidden debug info -->
-    <!-- <?php echo $debug_info; ?> -->
-
     <!-- Desktop Sidebar -->
     <div class="desktop-sidebar w-64 bg-blue-800 text-white fixed h-full z-40">
         <div class="p-4">
@@ -391,8 +411,7 @@ try {
                     <p class="font-medium"><?php echo htmlspecialchars($full_name); ?></p>
                     <p class="text-sm text-blue-300">Guru</p>
                     <?php if (!empty($guru_detail['bidang_keahlian'])): ?>
-                        <p class="text-xs text-blue-200"><?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?>
-                        </p>
+                        <p class="text-xs text-blue-200"><?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?></p>
                     <?php endif; ?>
                 </div>
             </div>
@@ -448,9 +467,7 @@ try {
                         <p class="font-medium"><?php echo htmlspecialchars($full_name); ?></p>
                         <p class="text-sm text-blue-300">Guru</p>
                         <?php if (!empty($guru_detail['bidang_keahlian'])): ?>
-                            <p class="text-xs text-blue-200">
-                                <?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?>
-                            </p>
+                            <p class="text-xs text-blue-200"><?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?></p>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -479,8 +496,7 @@ try {
                     <?php endif; ?>
                 </div>
                 <div class="mt-2 md:mt-0 text-right">
-                    <span
-                        class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-800">
+                    <span class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-800">
                         <i class="fas fa-calendar-alt mr-2"></i>
                         <?php echo date('d F Y'); ?>
                     </span>
@@ -491,72 +507,131 @@ try {
         <!-- Content -->
         <div class="container mx-auto p-4 md:p-6">
             <!-- Stats Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <!-- Total Siswa Diajar -->
                 <div class="stat-card bg-white rounded-xl p-5 shadow">
-                    <div class="flex items-center md:mt-5">
-                        <div class="p-3 bg-blue-100 rounded-lg mr-3 md:mr-4">
-                            <i class="fas fa-users text-blue-600 text-xl md:text-2xl"></i>
+                    <div class="flex items-center">
+                        <div class="p-3 bg-blue-100 rounded-lg mr-4">
+                            <i class="fas fa-users text-blue-600 text-2xl"></i>
                         </div>
                         <div>
-                            <p class="text-gray-600 text-sm md:text-base">Total Siswa Diajar</p>
+                            <p class="text-gray-600 text-sm">Total Siswa Diajar</p>
                             <h3 class="text-2xl font-bold text-gray-800">
                                 <?php echo number_format($statistics['total_siswa']); ?>
                             </h3>
+                            <p class="text-xs text-gray-500">Siswa</p>
                         </div>
                     </div>
                 </div>
 
-                <!-- Siswa dengan Jadwal Aktif -->
-                <div class="stat-card bg-white p-5 rounded-xl shadow border-2 border-green-300">
-                    <div class="flex items-center ">
-                        <div class="p-3 bg-green-100 rounded-lg mr-3 md:mr-4">
-                            <i class="fas fa-calendar-check text-green-600 text-xl md:text-2xl"></i>
+                <!-- Total Pertemuan -->
+                <div class="stat-card bg-white rounded-xl p-5 shadow">
+                    <div class="flex items-center">
+                        <div class="p-3 bg-purple-100 rounded-lg mr-4">
+                            <i class="fas fa-calendar-check text-purple-600 text-2xl"></i>
                         </div>
                         <div>
-                            <p class="text-gray-600 text-sm md:text-base">Siswa dengan Jadwal</p>
+                            <p class="text-gray-600 text-sm">Total Jadwal</p>
                             <h3 class="text-2xl font-bold text-gray-800">
-                                <?php echo number_format($statistics['total_siswa_jadwal']); ?>
+                                <?php echo number_format($statistics['total_jadwal_sesi']); ?>
                             </h3>
-                            <p class="text-xs text-gray-500 mt-1">Memiliki jadwal aktif</p>
+                            <p class="text-xs text-gray-500">Jadwal terisi</p>
                         </div>
                     </div>
                 </div>
 
                 <!-- Total Penilaian -->
-                <div class="stat-card bg-white p-5 rounded-xl shadow">
-                    <div class="flex items-center md:mt-5 ">
-                        <div class="p-3 bg-green-100 rounded-lg mr-3 md:mr-4">
-                            <i class="fas fa-clipboard-check text-green-600 text-xl md:text-2xl"></i>
+                <div class="stat-card bg-white rounded-xl p-5 shadow">
+                    <div class="flex items-center">
+                        <div class="p-3 bg-yellow-100 rounded-lg mr-4">
+                            <i class="fas fa-clipboard-check text-yellow-600 text-2xl"></i>
                         </div>
                         <div>
-                            <p class="text-gray-600 text-sm md:text-base">Total Penilaian</p>
+                            <p class="text-gray-600 text-sm">Total Penilaian</p>
                             <h3 class="text-2xl font-bold text-gray-800">
                                 <?php echo number_format($statistics['total_penilaian']); ?>
                             </h3>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Penilaian Bulan Ini -->
-                <div class="stat-card bg-white rounded-xl p-5 shadow">
-                    <div class="flex items-center  md:mt-3">
-                        <div class="p-3 bg-yellow-100 rounded-lg mr-3 md:mr-4">
-                            <i class="fas fa-calendar-day text-yellow-600 text-xl md:text-2xl"></i>
-                        </div>
-                        <div>
-                            <p class="text-gray-600 text-sm md:text-base">Penilaian Bulan Ini</p>
-                            <h3 class="text-2xl font-bold text-gray-800">
-                                <?php echo number_format($statistics['penilaian_bulan_ini']); ?>
-                            </h3>
-                            <p class="text-xs text-gray-500 mt-1"><?php echo date('F Y'); ?></p>
+                            <p class="text-xs text-gray-500"><?php echo $statistics['penilaian_bulan_ini']; ?> bulan ini</p>
                         </div>
                     </div>
                 </div>
             </div>
 
+            <!-- Row 2: Kapasitas & Rata-rata -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <!-- Kapasitas Mengajar -->
+                <!-- <div class="bg-white rounded-xl p-5 shadow">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-3">
+                        <i class="fas fa-chart-pie mr-2 text-blue-600"></i>Kapasitas Mengajar
+                    </h3>
+                    <div class="space-y-3">
+                        <div>
+                            <div class="flex justify-between text-sm text-gray-600 mb-1">
+                                <span>Total Kapasitas</span>
+                                <span class="font-semibold"><?php echo $statistics['kapasitas_total']; ?> siswa</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-2.5">
+                                <div class="bg-blue-600 h-2.5 rounded-full progress-bar" style="width: <?php echo $kapasitas_persen; ?>%"></div>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">
+                                Terisi: <?php echo $statistics['kapasitas_terisi']; ?> dari <?php echo $statistics['kapasitas_total']; ?> siswa
+                            </p>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 pt-2">
+                            <div class="text-center p-2 bg-blue-50 rounded">
+                                <span class="text-xs text-gray-600">Rata-rata Nilai</span>
+                                <p class="text-xl font-bold text-blue-600"><?php echo $statistics['rata_nilai']; ?></p>
+                            </div>
+                            <div class="text-center p-2 bg-green-50 rounded">
+                                <span class="text-xs text-gray-600">Siswa Terbaik</span>
+                                <p class="text-sm font-semibold text-green-600 truncate"><?php echo htmlspecialchars($statistics['siswa_terbaik']['nama_lengkap']); ?></p>
+                                <p class="text-xs text-gray-500">Score: <?php echo $statistics['siswa_terbaik']['total_score']; ?>/50</p>
+                            </div>
+                        </div>
+                    </div>
+                </div> -->
+
+                <!-- Jadwal Hari Ini
+                <div class="bg-white rounded-xl p-5 shadow">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-3">
+                        <i class="fas fa-calendar-day mr-2 text-green-600"></i>Jadwal Hari Ini (<?php echo $hari_ini_id; ?>)
+                    </h3>
+                    <?php if (count($jadwal_hari_ini) > 0): ?>
+                        <div class="space-y-3">
+                            <?php foreach ($jadwal_hari_ini as $jadwal): ?>
+                                <div class="border-l-4 <?php echo ($jadwal['kapasitas_terisi'] >= $jadwal['kapasitas_maks']) ? 'border-red-500' : 'border-green-500'; ?> pl-3 py-1">
+                                    <div class="flex justify-between items-start">
+                                        <div>
+                                            <p class="font-medium text-gray-900">
+                                                <?php echo $jadwal['jam_mulai']; ?> - <?php echo $jadwal['jam_selesai']; ?>
+                                            </p>
+                                            <p class="text-sm text-gray-600">
+                                                <?php echo $jadwal['total_siswa_terjadwal']; ?> siswa terjadwal
+                                            </p>
+                                            <?php if (!empty($jadwal['daftar_siswa'])): ?>
+                                                <p class="text-xs text-gray-500 truncate max-w-xs" title="<?php echo htmlspecialchars($jadwal['daftar_siswa']); ?>">
+                                                    <?php echo htmlspecialchars(substr($jadwal['daftar_siswa'], 0, 50)) . '...'; ?>
+                                                </p>
+                                            <?php endif; ?>
+                                        </div>
+                                        <span class="text-xs px-2 py-1 rounded-full <?php echo ($jadwal['kapasitas_terisi'] >= $jadwal['kapasitas_maks']) ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'; ?>">
+                                            <?php echo $jadwal['kapasitas_terisi']; ?>/<?php echo $jadwal['kapasitas_maks']; ?>
+                                        </span>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php else: ?>
+                        <div class="text-center py-4">
+                            <i class="fas fa-calendar-times text-gray-300 text-3xl mb-2"></i>
+                            <p class="text-gray-500">Tidak ada jadwal hari ini</p>
+                        </div>
+                    <?php endif; ?>
+                </div> -->
+            </div>
+
             <!-- Recent Data -->
-            <div class="grid grid-cols-1 gap-8 mb-8">
+            <div class="grid grid-cols-1 gap-6 mb-8">
                 <!-- Penilaian Terbaru -->
                 <div class="bg-white shadow rounded-lg">
                     <div class="px-4 py-5 sm:px-6 border-b border-gray-200">
@@ -568,53 +643,47 @@ try {
                         <div class="flow-root">
                             <ul class="divide-y divide-gray-200">
                                 <?php if (count($penilaian_terbaru) > 0): ?>
-                                        <?php foreach ($penilaian_terbaru as $penilaian): ?>
-                                                                        <li class="py-3 hover:bg-gray-50">
-                                                                            <div class="flex items-center space-x-4">
-                                                                                <div class="flex-shrink-0">
-                                                                                    <div class="h-10 w-10 rounded-full 
+                                    <?php foreach ($penilaian_terbaru as $penilaian): ?>
+                                        <li class="py-3 hover:bg-gray-50">
+                                            <div class="flex items-center space-x-4">
+                                                <div class="flex-shrink-0">
+                                                    <div class="h-10 w-10 rounded-full 
                                                         <?php
                                                         $score = $penilaian['total_score'] ?? 0;
-                                                        if ($score >= 40)
-                                                            echo 'bg-green-100 text-green-800';
-                                                        elseif ($score >= 30)
-                                                            echo 'bg-blue-100 text-blue-800';
-                                                        elseif ($score >= 20)
-                                                            echo 'bg-yellow-100 text-yellow-800';
-                                                        else
-                                                            echo 'bg-red-100 text-red-800';
+                                                        if ($score >= 40) echo 'bg-green-100 text-green-800';
+                                                        elseif ($score >= 30) echo 'bg-blue-100 text-blue-800';
+                                                        elseif ($score >= 20) echo 'bg-yellow-100 text-yellow-800';
+                                                        else echo 'bg-red-100 text-red-800';
                                                         ?> flex items-center justify-center">
-                                                                                        <span class="text-xs font-bold">
-                                                                                            <?php echo $score; ?>
-                                                                                        </span>
-                                                                                    </div>
-                                                                                </div>
-                                                                                <div class="flex-1 min-w-0">
-                                                                                    <p class="text-sm font-medium text-gray-900 truncate">
-                                                                                        <?php echo htmlspecialchars($penilaian['nama_siswa'] ?? 'N/A'); ?>
-                                                                                    </p>
-                                                                                    <p class="text-sm text-gray-500 truncate">
-                                                                                        <?php echo htmlspecialchars($penilaian['nama_pelajaran'] ?? 'N/A'); ?> | 
-                                                                                        Kelas: <?php echo htmlspecialchars($penilaian['kelas'] ?? 'N/A'); ?>
-                                                                                    </p>
-                                                                                </div>
-                                                                                <div class="text-right">
-                                                                                    <div class="text-sm font-semibold text-gray-900">
-                                                                                        <?php echo $penilaian['total_score'] ?? 0; ?>/50
-                                                                                    </div>
-                                                                                    <div class="text-xs text-gray-500">
-                                                                                        <?php echo isset($penilaian['tanggal_penilaian']) ? date('d M Y', strtotime($penilaian['tanggal_penilaian'])) : '-'; ?>
-                                                                                    </div>
-                                                                                </div>
-                                                                            </div>
-                                                                        </li>
-                                                    <?php endforeach; ?>
+                                                        <span class="text-xs font-bold"><?php echo $score; ?></span>
+                                                    </div>
+                                                </div>
+                                                <div class="flex-1 min-w-0">
+                                                    <p class="text-sm font-medium text-gray-900 truncate">
+                                                        <?php echo htmlspecialchars($penilaian['nama_siswa'] ?? 'N/A'); ?>
+                                                    </p>
+                                                    <p class="text-sm text-gray-500 truncate">
+                                                        Kelas: <?php echo htmlspecialchars($penilaian['kelas'] ?? 'N/A'); ?> | 
+                                                        Tingkat: <?php echo htmlspecialchars($penilaian['tingkat_bimbel'] ?? 'N/A'); ?>
+                                                    </p>
+                                                </div>
+                                                <div class="text-right">
+                                                    <div class="text-sm font-semibold text-gray-900">
+                                                        <?php echo $penilaian['total_score'] ?? 0; ?>/50
+                                                    </div>
+                                                    <div class="text-xs text-gray-500">
+                                                        <?php echo isset($penilaian['tanggal_penilaian']) ? date('d M Y', strtotime($penilaian['tanggal_penilaian'])) : '-'; ?>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </li>
+                                    <?php endforeach; ?>
                                 <?php else: ?>
-                                                    <li class="py-4 text-center text-gray-500">
-                                                        <i class="fas fa-clipboard-list text-2xl mb-2"></i>
-                                                        <p>Belum ada data penilaian</p>
-                                                        <p class="text-xs text-gray-400 mt-1">Silakan input penilaian baru</p>
-                                                    </li>
+                                    <li class="py-4 text-center text-gray-500">
+                                        <i class="fas fa-clipboard-list text-2xl mb-2"></i>
+                                        <p>Belum ada data penilaian</p>
+                                        <p class="text-xs text-gray-400 mt-1">Silakan input penilaian baru</p>
+                                    </li>
                                 <?php endif; ?>
                             </ul>
                         </div>
@@ -626,10 +695,58 @@ try {
                     </div>
                 </div>
 
-               
+                <!-- Siswa Belum Dinilai Bulan Ini -->
+                <!-- <div class="bg-white shadow rounded-lg">
+                    <div class="px-4 py-5 sm:px-6 border-b border-gray-200">
+                        <h3 class="text-lg font-medium leading-6 text-gray-900">
+                            <i class="fas fa-exclamation-triangle mr-2 text-yellow-500"></i> Siswa Belum Dinilai (<?php echo date('F Y'); ?>)
+                        </h3>
+                    </div>
+                    <div class="px-4 py-2 sm:p-6">
+                        <div class="flow-root">
+                            <ul class="divide-y divide-gray-200">
+                                <?php if (count($siswa_belum_dinilai) > 0): ?>
+                                    <?php foreach ($siswa_belum_dinilai as $siswa): ?>
+                                        <li class="py-3 hover:bg-gray-50">
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex items-center">
+                                                    <div class="flex-shrink-0 h-8 w-8 bg-yellow-100 rounded-full flex items-center justify-center">
+                                                        <i class="fas fa-user-graduate text-yellow-600 text-xs"></i>
+                                                    </div>
+                                                    <div class="ml-3">
+                                                        <p class="text-sm font-medium text-gray-900">
+                                                            <?php echo htmlspecialchars($siswa['nama_lengkap']); ?>
+                                                        </p>
+                                                        <p class="text-xs text-gray-500">
+                                                            Kelas: <?php echo htmlspecialchars($siswa['kelas']); ?> | 
+                                                            Tingkat: <?php echo htmlspecialchars($siswa['tingkat_bimbel']); ?>
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <a href="inputNilai.php?siswa_id=<?php echo $siswa['id']; ?>" 
+                                                   class="inline-flex items-center px-2.5 py-1.5 border border-transparent text-xs font-medium rounded text-white bg-blue-600 hover:bg-blue-700">
+                                                    <i class="fas fa-plus mr-1"></i> Nilai
+                                                </a>
+                                            </div>
+                                        </li>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <li class="py-4 text-center text-gray-500">
+                                        <i class="fas fa-check-circle text-green-500 text-2xl mb-2"></i>
+                                        <p>Semua siswa sudah dinilai bulan ini</p>
+                                        <p class="text-xs text-gray-400 mt-1">Good job! 🎉</p>
+                                    </li>
+                                <?php endif; ?>
+                            </ul>
+                        </div>
+                        <div class="mt-4 text-center">
+                            <a href="inputNilai.php" class="inline-flex items-center text-sm text-blue-600 hover:text-blue-900">
+                                <i class="fas fa-plus-circle mr-1"></i> Input nilai baru
+                            </a>
+                        </div>
+                    </div>
+                </div> -->
             </div>
-
-            
 
             <!-- Quick Actions -->
             <div class="bg-white shadow rounded-lg p-6">
@@ -726,7 +843,6 @@ try {
             });
         }
 
-        // Close menu when clicking on menu items (mobile)
         document.querySelectorAll('.menu-item').forEach(item => {
             item.addEventListener('click', () => {
                 if (window.innerWidth < 768) {
@@ -739,7 +855,6 @@ try {
             });
         });
         
-        // Dropdown functionality
         document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
             toggle.addEventListener('click', function(e) {
                 e.preventDefault();
@@ -749,13 +864,11 @@ try {
                 const submenu = dropdownGroup.querySelector('.dropdown-submenu');
                 const arrow = this.querySelector('.arrow');
                 
-                // Toggle current dropdown
                 if (submenu.style.display === 'block') {
                     submenu.style.display = 'none';
                     arrow.style.transform = 'rotate(0deg)';
                     this.classList.remove('open');
                 } else {
-                    // Close other dropdowns
                     document.querySelectorAll('.dropdown-submenu').forEach(sm => {
                         sm.style.display = 'none';
                     });
@@ -764,7 +877,6 @@ try {
                         t.querySelector('.arrow').style.transform = 'rotate(0deg)';
                     });
                     
-                    // Open this dropdown
                     submenu.style.display = 'block';
                     arrow.style.transform = 'rotate(-90deg)';
                     this.classList.add('open');
@@ -772,7 +884,6 @@ try {
             });
         });
 
-        // Close dropdowns when clicking outside
         document.addEventListener('click', function(e) {
             if (!e.target.closest('.mb-1')) {
                 document.querySelectorAll('.dropdown-submenu').forEach(submenu => {
@@ -785,7 +896,6 @@ try {
             }
         });
 
-        // Update server time
         function updateServerTime() {
             const now = new Date();
             const timeString = now.toLocaleTimeString('id-ID');
@@ -800,9 +910,8 @@ try {
 
         // Debug info di console
         console.log('Guru ID:', <?php echo $guru_id; ?>);
-        console.log('Total Penilaian:', <?php echo $statistics['total_penilaian']; ?>);
-        console.log('Penilaian Bulan Ini:', <?php echo $statistics['penilaian_bulan_ini']; ?>);
-        console.log('Data Penilaian Terbaru:', <?php echo json_encode($penilaian_terbaru); ?>);
+        console.log('Statistik:', <?php echo json_encode($statistics); ?>);
+        console.log('Jadwal Hari Ini:', <?php echo json_encode($jadwal_hari_ini); ?>);
     </script>
 </body>
 </html>

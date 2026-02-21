@@ -6,6 +6,30 @@ ini_set('display_errors', 1);
 require_once '../includes/config.php';
 require_once '../includes/menu_functions.php';
 
+// Fungsi konversi hari Inggris ke Indonesia
+function getHariIndonesia($tanggal) {
+    if (empty($tanggal)) return '';
+    $hariInggris = date('l', strtotime($tanggal));
+    $hariIndonesia = [
+        'Sunday' => 'Minggu',
+        'Monday' => 'Senin',
+        'Tuesday' => 'Selasa',
+        'Wednesday' => 'Rabu',
+        'Thursday' => 'Kamis',
+        'Friday' => 'Jumat',
+        'Saturday' => 'Sabtu'
+    ];
+    return $hariIndonesia[$hariInggris] ?? $hariInggris;
+}
+
+// Fungsi format tanggal lengkap dengan hari
+function formatTanggalLengkap($tanggal) {
+    if (empty($tanggal)) return '';
+    $hari = getHariIndonesia($tanggal);
+    $tanggal_format = date('d F Y', strtotime($tanggal));
+    return $hari . ', ' . $tanggal_format;
+}
+
 // CEK LOGIN & ROLE
 if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] != 'orangtua') {
     header('Location: ../index.php');
@@ -53,7 +77,9 @@ if (isset($_GET['action'])) {
             $penilaian_id = intval($penilaian_id);
             
             $sql = "SELECT ps.*, 
+                   ps.tanggal_penilaian as tanggal_original,
                    DATE_FORMAT(ps.tanggal_penilaian, '%d %M %Y') as tanggal_format,
+                   DATE_FORMAT(ps.tanggal_penilaian, '%H:%i') as jam_format,
                    sp.nama_pelajaran,
                    u.full_name as nama_guru
             FROM penilaian_siswa ps
@@ -98,7 +124,9 @@ if (isset($_GET['action'])) {
         $penilaian_id = intval($_GET['id']);
         
         $sql = "SELECT ps.*, 
+                       ps.tanggal_penilaian as tanggal_original,
                        DATE_FORMAT(ps.tanggal_penilaian, '%d %M %Y') as tanggal_format,
+                       DATE_FORMAT(ps.tanggal_penilaian, '%H:%i') as jam_format,
                        sp.nama_pelajaran,
                        u.full_name as nama_guru
                 FROM penilaian_siswa ps
@@ -176,6 +204,7 @@ if ($selected_anak_id == 0 && !empty($anak_data)) {
 $filter_guru = isset($_GET['guru']) ? $_GET['guru'] : '';
 $filter_kategori = isset($_GET['kategori']) ? $_GET['kategori'] : '';
 $filter_bulan = isset($_GET['bulan']) ? $_GET['bulan'] : '';
+$filter_minggu = isset($_GET['minggu']) ? $_GET['minggu'] : '';
 $search_keyword = isset($_GET['search']) ? trim($_GET['search']) : '';
 
 // PAGINATION
@@ -213,9 +242,11 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
     // BANGUN QUERY DASAR
     $base_query = "SELECT 
                 ps.*,
+                ps.tanggal_penilaian as tanggal_original,
                 DATE_FORMAT(ps.tanggal_penilaian, '%d %M %Y') as tanggal_format,
                 DATE_FORMAT(ps.tanggal_penilaian, '%H:%i') as jam_format,
                 DATE_FORMAT(ps.tanggal_penilaian, '%Y-%m') as bulan_tahun,
+                WEEK(ps.tanggal_penilaian, 1) as minggu_ke,
                 sp.nama_pelajaran,
                 u.full_name as nama_guru
                FROM penilaian_siswa ps
@@ -269,6 +300,33 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
         $param_types .= "s";
         $count_param_types .= "s";
     }
+    
+// TAMBAH FILTER MINGGU
+if (!empty($filter_minggu)) {
+    // Hitung rentang tanggal untuk minggu yang dipilih
+    $tahun = substr($filter_bulan, 0, 4);
+    $bulan = substr($filter_bulan, 5, 2);
+    $tanggal_awal_bulan = "$tahun-$bulan-01";
+    
+    $minggu_ke = intval($filter_minggu);
+    $tanggal_mulai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . (($minggu_ke-1)*7) . ' days'));
+    $tanggal_selesai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . ($minggu_ke*7 - 1) . ' days'));
+    
+    // Batasi dengan akhir bulan
+    $tanggal_akhir_bulan = date('Y-m-t', strtotime($tanggal_awal_bulan));
+    if (strtotime($tanggal_selesai) > strtotime($tanggal_akhir_bulan)) {
+        $tanggal_selesai = $tanggal_akhir_bulan;
+    }
+    
+    $base_query .= " AND ps.tanggal_penilaian BETWEEN ? AND ?";
+    $count_query .= " AND ps.tanggal_penilaian BETWEEN ? AND ?";
+    $params[] = $tanggal_mulai;
+    $params[] = $tanggal_selesai;
+    $count_params[] = $tanggal_mulai;
+    $count_params[] = $tanggal_selesai;
+    $param_types .= "ss";
+    $count_param_types .= "ss";
+}
     
     // TAMBAH SEARCH
     if (!empty($search_keyword)) {
@@ -353,6 +411,100 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
     }
 }
 
+// GENERATE OPTIONS BULAN
+$bulan_options = [];
+if ($selected_anak_id > 0) {
+    $sql_bulan = "SELECT DISTINCT DATE_FORMAT(tanggal_penilaian, '%Y-%m') as bulan_tahun,
+                          DATE_FORMAT(tanggal_penilaian, '%M %Y') as bulan_format
+                   FROM penilaian_siswa 
+                   WHERE siswa_id = ?
+                   ORDER BY bulan_tahun DESC";
+    
+    $stmt_bulan = $conn->prepare($sql_bulan);
+    if ($stmt_bulan) {
+        $stmt_bulan->bind_param("i", $selected_anak_id);
+        $stmt_bulan->execute();
+        $result_bulan = $stmt_bulan->get_result();
+        while ($row_bulan = $result_bulan->fetch_assoc()) {
+            $bulan_options[$row_bulan['bulan_tahun']] = $row_bulan['bulan_format'];
+        }
+        $stmt_bulan->close();
+    }
+}
+
+// AMBIL DATA MINGGU UNTUK FILTER (hanya jika bulan dipilih)
+$minggu_options = [];
+if (!empty($filter_bulan) && $selected_anak_id > 0) {
+    // Hitung minggu dalam bulan (1-4/5)
+    $tahun = substr($filter_bulan, 0, 4);
+    $bulan = substr($filter_bulan, 5, 2);
+    
+    // Tentukan tanggal awal bulan
+    $tanggal_awal_bulan = "$tahun-$bulan-01";
+    $tanggal_akhir_bulan = date('Y-m-t', strtotime($tanggal_awal_bulan));
+    
+    // Hitung jumlah hari dalam bulan
+    $jumlah_hari = date('t', strtotime($tanggal_awal_bulan));
+    
+    // Bagi menjadi 4 minggu (dengan kemungkinan minggu ke-5)
+    $minggu = [];
+    
+    for ($i = 1; $i <= 4; $i++) {
+        $tanggal_mulai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . (($i-1)*7) . ' days'));
+        $tanggal_selesai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . ($i*7 - 1) . ' days'));
+        
+        // Pastikan tidak melebihi akhir bulan
+        if (strtotime($tanggal_selesai) > strtotime($tanggal_akhir_bulan)) {
+            $tanggal_selesai = $tanggal_akhir_bulan;
+        }
+        
+        // Cek apakah ada penilaian di minggu ini
+        $sql_cek = "SELECT COUNT(*) as total 
+                   FROM penilaian_siswa 
+                   WHERE siswa_id = ? 
+                     AND tanggal_penilaian BETWEEN ? AND ?";
+        
+        $stmt_cek = $conn->prepare($sql_cek);
+        if ($stmt_cek) {
+            $stmt_cek->bind_param("iss", $selected_anak_id, $tanggal_mulai, $tanggal_selesai);
+            $stmt_cek->execute();
+            $result_cek = $stmt_cek->get_result();
+            $row_cek = $result_cek->fetch_assoc();
+            
+            if ($row_cek['total'] > 0) {
+                $minggu_options[$i] = "Minggu $i: " . date('d M', strtotime($tanggal_mulai)) . " - " . date('d M', strtotime($tanggal_selesai));
+            }
+            $stmt_cek->close();
+        }
+    }
+    
+    // Cek untuk minggu ke-5 jika ada
+    if ($jumlah_hari > 28) {
+        $tanggal_mulai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + 28 days'));
+        $tanggal_selesai = $tanggal_akhir_bulan;
+        
+        if (strtotime($tanggal_mulai) <= strtotime($tanggal_akhir_bulan)) {
+            $sql_cek = "SELECT COUNT(*) as total 
+                       FROM penilaian_siswa 
+                       WHERE siswa_id = ? 
+                         AND tanggal_penilaian BETWEEN ? AND ?";
+            
+            $stmt_cek = $conn->prepare($sql_cek);
+            if ($stmt_cek) {
+                $stmt_cek->bind_param("iss", $selected_anak_id, $tanggal_mulai, $tanggal_selesai);
+                $stmt_cek->execute();
+                $result_cek = $stmt_cek->get_result();
+                $row_cek = $result_cek->fetch_assoc();
+                
+                if ($row_cek['total'] > 0) {
+                    $minggu_options[5] = "Minggu 5: " . date('d M', strtotime($tanggal_mulai)) . " - " . date('d M', strtotime($tanggal_selesai));
+                }
+                $stmt_cek->close();
+            }
+        }
+    }
+}
+
 // HITUNG PAGINATION
 $total_pages = ceil($total_records / $limit);
 $start_record = ($page - 1) * $limit + 1;
@@ -376,27 +528,6 @@ if (!empty($riwayat_data)) {
     }
     $stats['rata_skor'] = $total_records > 0 ? round($total_skor / $total_records, 1) : 0;
 }
-
-// GENERATE OPTIONS BULAN
-$bulan_options = [];
-if ($selected_anak_id > 0) {
-    $sql_bulan = "SELECT DISTINCT DATE_FORMAT(tanggal_penilaian, '%Y-%m') as bulan_tahun,
-                          DATE_FORMAT(tanggal_penilaian, '%M %Y') as bulan_format
-                   FROM penilaian_siswa 
-                   WHERE siswa_id = ?
-                   ORDER BY bulan_tahun DESC";
-    
-    $stmt_bulan = $conn->prepare($sql_bulan);
-    if ($stmt_bulan) {
-        $stmt_bulan->bind_param("i", $selected_anak_id);
-        $stmt_bulan->execute();
-        $result_bulan = $stmt_bulan->get_result();
-        while ($row_bulan = $result_bulan->fetch_assoc()) {
-            $bulan_options[$row_bulan['bulan_tahun']] = $row_bulan['bulan_format'];
-        }
-        $stmt_bulan->close();
-    }
-}
 ?>
 
 <!DOCTYPE html>
@@ -409,7 +540,7 @@ if ($selected_anak_id > 0) {
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        /* (CSS styles tetap sama seperti sebelumnya) */
+        /* CSS styles tetap sama seperti sebelumnya */
         .card {
             transition: transform 0.2s, box-shadow 0.2s;
         }
@@ -772,6 +903,7 @@ if ($selected_anak_id > 0) {
                             <input type="hidden" name="guru" value="<?php echo htmlspecialchars($filter_guru); ?>">
                             <input type="hidden" name="kategori" value="<?php echo htmlspecialchars($filter_kategori); ?>">
                             <input type="hidden" name="bulan" value="<?php echo htmlspecialchars($filter_bulan); ?>">
+                            <input type="hidden" name="minggu" value="<?php echo htmlspecialchars($filter_minggu); ?>">
                             <input type="hidden" name="search" value="<?php echo htmlspecialchars($search_keyword); ?>">
                             
                             <select name="anak_id" onchange="this.form.submit()" 
@@ -838,77 +970,92 @@ if ($selected_anak_id > 0) {
                     </div>
                 </div>
 
-                <!-- Filter Section -->
-                <div class="card bg-white rounded-xl shadow p-4 md:p-6 mb-6">
-                    <h3 class="text-base md:text-lg font-semibold text-gray-800 mb-3 md:mb-4">
-                        <i class="fas fa-filter mr-2"></i> Filter & Pencarian
-                    </h3>
-                    
-                    <form method="GET" class="space-y-3 md:space-y-4">
-                        <input type="hidden" name="anak_id" value="<?php echo $selected_anak_id; ?>">
-                        <input type="hidden" name="page" value="1">
-                        
-                        <div class="grid filter-grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
-                            <!-- Filter Guru -->
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Filter Guru</label>
-                                <select name="guru" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
-                                    <option value="">Semua Guru</option>
-                                    <?php foreach ($guru_list as $guru): ?>
-                                    <option value="<?php echo htmlspecialchars($guru); ?>"
-                                            <?php echo $filter_guru == $guru ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($guru); ?>
-                                    </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                            
-                            <!-- Filter Kategori -->
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Filter Kategori</label>
-                                <select name="kategori" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
-                                    <option value="">Semua Kategori</option>
-                                    <?php foreach ($kategori_list as $kategori): ?>
-                                    <option value="<?php echo $kategori; ?>"
-                                            <?php echo $filter_kategori == $kategori ? 'selected' : ''; ?>>
-                                        <?php echo $kategori; ?>
-                                    </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                            
-                            <!-- Filter Bulan -->
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Filter Bulan</label>
-                                <select name="bulan" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
-                                    <option value="">Semua Bulan</option>
-                                    <?php foreach ($bulan_options as $value => $label): ?>
-                                    <option value="<?php echo $value; ?>"
-                                            <?php echo $filter_bulan == $value ? 'selected' : ''; ?>>
-                                        <?php echo $label; ?>
-                                    </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                        </div>
-                        
-                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
-                            <div class="text-sm text-gray-600">
-                                Menampilkan <?php echo $start_record; ?>-<?php echo $end_record; ?> dari <?php echo $total_records; ?> penilaian
-                            </div>
-                            <div class="flex space-x-2">
-                                <button type="submit" 
-                                        class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm md:text-base">
-                                    <i class="fas fa-filter mr-1 md:mr-2"></i> <span class="hidden md:inline">Terapkan</span>
-                                </button>
-                                <a href="riwayatNilai.php?anak_id=<?php echo $selected_anak_id; ?>" 
-                                   class="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm md:text-base">
-                                    <i class="fas fa-redo mr-1 md:mr-2"></i> <span class="hidden md:inline">Reset</span>
-                                </a>
-                            </div>
-                        </div>
-                    </form>
-                </div>
+<!-- Filter Section -->
+<div class="card bg-white rounded-xl shadow p-4 md:p-6 mb-6">
+    <h3 class="text-base md:text-lg font-semibold text-gray-800 mb-3 md:mb-4">
+        <i class="fas fa-filter mr-2"></i> Filter & Pencarian
+    </h3>
+    
+    <form method="GET" class="space-y-3 md:space-y-4" id="filterForm">
+        <input type="hidden" name="anak_id" value="<?php echo $selected_anak_id; ?>">
+        <input type="hidden" name="page" value="1">
+        
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-3 md:gap-4">
+            <!-- Filter Guru -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Filter Guru</label>
+                <select name="guru" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
+                    <option value="">Semua Guru</option>
+                    <?php foreach ($guru_list as $guru): ?>
+                    <option value="<?php echo htmlspecialchars($guru); ?>"
+                            <?php echo $filter_guru == $guru ? 'selected' : ''; ?>>
+                        <?php echo htmlspecialchars($guru); ?>
+                    </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            
+            <!-- Filter Kategori -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Filter Kategori</label>
+                <select name="kategori" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
+                    <option value="">Semua Kategori</option>
+                    <?php foreach ($kategori_list as $kategori): ?>
+                    <option value="<?php echo $kategori; ?>"
+                            <?php echo $filter_kategori == $kategori ? 'selected' : ''; ?>>
+                        <?php echo $kategori; ?>
+                    </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            
+            <!-- Filter Bulan -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Filter Bulan</label>
+                <select name="bulan" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
+                    <option value="">Semua Bulan</option>
+                    <?php foreach ($bulan_options as $value => $label): ?>
+                    <option value="<?php echo $value; ?>"
+                            <?php echo $filter_bulan == $value ? 'selected' : ''; ?>>
+                        <?php echo $label; ?>
+                    </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            
+            <!-- Filter Minggu -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Filter Minggu</label>
+                <select name="minggu" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base"
+                        <?php echo empty($filter_bulan) ? 'disabled' : ''; ?>>
+                    <option value=""><?php echo empty($filter_bulan) ? 'Pilih bulan dulu' : 'Semua Minggu'; ?></option>
+                    <?php foreach ($minggu_options as $minggu_ke => $label): ?>
+                    <option value="<?php echo $minggu_ke; ?>"
+                            <?php echo $filter_minggu == $minggu_ke ? 'selected' : ''; ?>>
+                        <?php echo $label; ?>
+                    </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+        </div>
+        
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+            <div class="text-sm text-gray-600">
+                Menampilkan <?php echo $start_record; ?>-<?php echo $end_record; ?> dari <?php echo $total_records; ?> penilaian
+            </div>
+            <div class="flex space-x-2">
+                <button type="submit" 
+                        class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm md:text-base">
+                    <i class="fas fa-filter mr-1 md:mr-2"></i> Terapkan Filter
+                </button>
+                <a href="riwayatNilai.php?anak_id=<?php echo $selected_anak_id; ?>" 
+                   class="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm md:text-base">
+                    <i class="fas fa-redo mr-1 md:mr-2"></i> Reset
+                </a>
+            </div>
+        </div>
+    </form>
+</div>
 
                 <!-- Statistik Cards -->
                 <div class="grid stat-cards grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
@@ -978,7 +1125,7 @@ if ($selected_anak_id > 0) {
                             <i class="fas fa-clipboard-list text-4xl text-gray-400 mb-3"></i>
                             <h4 class="text-lg font-medium text-gray-700 mb-2">Tidak ada data penilaian</h4>
                             <p class="text-gray-500 text-sm md:text-base">
-                                <?php echo !empty($filter_guru) || !empty($filter_kategori) || !empty($filter_bulan) || !empty($search_keyword) 
+                                <?php echo !empty($filter_guru) || !empty($filter_kategori) || !empty($filter_bulan) || !empty($filter_minggu) || !empty($search_keyword) 
                                     ? 'Coba ubah filter atau kata kunci pencarian' 
                                     : 'Belum ada penilaian untuk anak ini'; ?>
                             </p>
@@ -1019,11 +1166,12 @@ if ($selected_anak_id > 0) {
                                             else $badge_class = 'badge-kurang';
                                             
                                             $persentase = $data['persentase'] ?? round(($data['total_score'] / 50) * 100);
+                                            $tanggal_lengkap = formatTanggalLengkap($data['tanggal_original']);
                                         ?>
                                         <tr class="hover:bg-gray-50">
                                             <td class="px-4 md:px-6 py-3 md:py-4 whitespace-nowrap">
-                                                <div class="text-sm font-medium text-gray-900"><?php echo $data['tanggal_format']; ?></div>
-                                                <!--<div class="text-xs text-gray-500"><?php echo $data['jam_format']; ?></div>-->
+                                                <div class="text-sm font-medium text-gray-900"><?php echo $tanggal_lengkap; ?></div>
+                                                <!-- <div class="text-xs text-gray-500"><?php echo $data['jam_format']; ?></div> -->
                                             </td>
                                             <td class="px-4 md:px-6 py-3 md:py-4">
                                                 <div class="text-sm font-medium text-gray-900"><?php echo $data['nama_guru']; ?></div>
@@ -1031,7 +1179,7 @@ if ($selected_anak_id > 0) {
                                             </td>
                                             <td class="px-4 md:px-6 py-3 md:py-4 whitespace-nowrap">
                                                 <div class="text-lg font-bold text-gray-900"><?php echo $data['total_score']; ?>/50</div>
-                                                <div class="text-xs text-gray-500"><?php echo $persentase; ?>%</div>
+                                                <!-- <div class="text-xs text-gray-500"><?php echo $persentase; ?>%</div> -->
                                             </td>
                                             <td class="px-4 md:px-6 py-3 md:py-4 whitespace-nowrap">
                                                 <span class="badge <?php echo $badge_class; ?>">
@@ -1070,13 +1218,14 @@ if ($selected_anak_id > 0) {
                                     else $badge_class = 'badge-kurang';
                                     
                                     $persentase = $data['persentase'] ?? round(($data['total_score'] / 50) * 100);
+                                    $tanggal_lengkap = formatTanggalLengkap($data['tanggal_original']);
                                 ?>
                                 <div class="mobile-card-item">
                                     <div class="flex justify-between items-start mb-2">
                                         <div>
                                             <div class="mobile-card-label">Tanggal</div>
                                             <div class="mobile-card-value font-medium">
-                                                <?php echo $data['tanggal_format']; ?>
+                                                <?php echo $tanggal_lengkap; ?>
                                             </div>
                                             <div class="text-xs text-gray-500"><?php echo $data['jam_format']; ?></div>
                                         </div>
@@ -1325,6 +1474,18 @@ if ($selected_anak_id > 0) {
             }
         });
 
+        // Filter Minggu - Enable/Disable berdasarkan bulan
+$(document).ready(function() {
+    $('select[name="bulan"]').change(function() {
+        if ($(this).val()) {
+            $('select[name="minggu"]').prop('disabled', false);
+        } else {
+            $('select[name="minggu"]').prop('disabled', true);
+            $('select[name="minggu"]').val('');
+        }
+    });
+});
+
         // Functionality for penilaian detail
         function showDetailPenilaian(penilaianId) {
             const modal = document.getElementById('detailPenilaianModal');
@@ -1389,12 +1550,16 @@ if ($selected_anak_id > 0) {
                     { name: 'Independensi', value: d.independence }
                 ];
                 
+                const tanggalLengkap = d.tanggal_original ? 
+                    `${getHariIndonesia(d.tanggal_original)}, ${d.tanggal_format}` : 
+                    d.tanggal_format;
+                
                 content.innerHTML = `
                     <div class="space-y-6">
                         <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-6 rounded-lg">
                             <h3 class="text-xl font-bold">Detail Penilaian</h3>
                             <div class="mt-2 space-y-2">
-                                <p><i class="fas fa-calendar-alt mr-2"></i> ${d.tanggal_format}</p>
+                                <p><i class="fas fa-calendar-alt mr-2"></i> ${tanggalLengkap} (${d.jam_format})</p>
                                 <p><i class="fas fa-user-tie mr-2"></i> ${d.nama_guru}</p>
                                 ${d.nama_pelajaran ? `<p><i class="fas fa-book mr-2"></i> ${d.nama_pelajaran}</p>` : ''}
                             </div>
@@ -1454,6 +1619,17 @@ if ($selected_anak_id > 0) {
                     </div>
                 `;
             }
+        }
+
+        // Helper function untuk mendapatkan hari Indonesia (untuk JavaScript)
+        function getHariIndonesia(tanggal) {
+            if (!tanggal) return '';
+            const hariInggris = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            const hariIndonesia = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+            
+            const date = new Date(tanggal + 'T00:00:00');
+            const dayIndex = date.getDay();
+            return hariIndonesia[dayIndex] || hariInggris[dayIndex];
         }
 
         function closeModal(modalId) {
