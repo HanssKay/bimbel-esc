@@ -961,7 +961,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_jadwal_detail' && isset($_GET[
             z-index: 1000;
             max-height: 300px;
             overflow-y: auto;
-            width: 50%;
+            width: 20%;
             margin-top: 2px;
         }
 
