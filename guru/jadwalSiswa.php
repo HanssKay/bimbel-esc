@@ -1433,29 +1433,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_jadwal_detail' && isset($_GET[
                 </div>
             </div>
 
-            <!-- Siswa Tanpa Jadwal -->
-            <?php if (count($siswa_tanpa_jadwal) > 0 && !$filter_hari && !$filter_siswa && !$filter_tingkat): ?>
-                <div class="bg-white shadow rounded-lg p-6 mt-6">
-                    <h3 class="text-lg font-medium leading-6 text-gray-900 mb-4">
-                        <i class="fas fa-exclamation-triangle text-yellow-500 mr-2"></i> Siswa Belum Terjadwal
-                    </h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <?php foreach ($siswa_tanpa_jadwal as $siswa): ?>
-                            <div class="border rounded-lg p-4 hover:shadow-md transition-shadow">
-                                <div class="font-medium text-gray-900"><?php echo htmlspecialchars($siswa['nama_lengkap']); ?>
-                                </div>
-                                <div class="text-sm text-gray-600 mb-2">
-                                    Kelas: <?php echo $siswa['kelas']; ?> | <?php echo $siswa['sekolah_asal'] ?? '-'; ?>
-                                </div>
-                                <button onclick="quickAddJadwal(<?php echo $siswa['id']; ?>)"
-                                    class="mt-2 w-full px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm transition-colors">
-                                    <i class="fas fa-plus-circle mr-1"></i> Buat Jadwal
-                                </button>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                </div>
-            <?php endif; ?>
         </div>
 
         <!-- Footer -->
