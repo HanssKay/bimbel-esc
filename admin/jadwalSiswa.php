@@ -109,7 +109,7 @@ function cariAtauBuatSesiGuru($conn, $guru_id, $hari, $jam_mulai, $jam_selesai)
         // Buat sesi baru - tanpa kapasitas_maks dan kapasitas_terisi
         $sql_insert = "INSERT INTO sesi_mengajar_guru 
               (guru_id, hari, jam_mulai, jam_selesai, status, created_at) 
-              VALUES (?, ?, ?, ?, 'tersedia', NOW())";
+              VALUES (?, ?, ?, ?, 'aktif', NOW())";
 
         $stmt_insert = executeQuery($conn, $sql_insert, [$guru_id, $hari, $jam_mulai, $jam_selesai], "isss");
         $sesi_id = $stmt_insert->insert_id;
