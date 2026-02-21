@@ -99,8 +99,8 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
 
     if (guruBolehAksesSiswa($conn, $guru_id, $siswa_id)) {
         try {
-            // QUERY 1: Ambil data dasar siswa
-            $sql_main = "SELECT 
+            // QUERY 1: Ambil data dasar siswa - TANPA GROUP BY
+            $sql_main = "SELECT DISTINCT 
                         s.*,
                         ps.tingkat,
                         ps.jenis_kelas,
@@ -115,7 +115,6 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                     AND jb.status = 'aktif'
                     AND ps.status = 'aktif'
                     AND smg.status != 'tidak_aktif'
-                    GROUP BY s.id
                     LIMIT 1";
 
             $stmt = $conn->prepare($sql_main);
@@ -129,7 +128,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
             if ($row = $result->fetch_assoc()) {
                 $siswa_detail = $row;
 
-                // QUERY 2: Ambil data program/mata pelajaran yang diajar guru ini
+                // QUERY 2: Ambil data program/mata pelajaran - TANPA GROUP BY
                 $sql_program_guru = "SELECT DISTINCT sp.nama_pelajaran
                                     FROM siswa_pelajaran sp
                                     INNER JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id
@@ -138,8 +137,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                                     AND smg.guru_id = ?
                                     AND jb.status = 'aktif'
                                     AND sp.status = 'aktif'
-                                    AND smg.status != 'tidak_aktif'
-                                    GROUP BY sp.nama_pelajaran";
+                                    AND smg.status != 'tidak_aktif'";
 
                 $stmt2 = $conn->prepare($sql_program_guru);
                 if ($stmt2) {
@@ -154,7 +152,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                     $stmt2->close();
                 }
 
-                // QUERY 3: Hitung total program yang diajar guru ini
+                // QUERY 3: Hitung total program - TANPA GROUP BY (gunakan subquery atau count distinct)
                 $sql_total_program = "SELECT COUNT(DISTINCT sp.nama_pelajaran) as total_program
                                      FROM siswa_pelajaran sp
                                      INNER JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id
@@ -176,7 +174,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                     $stmt3->close();
                 }
 
-                // QUERY 4: Hitung total jadwal per minggu
+                // QUERY 4: Hitung total jadwal - TANPA GROUP BY
                 $sql_total_jadwal = "SELECT COUNT(DISTINCT jb.id) as total_jadwal
                                     FROM jadwal_belajar jb
                                     INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
@@ -224,7 +222,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                     $stmt5->close();
                 }
 
-                // QUERY 6: Ambil saudara kandung
+                // QUERY 6: Ambil saudara kandung (sudah benar)
                 if (!empty($orangtua_data)) {
                     $orangtua_ids = array_column($orangtua_data, 'id');
                     $placeholders = implode(',', array_fill(0, count($orangtua_ids), '?'));
@@ -252,7 +250,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                     }
                 }
 
-                // QUERY 7: Ambil jadwal belajar detail
+                // QUERY 7: Ambil jadwal belajar detail - TANPA GROUP BY
                 $sql_jadwal = "SELECT DISTINCT 
                               smg.hari,
                               DATE_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai,
@@ -285,7 +283,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['siswa_
                     $stmt7->close();
                 }
 
-                // QUERY 8: Ambil riwayat penilaian
+                // QUERY 8: Ambil riwayat penilaian (sudah benar)
                 $sql_penilaian = "SELECT ps.*, 
                                   DATE_FORMAT(ps.tanggal_penilaian, '%d %M %Y') as tgl_format,
                                   ps.kategori
@@ -1166,39 +1164,6 @@ if ($guru_id > 0) {
                             </div>
                         </div>
 
-                        <!-- Jadwal Belajar -->
-                        <?php if (!empty($siswa_detail['jadwal_detail'])): ?>
-                        <div class="bg-orange-50 p-4 rounded-lg">
-                            <h3 class="font-bold text-lg text-orange-800 mb-4 flex items-center">
-                                <i class="fas fa-calendar-alt mr-2"></i> Jadwal Belajar
-                            </h3>
-                            <div class="space-y-3">
-                                <?php foreach ($siswa_detail['jadwal_detail'] as $jadwal): ?>
-                                    <div class="bg-white p-3 rounded-lg border-l-4 border-orange-400 shadow-sm jadwal-card">
-                                        <div class="flex justify-between items-start">
-                                            <div>
-                                                <div class="font-medium text-gray-900">
-                                                    <?= htmlspecialchars($jadwal['hari']) ?>, 
-                                                    <?= $jadwal['jam_mulai'] ?> - <?= $jadwal['jam_selesai'] ?>
-                                                </div>
-                                                <!-- <div class="text-sm text-gray-600 mt-1">
-                                                    <i class="fas fa-book mr-1 text-orange-500"></i>
-                                                    <?= htmlspecialchars($jadwal['nama_pelajaran'] ?? 'Belum ada mata pelajaran') ?>
-                                                </div> -->
-                                            </div>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                                <?php if ($siswa_detail['total_jadwal'] > 0): ?>
-                                    <div class="text-sm text-gray-500 mt-2">
-                                        <i class="fas fa-info-circle mr-1"></i>
-                                        Total: <?= $siswa_detail['total_jadwal'] ?> jadwal per minggu
-                                    </div>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                        <?php endif; ?>
-
                         <!-- Data Orang Tua -->
                         <?php if (!empty($siswa_detail['orangtua'])): ?>
                         <div class="bg-yellow-50 p-4 rounded-lg">
@@ -1242,54 +1207,6 @@ if ($guru_id > 0) {
                         </div>
                         <?php endif; ?>
 
-                        <!-- Riwayat Penilaian -->
-                        <?php if (!empty($siswa_detail['penilaian'])): ?>
-                        <div class="bg-indigo-50 p-4 rounded-lg">
-                            <h3 class="font-bold text-lg text-indigo-800 mb-4 flex items-center">
-                                <i class="fas fa-clipboard-list mr-2"></i> Riwayat Penilaian
-                            </h3>
-                            <div class="space-y-3">
-                                <?php foreach ($siswa_detail['penilaian'] as $penilaian): ?>
-                                    <div class="bg-white p-3 rounded-lg border">
-                                        <div class="flex justify-between items-center">
-                                            <div>
-                                                <div class="font-medium text-gray-900">
-                                                    <?= date('d M Y', strtotime($penilaian['tanggal_penilaian'])) ?>
-                                                </div>
-                                                <div class="text-sm text-gray-600">
-                                                    Total Score: <?= $penilaian['total_score'] ?>/50
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <span class="px-2 py-1 text-xs rounded-full 
-                                                    <?php
-                                                    $kategori = $penilaian['kategori'] ?? '';
-                                                    if ($kategori == 'Sangat Baik') echo 'bg-green-100 text-green-800';
-                                                    elseif ($kategori == 'Baik') echo 'bg-blue-100 text-blue-800';
-                                                    elseif ($kategori == 'Cukup') echo 'bg-yellow-100 text-yellow-800';
-                                                    else echo 'bg-red-100 text-red-800';
-                                                    ?>">
-                                                    <?= $kategori ?>
-                                                </span>
-                                            </div>
-                                        </div>
-                                        <?php if (!empty($penilaian['catatan_guru'])): ?>
-                                            <div class="mt-2 text-sm text-gray-600 border-t pt-2">
-                                                <i class="fas fa-quote-left text-gray-400 mr-1"></i>
-                                                <?= htmlspecialchars($penilaian['catatan_guru']) ?>
-                                            </div>
-                                        <?php endif; ?>
-                                    </div>
-                                <?php endforeach; ?>
-                                <div class="text-center mt-3">
-                                    <a href="riwayat.php?siswa_id=<?= $siswa_detail['id'] ?>" 
-                                       class="inline-flex items-center text-sm text-indigo-600 hover:text-indigo-800">
-                                        <i class="fas fa-history mr-1"></i> Lihat semua penilaian
-                                    </a>
-                                </div>
-                            </div>
-                        </div>
-                        <?php endif; ?>
                     </div>
                 <?php else: ?>
                     <div class="text-center py-8 text-red-600">
