@@ -809,9 +809,9 @@ $urutan_hari = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
 
                             <div class="text-center py-8 text-gray-500">
                                 <i class="fas fa-calendar-plus text-5xl mb-4 text-gray-300"></i>
-                                <h3 class="text-lg font-medium mb-2">Belum Ada Jadwal Bimbingan</h3>
+                                <h3 class="text-lg font-medium mb-2">Belum Ada Jadwal Belajar</h3>
                                 <p class="mb-4">
-                                    Anak-anak Anda belum memiliki jadwal bimbingan belajar.
+                                    Anak-anak Anda belum memiliki jadwal belajar.
                                 </p>
                                 <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 max-w-md mx-auto">
                                     <p class="text-yellow-800 text-sm">
@@ -901,7 +901,7 @@ $urutan_hari = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
                         <div class="bg-white shadow rounded-lg mb-8">
                             <div class="px-4 py-5 sm:px-6 border-b border-gray-200">
                                 <h3 class="text-lg font-medium leading-6 text-gray-900">
-                                    <i class="fas fa-chart-pie mr-2"></i> Sebaran Jadwal per Hari
+                                    <i class="fas fa-chart-pie mr-2"></i> Jadwal per Hari
                                 </h3>
                             </div>
                             <div class="p-6">
@@ -928,7 +928,7 @@ $urutan_hari = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
                     <div class="bg-white shadow rounded-lg mb-8">
                         <div class="px-4 py-5 sm:px-6 border-b border-gray-200">
                             <h3 class="text-lg font-medium leading-6 text-gray-900">
-                                <i class="fas fa-table mr-2"></i> Daftar Jadwal Bimbingan
+                                <i class="fas fa-table mr-2"></i> Daftar Jadwal Belajar Anak
                                 <?php if ($filter_hari || $filter_anak): ?>
                                     <span class="text-sm font-normal text-gray-500 ml-2">
                                         (Filter diterapkan)
@@ -1024,9 +1024,7 @@ $urutan_hari = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
                             <i class="fas fa-info-circle mr-2"></i> Informasi Jadwal
                         </h4>
                         <ul class="text-blue-700 text-sm space-y-1">
-                            <li>• Jadwal ditampilkan berdasarkan sesi mengajar yang aktif.</li>
-                            <li>• Setiap jadwal adalah sesi belajar selama <?php echo hitungDurasi('09:00:00', '11:00:00'); ?>
-                                jam.</li>
+                            <li>• Jadwal ditampilkan berdasarkan jadwal anak yang aktif.</li>
                             <li>• Jika ada perubahan jadwal, akan segera diperbarui di sini.</li>
                             <li>• Hubungi guru atau admin jika ada pertanyaan tentang jadwal.</li>
                         </ul>

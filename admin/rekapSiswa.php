@@ -37,9 +37,6 @@ $filter_guru = isset($_GET['guru_id']) ? intval($_GET['guru_id']) : 0;
 // Filter siswa
 $filter_siswa = isset($_GET['siswa_id']) ? intval($_GET['siswa_id']) : 0;
 
-// Filter minggu (1-4)
-$filter_minggu = isset($_GET['minggu']) ? intval($_GET['minggu']) : 0;
-
 // Ambil daftar guru untuk dropdown
 $guru_options = [];
 $sql_guru = "SELECT g.id, u.full_name as nama_guru 
@@ -71,251 +68,156 @@ while ($row = $result_siswa->fetch_assoc()) {
 }
 $stmt_siswa->close();
 
-// Hitung rentang tanggal berdasarkan minggu
-$start_date = null;
-$end_date = null;
-if ($filter_minggu > 0) {
-    $first_day = date("Y-m-01", strtotime($periode . "-01"));
-    $week_start = ($filter_minggu - 1) * 7 + 1;
-    $start_date = date("Y-m-d", strtotime($first_day . " +" . ($week_start - 1) . " days"));
-    $end_date = date("Y-m-d", strtotime($start_date . " +6 days"));
-    
-    // Pastikan tidak melebihi akhir bulan
-    $last_day = date("Y-m-t", strtotime($periode . "-01"));
-    if ($end_date > $last_day) {
-        $end_date = $last_day;
-    }
-}
+// Hitung tanggal awal dan akhir bulan
+$tanggal_awal = date('Y-m-01', strtotime("$tahun-$bulan-01"));
+$tanggal_akhir = date('Y-m-t', strtotime("$tahun-$bulan-01"));
 
-// **QUERY UTAMA: Ambil data jadwal belajar yang aktif - DIAMANKAN**
-$sql_rekap = "SELECT 
-                g.id as guru_id,
-                u.full_name as nama_guru,
-                smg.id as sesi_guru_id,
-                smg.hari,
-                smg.jam_mulai,
-                smg.jam_selesai,
-                ps.id as pendaftaran_id,
-                s.id as siswa_id,
-                s.nama_lengkap,
-                s.kelas as kelas_sekolah,
-                sp.id as siswa_pelajaran_id,
-                sp.nama_pelajaran,
-                ps.tingkat as tingkat_bimbel,
-                jb.id as jadwal_id
-              FROM jadwal_belajar jb
-              JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
-              JOIN siswa_pelajaran sp ON jb.siswa_pelajaran_id = sp.id
-              JOIN siswa s ON sp.siswa_id = s.id
-              JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-              LEFT JOIN guru g ON smg.guru_id = g.id
-              LEFT JOIN users u ON g.user_id = u.id
-              WHERE jb.status = 'aktif'
-              AND sp.status = 'aktif'
-              AND ps.status = 'aktif'
-              AND s.status = 'aktif'";
+// ============================================
+// AMBIL DATA REKAP ABSENSI - TANPA KOLOM MAPEL
+// ============================================
+$rekap_data = [];
+$statistik = [
+    'total_siswa' => 0,
+    'total_guru' => 0,
+    'total_sesi' => 0,
+    'hadir' => 0,
+    'izin' => 0,
+    'sakit' => 0,
+    'alpha' => 0
+];
 
-// Tambahkan filter dengan cara yang aman
-$filter_conditions = [];
-$filter_params = [];
-$filter_types = "";
-
+// Ambil semua guru yang mengajar
+$guru_ids = [];
 if ($filter_guru > 0) {
-    $filter_conditions[] = "smg.guru_id = ?";
-    $filter_params[] = $filter_guru;
-    $filter_types .= "i";
-}
-
-if ($filter_siswa > 0) {
-    $filter_conditions[] = "s.id = ?";
-    $filter_params[] = $filter_siswa;
-    $filter_types .= "i";
-}
-
-if (!empty($filter_conditions)) {
-    $sql_rekap .= " AND " . implode(" AND ", $filter_conditions);
-}
-
-$sql_rekap .= " ORDER BY u.full_name, 
-                  FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'),
-                  smg.jam_mulai,
-                  s.nama_lengkap";
-
-// Eksekusi query utama
-$stmt_rekap = $conn->prepare($sql_rekap);
-if (!empty($filter_params)) {
-    $stmt_rekap->bind_param($filter_types, ...$filter_params);
-}
-
-$stmt_rekap->execute();
-$result_rekap = $stmt_rekap->get_result();
-
-$data_rekap = [];
-$grouped_data = [];
-
-// Statistik
-$total_siswa_rekap = 0;
-$total_hadir_rekap = 0;
-$total_izin_rekap = 0;
-$total_sakit_rekap = 0;
-$total_alpha_rekap = 0;
-$total_belum_absen = 0;
-
-// Array untuk menyimpan data untuk query absensi batch
-$absensi_data_batch = [];
-
-while ($row = $result_rekap->fetch_assoc()) {
-    // Simpan data untuk query absensi batch
-    $absensi_data_batch[] = [
-        'row_data' => $row,
-        'siswa_id' => $row['siswa_id'],
-        'siswa_pelajaran_id' => $row['siswa_pelajaran_id'],
-        'sesi_guru_id' => $row['sesi_guru_id']
-    ];
-    
-    // Buat key unik untuk grouping
-    $key = $row['guru_id'] . '_' . $row['hari'] . '_' . $row['jam_mulai'] . '_' . $row['jam_selesai'] . '_' . $row['nama_pelajaran'];
-    
-    if (!isset($grouped_data[$key])) {
-        $grouped_data[$key] = [
-            'guru_id' => $row['guru_id'],
-            'nama_guru' => $row['nama_guru'] ?? 'Belum ditentukan',
-            'hari' => $row['hari'],
-            'jam_mulai' => $row['jam_mulai'],
-            'jam_selesai' => $row['jam_selesai'],
-            'nama_pelajaran' => $row['nama_pelajaran'],
-            'tingkat_bimbel' => $row['tingkat_bimbel'],
-            'jadwal_id' => $row['jadwal_id'],
-            'siswa' => []
-        ];
+    $guru_ids[] = $filter_guru;
+} else {
+    $sql_guru_all = "SELECT id FROM guru WHERE status = 'aktif'";
+    $result_guru_all = $conn->query($sql_guru_all);
+    while ($row = $result_guru_all->fetch_assoc()) {
+        $guru_ids[] = $row['id'];
     }
 }
-$stmt_rekap->close();
+$statistik['total_guru'] = count($guru_ids);
 
-// **AMBIL DATA ABSENSI DALAM BATCH - LEBIH EFISIEN**
-if (!empty($absensi_data_batch)) {
-    // Buat array untuk menyimpan hasil absensi
-    $absensi_results = [];
-    
-    // Query absensi untuk semua data sekaligus
-    $absensi_ids = [];
-    foreach ($absensi_data_batch as $item) {
-        $absensi_ids[] = $item['siswa_id'] . '-' . $item['siswa_pelajaran_id'] . '-' . $item['sesi_guru_id'];
+// Untuk setiap guru, ambil data siswa dan rekap absensi
+foreach ($guru_ids as $guru_id) {
+    // Ambil data guru
+    $sql_nama_guru = "SELECT u.full_name FROM guru g JOIN users u ON g.user_id = u.id WHERE g.id = ?";
+    $stmt_nama = $conn->prepare($sql_nama_guru);
+    $stmt_nama->bind_param("i", $guru_id);
+    $stmt_nama->execute();
+    $result_nama = $stmt_nama->get_result();
+    $nama_guru = $result_nama->fetch_assoc()['full_name'] ?? 'Guru';
+    $stmt_nama->close();
+
+    // Ambil semua siswa yang diajar guru ini (UNIQUE)
+    $sql_siswa = "SELECT DISTINCT 
+                    s.id,
+                    s.nama_lengkap,
+                    s.kelas as kelas_sekolah
+                  FROM siswa s
+                  INNER JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
+                  INNER JOIN jadwal_belajar jb ON ps.id = jb.pendaftaran_id
+                  INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                  WHERE smg.guru_id = ?
+                  AND jb.status = 'aktif'
+                  AND ps.status = 'aktif'
+                  AND s.status = 'aktif'";
+
+    $params = [$guru_id];
+    $types = "i";
+
+    if ($filter_siswa > 0) {
+        $sql_siswa .= " AND s.id = ?";
+        $params[] = $filter_siswa;
+        $types .= "i";
     }
-    
-    // Karena kita perlu filter tanggal, kita buat query terpisah
-    foreach ($absensi_data_batch as $item) {
-        $row = $item['row_data'];
-        
-        // Query absensi dengan prepared statement yang aman
-        $sql_absensi = "SELECT 
-                        COUNT(*) as total_sesi,
-                        SUM(CASE WHEN status = 'hadir' THEN 1 ELSE 0 END) as total_hadir,
-                        SUM(CASE WHEN status = 'izin' THEN 1 ELSE 0 END) as total_izin,
-                        SUM(CASE WHEN status = 'sakit' THEN 1 ELSE 0 END) as total_sakit,
-                        SUM(CASE WHEN status = 'alpha' THEN 1 ELSE 0 END) as total_alpha
-                      FROM absensi_siswa 
-                      WHERE siswa_id = ? 
-                      AND siswa_pelajaran_id = ? 
-                      AND sesi_guru_id = ?";
-        
-        // Tambahkan filter tanggal
-        if ($filter_minggu > 0) {
-            $sql_absensi .= " AND tanggal_absensi BETWEEN ? AND ?";
-            $stmt_absensi = $conn->prepare($sql_absensi);
-            if ($stmt_absensi) {
-                $stmt_absensi->bind_param("iiiss", 
-                    $row['siswa_id'], 
-                    $row['siswa_pelajaran_id'], 
-                    $row['sesi_guru_id'],
-                    $start_date,
-                    $end_date
-                );
-            }
-        } else {
-            $sql_absensi .= " AND DATE_FORMAT(tanggal_absensi, '%Y-%m') = ?";
-            $stmt_absensi = $conn->prepare($sql_absensi);
-            if ($stmt_absensi) {
-                $stmt_absensi->bind_param("iiis", 
-                    $row['siswa_id'], 
-                    $row['siswa_pelajaran_id'], 
-                    $row['sesi_guru_id'],
-                    $periode
-                );
-            }
-        }
-        
-        if ($stmt_absensi) {
-            $stmt_absensi->execute();
-            $result_absensi = $stmt_absensi->get_result();
-            $absensi = $result_absensi->fetch_assoc() ?? [
-                'total_sesi' => 0,
-                'total_hadir' => 0,
-                'total_izin' => 0,
-                'total_sakit' => 0,
-                'total_alpha' => 0
-            ];
-            $stmt_absensi->close();
-        } else {
-            $absensi = [
-                'total_sesi' => 0,
-                'total_hadir' => 0,
-                'total_izin' => 0,
-                'total_sakit' => 0,
-                'total_alpha' => 0
-            ];
-        }
-        
-        // Hitung total sesi yang seharusnya
-        $total_sesi_seharusnya = 4; // Default 4 sesi per bulan
-        
-        // Jika filter minggu aktif, maka hanya 1 sesi
-        if ($filter_minggu > 0) {
-            $total_sesi_seharusnya = 1;
-        }
-        
-        // Hitung yang belum diabsen
-        $total_sudah_absen = $absensi['total_hadir'] + $absensi['total_izin'] + $absensi['total_sakit'] + $absensi['total_alpha'];
-        $belum_absen = $total_sesi_seharusnya - $total_sudah_absen;
-        if ($belum_absen < 0) $belum_absen = 0;
-        
-        // Tambahkan data siswa ke grouped data
-        $key = $row['guru_id'] . '_' . $row['hari'] . '_' . $row['jam_mulai'] . '_' . $row['jam_selesai'] . '_' . $row['nama_pelajaran'];
-        
-        $siswa_data = [
-            'siswa_id' => $row['siswa_id'],
+
+    $sql_siswa .= " ORDER BY s.nama_lengkap";
+
+    $stmt_siswa = $conn->prepare($sql_siswa);
+    $stmt_siswa->bind_param($types, ...$params);
+    $stmt_siswa->execute();
+    $result_siswa = $stmt_siswa->get_result();
+
+    $siswa_data = [];
+    while ($row = $result_siswa->fetch_assoc()) {
+        $siswa_data[$row['id']] = [
+            'id' => $row['id'],
             'nama_lengkap' => $row['nama_lengkap'],
             'kelas_sekolah' => $row['kelas_sekolah'],
-            'nama_pelajaran' => $row['nama_pelajaran'],
-            'total_sesi' => $absensi['total_sesi'],
-            'total_hadir' => $absensi['total_hadir'],
-            'total_izin' => $absensi['total_izin'],
-            'total_sakit' => $absensi['total_sakit'],
-            'total_alpha' => $absensi['total_alpha'],
-            'belum_absen' => $belum_absen,
-            'total_sesi_seharusnya' => $total_sesi_seharusnya
+            'total_hadir' => 0,
+            'total_izin' => 0,
+            'total_sakit' => 0,
+            'total_alpha' => 0,
+            'total_sesi' => 0
         ];
-        
-        $grouped_data[$key]['siswa'][] = $siswa_data;
-        
-        // Update statistik
-        $total_siswa_rekap++;
-        $total_hadir_rekap += $absensi['total_hadir'];
-        $total_izin_rekap += $absensi['total_izin'];
-        $total_sakit_rekap += $absensi['total_sakit'];
-        $total_alpha_rekap += $absensi['total_alpha'];
-        $total_belum_absen += $belum_absen;
+    }
+    $stmt_siswa->close();
+
+    // Jika ada siswa untuk guru ini
+    if (!empty($siswa_data)) {
+        $siswa_ids = array_keys($siswa_data);
+        $placeholders = implode(',', array_fill(0, count($siswa_ids), '?'));
+
+        // Ambil data absensi untuk periode ini
+        $sql_absensi = "SELECT 
+                          a.siswa_id,
+                          a.status,
+                          COUNT(*) as jumlah
+                        FROM absensi_siswa a
+                        WHERE a.siswa_id IN ($placeholders)
+                        AND a.guru_id = ?
+                        AND a.tanggal_absensi BETWEEN ? AND ?
+                        GROUP BY a.siswa_id, a.status";
+
+        $params_absensi = array_merge($siswa_ids, [$guru_id, $tanggal_awal, $tanggal_akhir]);
+        $types_absensi = str_repeat('i', count($siswa_ids)) . "iss";
+
+        $stmt_absensi = $conn->prepare($sql_absensi);
+        $stmt_absensi->bind_param($types_absensi, ...$params_absensi);
+        $stmt_absensi->execute();
+        $result_absensi = $stmt_absensi->get_result();
+
+        while ($row = $result_absensi->fetch_assoc()) {
+            $siswa_id = $row['siswa_id'];
+            $status = $row['status'];
+            $jumlah = $row['jumlah'];
+
+            if (isset($siswa_data[$siswa_id])) {
+                $siswa_data[$siswa_id]['total_' . $status] = $jumlah;
+                $siswa_data[$siswa_id]['total_sesi'] += $jumlah;
+                $statistik[$status] += $jumlah;
+                $statistik['total_sesi'] += $jumlah;
+            }
+        }
+        $stmt_absensi->close();
+
+        // Hanya tampilkan siswa yang memiliki data absensi
+        $siswa_with_absensi = array_filter($siswa_data, function ($s) {
+            return $s['total_sesi'] > 0;
+        });
+
+        if (!empty($siswa_with_absensi)) {
+            $rekap_data[] = [
+                'guru_id' => $guru_id,
+                'nama_guru' => $nama_guru,
+                'siswa' => array_values($siswa_with_absensi)
+            ];
+            $statistik['total_siswa'] += count($siswa_with_absensi);
+        }
     }
 }
 
-// Konversi ke array untuk ditampilkan
-foreach ($grouped_data as $key => $group) {
-    $data_rekap[] = $group;
-}
+// Urutkan rekap_data berdasarkan nama guru
+usort($rekap_data, function ($a, $b) {
+    return strcmp($a['nama_guru'], $b['nama_guru']);
+});
 ?>
 
 <!DOCTYPE html>
 <html lang="id">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -326,13 +228,13 @@ foreach ($grouped_data as $key => $group) {
         .table-responsive {
             overflow-x: auto;
         }
-        
+
         @media (max-width: 768px) {
             .table-responsive table {
-                min-width: 1000px;
+                min-width: 800px;
             }
         }
-        
+
         .dropdown-submenu {
             display: none;
             max-height: 500px;
@@ -389,15 +291,15 @@ foreach ($grouped_data as $key => $group) {
             .desktop-sidebar {
                 display: block;
             }
-            
+
             .mobile-header {
                 display: none;
             }
-            
+
             #mobileMenu {
                 display: none;
             }
-            
+
             .menu-overlay {
                 display: none !important;
             }
@@ -407,23 +309,33 @@ foreach ($grouped_data as $key => $group) {
             .desktop-sidebar {
                 display: none;
             }
-            
+
             .stat-card {
                 padding: 1rem !important;
             }
-            
+
             .filter-form {
                 grid-template-columns: 1fr !important;
             }
         }
-        
+
         @media (min-width: 768px) {
             .filter-form {
                 grid-template-columns: repeat(5, 1fr) !important;
             }
         }
+
+        .badge-count {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
     </style>
 </head>
+
 <body class="bg-gray-100">
     <!-- Desktop Sidebar -->
     <div class="desktop-sidebar w-64 bg-blue-800 text-white fixed h-full z-40">
@@ -511,7 +423,7 @@ foreach ($grouped_data as $key => $group) {
                     <h1 class="md:text-2xl text-xl font-bold text-gray-800">
                         <i class="fas fa-chart-bar mr-2"></i> Rekap Absensi Seluruh Siswa
                     </h1>
-                    <p class="text-gray-600 md:text-md text-sm">Rekapitulasi absensi berdasarkan guru dan jadwal</p>
+                    <p class="text-gray-600 md:text-md text-sm">Rekapitulasi absensi per siswa (tanpa detail mapel)</p>
                 </div>
             </div>
         </div>
@@ -519,39 +431,28 @@ foreach ($grouped_data as $key => $group) {
         <!-- Content -->
         <div class="container mx-auto p-4 md:p-6">
             <!-- Filter Section -->
+            <!-- Filter Section -->
             <div class="bg-white shadow rounded-lg p-6 mb-6">
                 <h3 class="text-lg font-medium text-gray-900 mb-4">Filter Rekap</h3>
-                <form method="GET" class="filter-form grid grid-cols-1 md:grid-cols-5 gap-4">
+                <form method="GET" class="filter-form grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">
                             <i class="fas fa-calendar mr-1"></i> Periode (Bulan-Tahun)
                         </label>
-                        <input type="month" name="periode" value="<?php echo $periode; ?>" 
-                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">
-                            <i class="fas fa-calendar-week mr-1"></i> Minggu
-                        </label>
-                        <select name="minggu" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="0">Semua Minggu</option>
-                            <option value="1" <?php echo ($filter_minggu == 1) ? 'selected' : ''; ?>>Minggu 1</option>
-                            <option value="2" <?php echo ($filter_minggu == 2) ? 'selected' : ''; ?>>Minggu 2</option>
-                            <option value="3" <?php echo ($filter_minggu == 3) ? 'selected' : ''; ?>>Minggu 3</option>
-                            <option value="4" <?php echo ($filter_minggu == 4) ? 'selected' : ''; ?>>Minggu 4</option>
-                        </select>
+                        <input type="month" name="periode" value="<?php echo $periode; ?>"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">
                             <i class="fas fa-chalkboard-teacher mr-1"></i> Guru
                         </label>
-                        <select name="guru_id" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <select name="guru_id"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                             <option value="0">Semua Guru</option>
                             <?php foreach ($guru_options as $guru): ?>
-                            <option value="<?php echo $guru['id']; ?>" 
-                                <?php echo ($filter_guru == $guru['id']) ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($guru['nama_guru']); ?>
-                            </option>
+                                <option value="<?php echo $guru['id']; ?>" <?php echo ($filter_guru == $guru['id']) ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($guru['nama_guru']); ?>
+                                </option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -559,36 +460,33 @@ foreach ($grouped_data as $key => $group) {
                         <label class="block text-sm font-medium text-gray-700 mb-1">
                             <i class="fas fa-user-graduate mr-1"></i> Siswa
                         </label>
-                        <select name="siswa_id" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <select name="siswa_id"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                             <option value="0">Semua Siswa</option>
                             <?php foreach ($siswa_options as $siswa): ?>
-                            <option value="<?php echo $siswa['id']; ?>" 
-                                <?php echo ($filter_siswa == $siswa['id']) ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($siswa['nama_lengkap'] . ' - ' . $siswa['kelas']); ?>
-                            </option>
+                                <option value="<?php echo $siswa['id']; ?>" <?php echo ($filter_siswa == $siswa['id']) ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($siswa['nama_lengkap'] . ' - ' . $siswa['kelas']); ?>
+                                </option>
                             <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="flex items-end">
-                        <div class="flex space-x-2 w-full">
-                            <button type="submit" class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <i class="fas fa-filter mr-2"></i> Terapkan Filter
+                        <div class="flex space-x-1 w-full mb-1">
+                            <button type="submit"
+                                class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <i class="fas fa-filter mr-2"></i> Terapkan
                             </button>
-                            <a href="rekapSiswa.php" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">
+                            <a href="rekapAbsensi.php"
+                                class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">
                                 <i class="fas fa-redo"></i>
                             </a>
                         </div>
                     </div>
                 </form>
-                <?php if ($filter_minggu > 0 && $start_date && $end_date): ?>
-                <div class="mt-4 p-3 bg-blue-50 rounded-md">
-                    <p class="text-sm text-blue-800">
-                        <i class="fas fa-info-circle mr-2"></i>
-                        Menampilkan data untuk Minggu <?php echo $filter_minggu; ?>: 
-                        <?php echo date('d M Y', strtotime($start_date)); ?> - <?php echo date('d M Y', strtotime($end_date)); ?>
-                    </p>
-                </div>
-                <?php endif; ?>
+                <p class="text-xs text-gray-500 mt-3">
+                    <i class="fas fa-info-circle"></i> Menampilkan rekap absensi bulan
+                    <?php echo date('F Y', strtotime($periode . '-01')); ?>
+                </p>
             </div>
 
             <!-- Statistik Total -->
@@ -597,125 +495,103 @@ foreach ($grouped_data as $key => $group) {
                     <div>
                         <h3 class="text-lg font-medium text-gray-900">
                             <i class="fas fa-chart-pie mr-2"></i>
-                            Statistik Rekap - 
-                            <?php if ($filter_minggu > 0): ?>
-                                Minggu <?php echo $filter_minggu; ?> 
-                            <?php endif; ?>
-                            <?php echo date('F Y', strtotime($periode . '-01')); ?>
+                            Statistik Rekap - <?php echo date('F Y', strtotime($periode . '-01')); ?>
                         </h3>
-                        <p class="text-gray-600">
+                        <p class="text-gray-600 text-sm">
                             <?php if ($filter_guru > 0 && isset($guru_options[$filter_guru])): ?>
                                 Guru: <?php echo htmlspecialchars($guru_options[$filter_guru]['nama_guru']); ?>
                             <?php endif; ?>
                             <?php if ($filter_siswa > 0 && isset($siswa_options[$filter_siswa])): ?>
                                 <?php echo ($filter_guru > 0) ? ' | ' : ''; ?>
-                                Siswa: <?php echo htmlspecialchars($siswa_options[$filter_siswa]['nama_lengkap'] . ' (' . $siswa_options[$filter_siswa]['kelas'] . ')'); ?>
+                                Siswa:
+                                <?php echo htmlspecialchars($siswa_options[$filter_siswa]['nama_lengkap'] . ' (' . $siswa_options[$filter_siswa]['kelas'] . ')'); ?>
                             <?php endif; ?>
                         </p>
                     </div>
                 </div>
-                
-                <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
-                    <div class="bg-gray-50 rounded-lg p-4">
-                        <div class="flex items-center">
-                            <div class="p-2 bg-gray-100 rounded-lg mr-3">
-                                <i class="fas fa-users text-gray-600"></i>
-                            </div>
-                            <div>
-                                <p class="text-sm text-gray-600">Total Siswa</p>
-                                <p class="text-xl font-bold text-gray-800"><?php echo $total_siswa_rekap; ?></p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="bg-white rounded-lg p-4 shadow">
+
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="bg-green-50 rounded-lg p-4">
                         <div class="flex items-center">
                             <div class="p-2 bg-green-100 rounded-lg mr-3">
                                 <i class="fas fa-check text-green-600"></i>
                             </div>
                             <div>
-                                <p class="text-sm text-gray-600">Total Hadir</p>
-                                <p class="text-xl font-bold text-gray-800"><?php echo $total_hadir_rekap; ?></p>
+                                <p class="text-sm text-gray-600">Hadir</p>
+                                <p class="text-xl font-bold text-green-600"><?php echo $statistik['hadir']; ?></p>
                             </div>
                         </div>
                     </div>
-                    <div class="bg-white rounded-lg p-4 shadow">
+                    <div class="bg-yellow-50 rounded-lg p-4">
                         <div class="flex items-center">
                             <div class="p-2 bg-yellow-100 rounded-lg mr-3">
                                 <i class="fas fa-envelope text-yellow-600"></i>
                             </div>
                             <div>
-                                <p class="text-sm text-gray-600">Total Izin</p>
-                                <p class="text-xl font-bold text-gray-800"><?php echo $total_izin_rekap; ?></p>
+                                <p class="text-sm text-gray-600">Izin</p>
+                                <p class="text-xl font-bold text-yellow-600"><?php echo $statistik['izin']; ?></p>
                             </div>
                         </div>
                     </div>
-                    <div class="bg-white rounded-lg p-4 shadow">
+                    <div class="bg-blue-50 rounded-lg p-4">
                         <div class="flex items-center">
                             <div class="p-2 bg-blue-100 rounded-lg mr-3">
                                 <i class="fas fa-thermometer text-blue-600"></i>
                             </div>
                             <div>
-                                <p class="text-sm text-gray-600">Total Sakit</p>
-                                <p class="text-xl font-bold text-gray-800"><?php echo $total_sakit_rekap; ?></p>
+                                <p class="text-sm text-gray-600">Sakit</p>
+                                <p class="text-xl font-bold text-blue-600"><?php echo $statistik['sakit']; ?></p>
                             </div>
                         </div>
                     </div>
-                    <div class="bg-white rounded-lg p-4 shadow">
+                    <div class="bg-red-50 rounded-lg p-4">
                         <div class="flex items-center">
                             <div class="p-2 bg-red-100 rounded-lg mr-3">
                                 <i class="fas fa-times text-red-600"></i>
                             </div>
                             <div>
-                                <p class="text-sm text-gray-600">Total Alpha</p>
-                                <p class="text-xl font-bold text-gray-800"><?php echo $total_alpha_rekap; ?></p>
+                                <p class="text-sm text-gray-600">Alpha</p>
+                                <p class="text-xl font-bold text-red-600"><?php echo $statistik['alpha']; ?></p>
                             </div>
                         </div>
                     </div>
                 </div>
-                
-                <!-- Statistik tambahan -->
-                <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="bg-gray-50 rounded-lg p-4">
+                <div class="grid grid-cols-2 mt-3 gap-3">
+                    <div class="bg-gray-100 rounded-lg p-4">
                         <div class="flex items-center">
-                            <div class="p-2 bg-purple-100 rounded-lg mr-3">
-                                <i class="fas fa-calendar-check text-purple-600"></i>
+                            <div class="p-2 bg-gray-100 rounded-lg mr-3">
+                                <i class="fas fa-users text-gray-600"></i>
                             </div>
                             <div>
-                                <p class="text-sm text-gray-600">Total Sesi Diabsen</p>
-                                <p class="text-xl font-bold text-gray-800">
-                                    <?php echo $total_hadir_rekap + $total_izin_rekap + $total_sakit_rekap + $total_alpha_rekap; ?>
-                                </p>
+                                <p class="text-sm text-gray-600">Total Guru</p>
+                                <p class="text-xl font-bold text-gray-800"><?php echo $statistik['total_guru']; ?></p>
                             </div>
                         </div>
                     </div>
-                    <div class="bg-white rounded-lg p-4 shadow">
+                    <div class="bg-gray-100 rounded-lg p-4">
                         <div class="flex items-center">
-                            <div class="p-2 bg-orange-100 rounded-lg mr-3">
-                                <i class="fas fa-question-circle text-orange-600"></i>
+                            <div class="p-2 bg-gray-100 rounded-lg mr-3">
+                                <i class="fas fa-user-graduate text-gray-600"></i>
                             </div>
                             <div>
-                                <p class="text-sm text-gray-600">Belum Diabsen</p>
-                                <p class="text-xl font-bold text-gray-800"><?php echo $total_belum_absen; ?></p>
+                                <p class="text-sm text-gray-600">Total Siswa</p>
+                                <p class="text-xl font-bold text-gray-800"><?php echo $statistik['total_siswa']; ?></p>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Rekap Per Jadwal -->
+            <!-- Rekap Per Guru -->
             <div class="bg-white shadow rounded-lg">
                 <div class="px-6 py-4 border-b border-gray-200">
                     <div class="flex justify-between items-center">
                         <h3 class="text-lg font-medium text-gray-900">
-                            <i class="fas fa-table mr-2"></i> 
-                            Rekap Absensi Per Jadwal - 
-                            <?php if ($filter_minggu > 0): ?>
-                                Minggu <?php echo $filter_minggu; ?> 
-                            <?php endif; ?>
-                            <?php echo date('F Y', strtotime($periode . '-01')); ?>
-                            <?php if (!empty($data_rekap)): ?>
+                            <i class="fas fa-table mr-2"></i>
+                            Rekap Absensi Per Guru - <?php echo date('F Y', strtotime($periode . '-01')); ?>
+                            <?php if (!empty($rekap_data)): ?>
                                 <span class="text-sm text-gray-600 font-normal">
-                                    (<?php echo count($data_rekap); ?> jadwal ditemukan)
+                                    (<?php echo count($rekap_data); ?> guru ditemukan)
                                 </span>
                             <?php endif; ?>
                         </h3>
@@ -725,109 +601,130 @@ foreach ($grouped_data as $key => $group) {
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="table-responsive">
-                    <?php if (empty($data_rekap)): ?>
-                    <div class="p-8 text-center text-gray-500">
-                        <i class="fas fa-database text-3xl mb-3"></i>
-                        <p class="text-lg">Tidak ada data rekap absensi</p>
-                        <p class="text-sm mt-2">Coba sesuaikan filter atau periode yang dipilih</p>
-                    </div>
+                    <?php if (empty($rekap_data)): ?>
+                        <div class="p-12 text-center text-gray-500">
+                            <i class="fas fa-database text-5xl mb-4 text-gray-300"></i>
+                            <p class="text-lg font-medium text-gray-700 mb-2">Tidak Ada Data Absensi</p>
+                            <p class="text-sm text-gray-500 max-w-md mx-auto">
+                                Tidak ditemukan data absensi untuk periode
+                                <?php echo date('F Y', strtotime($periode . '-01')); ?>.
+                                <?php if ($filter_guru > 0 || $filter_siswa > 0): ?>
+                                    Coba sesuaikan filter yang dipilih.
+                                <?php endif; ?>
+                            </p>
+                        </div>
                     <?php else: ?>
-                        <?php foreach ($data_rekap as $index => $jadwal): ?>
-                        <div class="border-b border-gray-200">
-                            <!-- Header Jadwal -->
-                            <div class="bg-gray-50 px-6 py-4">
-                                <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
-                                    <div>
-                                        <h4 class="font-medium text-gray-900">
-                                            <i class="fas fa-chalkboard-teacher mr-2"></i>
-                                            <?php echo htmlspecialchars($jadwal['nama_guru']); ?>
-                                        </h4>
-                                        <div class="mt-2 flex flex-wrap gap-3">
-                                            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                                                <i class="fas fa-calendar-day mr-1"></i>
-                                                <?php echo htmlspecialchars($jadwal['hari']); ?>
-                                            </span>
-                                            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                                                <i class="fas fa-clock mr-1"></i>
-                                                <?php echo date('H:i', strtotime($jadwal['jam_mulai'])); ?> - <?php echo date('H:i', strtotime($jadwal['jam_selesai'])); ?>
-                                            </span>
-                                            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
-                                                <i class="fas fa-book mr-1"></i>
-                                                <?php echo htmlspecialchars($jadwal['nama_pelajaran']); ?>
-                                            </span>
-                                            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-800">
-                                                <i class="fas fa-graduation-cap mr-1"></i>
-                                                Tingkat: <?php echo htmlspecialchars($jadwal['tingkat_bimbel']); ?>
-                                            </span>
+                        <?php foreach ($rekap_data as $index => $guru): ?>
+                            <div class="border-b border-gray-200 last:border-b-0">
+                                <!-- Header Guru -->
+                                <div class="bg-gray-50 px-6 py-4">
+                                    <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
+                                        <div>
+                                            <h4 class="font-medium text-gray-900 text-lg">
+                                                <i class="fas fa-chalkboard-teacher mr-2 text-blue-600"></i>
+                                                <?php echo htmlspecialchars($guru['nama_guru']); ?>
+                                            </h4>
+                                            <div class="mt-2 flex flex-wrap gap-2">
+                                                <span class="badge-count bg-blue-100 text-blue-800">
+                                                    <i class="fas fa-users mr-1"></i>
+                                                    <?php echo count($guru['siswa']); ?> siswa
+                                                </span>
+                                                <?php
+                                                $total_hadir_guru = array_sum(array_column($guru['siswa'], 'total_hadir'));
+                                                $total_izin_guru = array_sum(array_column($guru['siswa'], 'total_izin'));
+                                                $total_sakit_guru = array_sum(array_column($guru['siswa'], 'total_sakit'));
+                                                $total_alpha_guru = array_sum(array_column($guru['siswa'], 'total_alpha'));
+                                                $total_sesi_guru = $total_hadir_guru + $total_izin_guru + $total_sakit_guru + $total_alpha_guru;
+                                                ?>
+                                                <span class="badge-count bg-green-100 text-green-800">
+                                                    <i class="fas fa-check mr-1"></i> <?php echo $total_hadir_guru; ?>
+                                                </span>
+                                                <span class="badge-count bg-yellow-100 text-yellow-800">
+                                                    <i class="fas fa-envelope mr-1"></i> <?php echo $total_izin_guru; ?>
+                                                </span>
+                                                <span class="badge-count bg-blue-100 text-blue-800">
+                                                    <i class="fas fa-thermometer mr-1"></i> <?php echo $total_sakit_guru; ?>
+                                                </span>
+                                                <span class="badge-count bg-red-100 text-red-800">
+                                                    <i class="fas fa-times mr-1"></i> <?php echo $total_alpha_guru; ?>
+                                                </span>
+                                                <span class="badge-count bg-purple-100 text-purple-800">
+                                                    <i class="fas fa-calendar-check mr-1"></i> <?php echo $total_sesi_guru; ?>
+                                                    sesi
+                                                </span>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div class="mt-2 md:mt-0">
-                                        <span class="text-sm text-gray-500">
-                                            <?php echo count($jadwal['siswa']); ?> siswa
-                                        </span>
-                                    </div>
+                                </div>
+
+                                <!-- Tabel Siswa (TANPA KOLOM MAPEL) -->
+                                <div class="px-6 py-4">
+                                    <table class="min-w-full divide-y divide-gray-200">
+                                        <thead class="bg-gray-50">
+                                            <tr>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    No</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Nama Siswa</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Kelas</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Hadir</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Izin</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Sakit</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Alpha</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Total</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="bg-white divide-y divide-gray-200">
+                                            <?php foreach ($guru['siswa'] as $idx => $siswa): ?>
+                                                <tr class="hover:bg-gray-50">
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                                                        <?php echo $idx + 1; ?>
+                                                    </td>
+                                                    <td class="px-4 py-3 whitespace-nowrap">
+                                                        <div class="text-sm font-medium text-gray-900">
+                                                            <?php echo htmlspecialchars($siswa['nama_lengkap']); ?>
+                                                        </div>
+                                                    </td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                                                        <?php echo htmlspecialchars($siswa['kelas_sekolah']); ?>
+                                                    </td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-green-600">
+                                                        <?php echo $siswa['total_hadir']; ?>
+                                                    </td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-yellow-600">
+                                                        <?php echo $siswa['total_izin']; ?>
+                                                    </td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-blue-600">
+                                                        <?php echo $siswa['total_sakit']; ?>
+                                                    </td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-red-600">
+                                                        <?php echo $siswa['total_alpha']; ?>
+                                                    </td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                                                        <?php echo $siswa['total_sesi']; ?>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
-                            
-                            <!-- Tabel Siswa -->
-                            <div class="px-6 py-4">
-                                <table class="min-w-full divide-y divide-gray-200">
-                                    <thead class="bg-gray-50">
-                                        <tr>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No</th>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama Siswa</th>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kelas Sekolah</th>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Sesi</th>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hadir</th>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Izin</th>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sakit</th>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Alpha</th>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Belum Absen</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="bg-white divide-y divide-gray-200">
-                                        <?php foreach ($jadwal['siswa'] as $idx => $siswa): ?>
-                                        <tr class="hover:bg-gray-50">
-                                            <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                                                <?php echo $idx + 1; ?>
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap">
-                                                <div class="text-sm font-medium text-gray-900">
-                                                    <?php echo htmlspecialchars($siswa['nama_lengkap']); ?>
-                                                </div>
-                                                <div class="text-xs text-gray-500">
-                                                    <?php echo htmlspecialchars($siswa['nama_pelajaran']); ?>
-                                                </div>
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                                                <?php echo htmlspecialchars($siswa['kelas_sekolah']); ?>
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900 font-medium">
-                                                <?php echo $siswa['total_sesi']; ?>
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap text-sm text-green-600 font-medium">
-                                                <?php echo $siswa['total_hadir']; ?>
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap text-sm text-yellow-600 font-medium">
-                                                <?php echo $siswa['total_izin']; ?>
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap text-sm text-blue-600 font-medium">
-                                                <?php echo $siswa['total_sakit']; ?>
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap text-sm text-red-600 font-medium">
-                                                <?php echo $siswa['total_alpha']; ?>
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap text-sm font-medium <?php echo $siswa['belum_absen'] > 0 ? 'text-orange-600' : 'text-gray-400'; ?>">
-                                                <?php echo $siswa['belum_absen']; ?>
-                                            </td>
-                                        </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
                         <?php endforeach; ?>
                     <?php endif; ?>
                 </div>
@@ -883,7 +780,6 @@ foreach ($grouped_data as $key => $group) {
             });
         }
 
-        // Close menu when clicking on menu items (mobile)
         document.querySelectorAll('.menu-item').forEach(item => {
             item.addEventListener('click', () => {
                 if (window.innerWidth < 768) {
@@ -896,16 +792,15 @@ foreach ($grouped_data as $key => $group) {
             });
         });
 
-        // Dropdown functionality
         document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-            toggle.addEventListener('click', function(e) {
+            toggle.addEventListener('click', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
-                
+
                 const dropdownGroup = this.closest('.mb-1');
                 const submenu = dropdownGroup.querySelector('.dropdown-submenu');
                 const arrow = this.querySelector('.arrow');
-                
+
                 if (submenu.style.display === 'block') {
                     submenu.style.display = 'none';
                     arrow.style.transform = 'rotate(0deg)';
@@ -918,7 +813,7 @@ foreach ($grouped_data as $key => $group) {
                         t.classList.remove('open');
                         t.querySelector('.arrow').style.transform = 'rotate(0deg)';
                     });
-                    
+
                     submenu.style.display = 'block';
                     arrow.style.transform = 'rotate(-90deg)';
                     this.classList.add('open');
@@ -926,8 +821,7 @@ foreach ($grouped_data as $key => $group) {
             });
         });
 
-        // Close dropdowns when clicking outside
-        document.addEventListener('click', function(e) {
+        document.addEventListener('click', function (e) {
             if (!e.target.closest('.mb-1')) {
                 document.querySelectorAll('.dropdown-submenu').forEach(submenu => {
                     submenu.style.display = 'none';
@@ -940,4 +834,5 @@ foreach ($grouped_data as $key => $group) {
         });
     </script>
 </body>
+
 </html>

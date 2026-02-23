@@ -7,8 +7,10 @@ require_once '../includes/config.php';
 require_once '../includes/menu_functions.php';
 
 // Fungsi konversi hari Inggris ke Indonesia
-function getHariIndonesia($tanggal) {
-    if (empty($tanggal)) return '';
+function getHariIndonesia($tanggal)
+{
+    if (empty($tanggal))
+        return '';
     $hariInggris = date('l', strtotime($tanggal));
     $hariIndonesia = [
         'Sunday' => 'Minggu',
@@ -23,8 +25,10 @@ function getHariIndonesia($tanggal) {
 }
 
 // Fungsi format tanggal lengkap dengan hari
-function formatTanggalLengkap($tanggal) {
-    if (empty($tanggal)) return '';
+function formatTanggalLengkap($tanggal)
+{
+    if (empty($tanggal))
+        return '';
     $hari = getHariIndonesia($tanggal);
     $tanggal_format = date('d F Y', strtotime($tanggal));
     return $hari . ', ' . $tanggal_format;
@@ -63,19 +67,19 @@ try {
 // AJAX endpoints untuk detail dan perbandingan penilaian
 if (isset($_GET['action'])) {
     header('Content-Type: application/json');
-    
+
     if ($_GET['action'] == 'get_multiple_penilaian' && isset($_GET['ids'])) {
         $ids = explode(',', $_GET['ids']);
         $results = [];
-        
+
         if (count($ids) > 2) {
             echo json_encode(['success' => false, 'message' => 'Maksimal 2 penilaian dapat dibandingkan']);
             exit();
         }
-        
+
         foreach ($ids as $penilaian_id) {
             $penilaian_id = intval($penilaian_id);
-            
+
             $sql = "SELECT ps.*, 
                    ps.tanggal_penilaian as tanggal_original,
                    DATE_FORMAT(ps.tanggal_penilaian, '%d %M %Y') as tanggal_format,
@@ -91,27 +95,27 @@ if (isset($_GET['action'])) {
             JOIN orangtua o ON so.orangtua_id = o.id
             WHERE ps.id = ? 
               AND o.user_id = ?";
-              
+
             $stmt = $conn->prepare($sql);
             if ($stmt) {
                 $stmt->bind_param("ii", $penilaian_id, $user_id);
                 $stmt->execute();
                 $result = $stmt->get_result();
-                
+
                 if ($result->num_rows > 0) {
                     $data = $result->fetch_assoc();
-                    
+
                     // Hitung persentase jika tidak ada
                     if (!isset($data['persentase']) || empty($data['persentase'])) {
                         $data['persentase'] = round(($data['total_score'] / 50) * 100);
                     }
-                    
+
                     $results[] = $data;
                 }
                 $stmt->close();
             }
         }
-        
+
         if (count($results) > 0) {
             echo json_encode(['success' => true, 'data' => $results]);
         } else {
@@ -119,10 +123,10 @@ if (isset($_GET['action'])) {
         }
         exit();
     }
-    
+
     if ($_GET['action'] == 'get_detail_penilaian' && isset($_GET['id'])) {
         $penilaian_id = intval($_GET['id']);
-        
+
         $sql = "SELECT ps.*, 
                        ps.tanggal_penilaian as tanggal_original,
                        DATE_FORMAT(ps.tanggal_penilaian, '%d %M %Y') as tanggal_format,
@@ -138,21 +142,21 @@ if (isset($_GET['action'])) {
                 JOIN orangtua o ON so.orangtua_id = o.id
                 WHERE ps.id = ? 
                   AND o.user_id = ?";
-        
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("ii", $penilaian_id, $user_id);
             $stmt->execute();
             $result = $stmt->get_result();
-            
+
             if ($result->num_rows > 0) {
                 $data = $result->fetch_assoc();
-                
+
                 // Hitung persentase jika tidak ada
                 if (!isset($data['persentase']) || empty($data['persentase'])) {
                     $data['persentase'] = round(($data['total_score'] / 50) * 100);
                 }
-                
+
                 echo json_encode(['success' => true, 'data' => $data]);
             } else {
                 echo json_encode(['success' => false, 'message' => 'Data penilaian tidak ditemukan']);
@@ -177,7 +181,7 @@ if ($orangtua_id > 0) {
                 INNER JOIN siswa_orangtua so ON s.id = so.siswa_id
                 WHERE so.orangtua_id = ? 
                 ORDER BY s.nama_lengkap";
-        
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("i", $orangtua_id);
@@ -238,7 +242,7 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
         }
         $stmt_anak->close();
     }
-    
+
     // BANGUN QUERY DASAR
     $base_query = "SELECT 
                 ps.*,
@@ -256,7 +260,7 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
                JOIN siswa s ON ps.siswa_id = s.id
                JOIN siswa_orangtua so ON s.id = so.siswa_id
                WHERE ps.siswa_id = ? AND so.orangtua_id = ?";
-    
+
     $count_query = "SELECT COUNT(*) as total 
                     FROM penilaian_siswa ps
                     JOIN siswa_pelajaran sp ON ps.siswa_pelajaran_id = sp.id
@@ -265,12 +269,12 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
                     JOIN siswa s ON ps.siswa_id = s.id
                     JOIN siswa_orangtua so ON s.id = so.siswa_id
                     WHERE ps.siswa_id = ? AND so.orangtua_id = ?";
-    
+
     $params = array($selected_anak_id, $orangtua_id);
     $param_types = "ii";
     $count_params = array($selected_anak_id, $orangtua_id);
     $count_param_types = "ii";
-    
+
     // TAMBAH FILTER GURU
     if (!empty($filter_guru)) {
         $base_query .= " AND u.full_name LIKE ?";
@@ -280,7 +284,7 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
         $param_types .= "s";
         $count_param_types .= "s";
     }
-    
+
     // TAMBAH FILTER KATEGORI
     if (!empty($filter_kategori)) {
         $base_query .= " AND ps.kategori = ?";
@@ -290,7 +294,7 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
         $param_types .= "s";
         $count_param_types .= "s";
     }
-    
+
     // TAMBAH FILTER BULAN
     if (!empty($filter_bulan)) {
         $base_query .= " AND DATE_FORMAT(ps.tanggal_penilaian, '%Y-%m') = ?";
@@ -300,34 +304,34 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
         $param_types .= "s";
         $count_param_types .= "s";
     }
-    
-// TAMBAH FILTER MINGGU
-if (!empty($filter_minggu)) {
-    // Hitung rentang tanggal untuk minggu yang dipilih
-    $tahun = substr($filter_bulan, 0, 4);
-    $bulan = substr($filter_bulan, 5, 2);
-    $tanggal_awal_bulan = "$tahun-$bulan-01";
-    
-    $minggu_ke = intval($filter_minggu);
-    $tanggal_mulai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . (($minggu_ke-1)*7) . ' days'));
-    $tanggal_selesai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . ($minggu_ke*7 - 1) . ' days'));
-    
-    // Batasi dengan akhir bulan
-    $tanggal_akhir_bulan = date('Y-m-t', strtotime($tanggal_awal_bulan));
-    if (strtotime($tanggal_selesai) > strtotime($tanggal_akhir_bulan)) {
-        $tanggal_selesai = $tanggal_akhir_bulan;
+
+    // TAMBAH FILTER MINGGU
+    if (!empty($filter_minggu)) {
+        // Hitung rentang tanggal untuk minggu yang dipilih
+        $tahun = substr($filter_bulan, 0, 4);
+        $bulan = substr($filter_bulan, 5, 2);
+        $tanggal_awal_bulan = "$tahun-$bulan-01";
+
+        $minggu_ke = intval($filter_minggu);
+        $tanggal_mulai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . (($minggu_ke - 1) * 7) . ' days'));
+        $tanggal_selesai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . ($minggu_ke * 7 - 1) . ' days'));
+
+        // Batasi dengan akhir bulan
+        $tanggal_akhir_bulan = date('Y-m-t', strtotime($tanggal_awal_bulan));
+        if (strtotime($tanggal_selesai) > strtotime($tanggal_akhir_bulan)) {
+            $tanggal_selesai = $tanggal_akhir_bulan;
+        }
+
+        $base_query .= " AND ps.tanggal_penilaian BETWEEN ? AND ?";
+        $count_query .= " AND ps.tanggal_penilaian BETWEEN ? AND ?";
+        $params[] = $tanggal_mulai;
+        $params[] = $tanggal_selesai;
+        $count_params[] = $tanggal_mulai;
+        $count_params[] = $tanggal_selesai;
+        $param_types .= "ss";
+        $count_param_types .= "ss";
     }
-    
-    $base_query .= " AND ps.tanggal_penilaian BETWEEN ? AND ?";
-    $count_query .= " AND ps.tanggal_penilaian BETWEEN ? AND ?";
-    $params[] = $tanggal_mulai;
-    $params[] = $tanggal_selesai;
-    $count_params[] = $tanggal_mulai;
-    $count_params[] = $tanggal_selesai;
-    $param_types .= "ss";
-    $count_param_types .= "ss";
-}
-    
+
     // TAMBAH SEARCH
     if (!empty($search_keyword)) {
         $base_query .= " AND (ps.catatan_guru LIKE ? OR ps.rekomendasi LIKE ? OR sp.nama_pelajaran LIKE ?)";
@@ -342,10 +346,10 @@ if (!empty($filter_minggu)) {
         $param_types .= "sss";
         $count_param_types .= "sss";
     }
-    
+
     // ORDER BY
     $base_query .= " ORDER BY ps.tanggal_penilaian DESC, ps.id DESC";
-    
+
     // QUERY UNTUK TOTAL RECORDS
     $stmt_count = $conn->prepare($count_query);
     if ($stmt_count) {
@@ -353,7 +357,7 @@ if (!empty($filter_minggu)) {
         foreach ($count_params as $key => $value) {
             $bind_params[] = &$count_params[$key];
         }
-        
+
         call_user_func_array([$stmt_count, 'bind_param'], $bind_params);
         $stmt_count->execute();
         $result_count = $stmt_count->get_result();
@@ -362,13 +366,13 @@ if (!empty($filter_minggu)) {
         }
         $stmt_count->close();
     }
-    
+
     // TAMBAH LIMIT UNTUK PAGINATION
     $base_query .= " LIMIT ? OFFSET ?";
     $params[] = $limit;
     $params[] = $offset;
     $param_types .= "ii";
-    
+
     // EKSEKUSI QUERY UTAMA
     $stmt = $conn->prepare($base_query);
     if ($stmt) {
@@ -376,11 +380,11 @@ if (!empty($filter_minggu)) {
         foreach ($params as $key => $value) {
             $bind_params[] = &$params[$key];
         }
-        
+
         call_user_func_array([$stmt, 'bind_param'], $bind_params);
         $stmt->execute();
         $result = $stmt->get_result();
-        
+
         while ($row = $result->fetch_assoc()) {
             // Hitung persentase jika tidak ada
             if (!isset($row['persentase']) || empty($row['persentase'])) {
@@ -390,7 +394,7 @@ if (!empty($filter_minggu)) {
         }
         $stmt->close();
     }
-    
+
     // AMBIL LIST GURU UNTUK FILTER DROPDOWN
     $sql_guru = "SELECT DISTINCT u.full_name as nama_guru
                  FROM penilaian_siswa ps
@@ -398,7 +402,7 @@ if (!empty($filter_minggu)) {
                  JOIN users u ON g.user_id = u.id
                  WHERE ps.siswa_id = ?
                  ORDER BY u.full_name";
-    
+
     $stmt_guru = $conn->prepare($sql_guru);
     if ($stmt_guru) {
         $stmt_guru->bind_param("i", $selected_anak_id);
@@ -419,7 +423,7 @@ if ($selected_anak_id > 0) {
                    FROM penilaian_siswa 
                    WHERE siswa_id = ?
                    ORDER BY bulan_tahun DESC";
-    
+
     $stmt_bulan = $conn->prepare($sql_bulan);
     if ($stmt_bulan) {
         $stmt_bulan->bind_param("i", $selected_anak_id);
@@ -438,64 +442,64 @@ if (!empty($filter_bulan) && $selected_anak_id > 0) {
     // Hitung minggu dalam bulan (1-4/5)
     $tahun = substr($filter_bulan, 0, 4);
     $bulan = substr($filter_bulan, 5, 2);
-    
+
     // Tentukan tanggal awal bulan
     $tanggal_awal_bulan = "$tahun-$bulan-01";
     $tanggal_akhir_bulan = date('Y-m-t', strtotime($tanggal_awal_bulan));
-    
+
     // Hitung jumlah hari dalam bulan
     $jumlah_hari = date('t', strtotime($tanggal_awal_bulan));
-    
+
     // Bagi menjadi 4 minggu (dengan kemungkinan minggu ke-5)
     $minggu = [];
-    
+
     for ($i = 1; $i <= 4; $i++) {
-        $tanggal_mulai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . (($i-1)*7) . ' days'));
-        $tanggal_selesai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . ($i*7 - 1) . ' days'));
-        
+        $tanggal_mulai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . (($i - 1) * 7) . ' days'));
+        $tanggal_selesai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . ($i * 7 - 1) . ' days'));
+
         // Pastikan tidak melebihi akhir bulan
         if (strtotime($tanggal_selesai) > strtotime($tanggal_akhir_bulan)) {
             $tanggal_selesai = $tanggal_akhir_bulan;
         }
-        
+
         // Cek apakah ada penilaian di minggu ini
         $sql_cek = "SELECT COUNT(*) as total 
                    FROM penilaian_siswa 
                    WHERE siswa_id = ? 
                      AND tanggal_penilaian BETWEEN ? AND ?";
-        
+
         $stmt_cek = $conn->prepare($sql_cek);
         if ($stmt_cek) {
             $stmt_cek->bind_param("iss", $selected_anak_id, $tanggal_mulai, $tanggal_selesai);
             $stmt_cek->execute();
             $result_cek = $stmt_cek->get_result();
             $row_cek = $result_cek->fetch_assoc();
-            
+
             if ($row_cek['total'] > 0) {
                 $minggu_options[$i] = "Minggu $i: " . date('d M', strtotime($tanggal_mulai)) . " - " . date('d M', strtotime($tanggal_selesai));
             }
             $stmt_cek->close();
         }
     }
-    
+
     // Cek untuk minggu ke-5 jika ada
     if ($jumlah_hari > 28) {
         $tanggal_mulai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + 28 days'));
         $tanggal_selesai = $tanggal_akhir_bulan;
-        
+
         if (strtotime($tanggal_mulai) <= strtotime($tanggal_akhir_bulan)) {
             $sql_cek = "SELECT COUNT(*) as total 
                        FROM penilaian_siswa 
                        WHERE siswa_id = ? 
                          AND tanggal_penilaian BETWEEN ? AND ?";
-            
+
             $stmt_cek = $conn->prepare($sql_cek);
             if ($stmt_cek) {
                 $stmt_cek->bind_param("iss", $selected_anak_id, $tanggal_mulai, $tanggal_selesai);
                 $stmt_cek->execute();
                 $result_cek = $stmt_cek->get_result();
                 $row_cek = $result_cek->fetch_assoc();
-                
+
                 if ($row_cek['total'] > 0) {
                     $minggu_options[5] = "Minggu 5: " . date('d M', strtotime($tanggal_mulai)) . " - " . date('d M', strtotime($tanggal_selesai));
                 }
@@ -532,6 +536,7 @@ if (!empty($riwayat_data)) {
 
 <!DOCTYPE html>
 <html lang="id">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -544,10 +549,12 @@ if (!empty($riwayat_data)) {
         .card {
             transition: transform 0.2s, box-shadow 0.2s;
         }
+
         .card:hover {
             transform: translateY(-2px);
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
         }
+
         .badge {
             display: inline-block;
             padding: 0.25rem 0.75rem;
@@ -555,10 +562,27 @@ if (!empty($riwayat_data)) {
             font-size: 0.875rem;
             font-weight: 600;
         }
-        .badge-sangat-baik { background-color: #10B981; color: white; }
-        .badge-baik { background-color: #3B82F6; color: white; }
-        .badge-cukup { background-color: #F59E0B; color: white; }
-        .badge-kurang { background-color: #EF4444; color: white; }
+
+        .badge-sangat-baik {
+            background-color: #10B981;
+            color: white;
+        }
+
+        .badge-baik {
+            background-color: #3B82F6;
+            color: white;
+        }
+
+        .badge-cukup {
+            background-color: #F59E0B;
+            color: white;
+        }
+
+        .badge-kurang {
+            background-color: #EF4444;
+            color: white;
+        }
+
         .modal {
             display: none;
             position: fixed;
@@ -570,7 +594,7 @@ if (!empty($riwayat_data)) {
             background-color: rgba(0, 0, 0, 0.5);
             overflow-y: auto;
         }
-        
+
         .line-clamp-3 {
             display: -webkit-box;
             -webkit-line-clamp: 3;
@@ -601,7 +625,7 @@ if (!empty($riwayat_data)) {
             text-overflow: ellipsis;
             word-break: break-word;
         }
-        
+
         .modal-content {
             background-color: #fff;
             margin: 2% auto;
@@ -612,23 +636,39 @@ if (!empty($riwayat_data)) {
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
             animation: modalFadeIn 0.3s;
         }
+
         @keyframes modalFadeIn {
-            from { opacity: 0; transform: translateY(-20px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
+
         .modal-header {
             padding: 16px 24px;
             color: white;
             border-radius: 8px 8px 0 0;
             background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
         }
-        .modal-body { padding: 24px; max-height: 70vh; overflow-y: auto; }
+
+        .modal-body {
+            padding: 24px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
         .modal-footer {
             padding: 16px 24px;
             border-top: 1px solid #e5e7eb;
             background-color: #f9fafb;
             border-radius: 0 0 8px 8px;
         }
+
         .close {
             color: #fff;
             float: right;
@@ -637,8 +677,11 @@ if (!empty($riwayat_data)) {
             cursor: pointer;
             line-height: 1;
         }
-        .close:hover { opacity: 0.8; }
-        
+
+        .close:hover {
+            opacity: 0.8;
+        }
+
         /* Dropdown styles */
         .dropdown-submenu {
             display: none;
@@ -654,7 +697,7 @@ if (!empty($riwayat_data)) {
         .dropdown-toggle.open .arrow {
             transform: rotate(-90deg);
         }
-        
+
         /* Desktop sidebar tetap terlihat */
         .desktop-sidebar {
             display: none;
@@ -668,12 +711,12 @@ if (!empty($riwayat_data)) {
             .mobile-header {
                 display: none;
             }
-            
+
             /* Tampilkan tabel di desktop */
             .desktop-table {
                 display: block !important;
             }
-            
+
             .mobile-card {
                 display: none !important;
             }
@@ -719,51 +762,52 @@ if (!empty($riwayat_data)) {
 
         /* Mobile View Styles */
         @media (max-width: 767px) {
+
             /* Sembunyikan tabel di mobile */
             .desktop-table {
                 display: none !important;
             }
-            
+
             /* Tampilkan card layout di mobile */
             .mobile-card {
                 display: block !important;
             }
-            
+
             .modal-content {
                 width: 95%;
                 margin: 10% auto;
             }
-            
+
             .filter-grid {
                 grid-template-columns: 1fr !important;
                 gap: 0.5rem !important;
             }
-            
+
             .stat-cards {
                 grid-template-columns: repeat(2, 1fr) !important;
                 gap: 0.5rem !important;
             }
-            
+
             .table-container {
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
             }
-            
+
             .table-container table {
                 min-width: 800px;
             }
-            
+
             .table-container th,
             .table-container td {
                 padding: 0.5rem !important;
             }
-            
+
             .action-buttons {
                 display: flex;
                 flex-direction: column;
                 gap: 0.25rem;
             }
-            
+
             .action-buttons button {
                 padding: 0.25rem 0.5rem !important;
                 font-size: 0.75rem;
@@ -775,11 +819,11 @@ if (!empty($riwayat_data)) {
                 padding: 1rem;
                 border-bottom: 1px solid #e5e7eb;
             }
-            
+
             .mobile-card-item:last-child {
                 border-bottom: none;
             }
-            
+
             .mobile-card-label {
                 font-weight: 600;
                 color: #6B7280;
@@ -788,18 +832,19 @@ if (!empty($riwayat_data)) {
                 text-transform: uppercase;
                 letter-spacing: 0.05em;
             }
-            
+
             .mobile-card-value {
                 font-size: 0.875rem;
                 margin-bottom: 0.75rem;
             }
-            
+
             .mobile-card-actions {
                 margin-top: 0.5rem;
             }
         }
     </style>
 </head>
+
 <body class="bg-gray-100">
     <!-- Desktop Sidebar -->
     <div class="desktop-sidebar w-64 bg-blue-800 text-white fixed h-full z-40">
@@ -897,27 +942,27 @@ if (!empty($riwayat_data)) {
                 </div>
                 <div class="mt-4 md:mt-0 w-full md:w-auto">
                     <?php if (!empty($anak_data)): ?>
-                    <div class="relative">
-                        <form method="GET" class="flex items-center">
-                            <input type="hidden" name="page" value="1">
-                            <input type="hidden" name="guru" value="<?php echo htmlspecialchars($filter_guru); ?>">
-                            <input type="hidden" name="kategori" value="<?php echo htmlspecialchars($filter_kategori); ?>">
-                            <input type="hidden" name="bulan" value="<?php echo htmlspecialchars($filter_bulan); ?>">
-                            <input type="hidden" name="minggu" value="<?php echo htmlspecialchars($filter_minggu); ?>">
-                            <input type="hidden" name="search" value="<?php echo htmlspecialchars($search_keyword); ?>">
-                            
-                            <select name="anak_id" onchange="this.form.submit()" 
+                        <div class="relative">
+                            <form method="GET" class="flex items-center">
+                                <input type="hidden" name="page" value="1">
+                                <input type="hidden" name="guru" value="<?php echo htmlspecialchars($filter_guru); ?>">
+                                <input type="hidden" name="kategori"
+                                    value="<?php echo htmlspecialchars($filter_kategori); ?>">
+                                <input type="hidden" name="bulan" value="<?php echo htmlspecialchars($filter_bulan); ?>">
+                                <input type="hidden" name="minggu" value="<?php echo htmlspecialchars($filter_minggu); ?>">
+                                <input type="hidden" name="search" value="<?php echo htmlspecialchars($search_keyword); ?>">
+
+                                <select name="anak_id" onchange="this.form.submit()"
                                     class="w-full md:w-auto border border-gray-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
-                                <?php foreach ($anak_data as $anak): ?>
-                                <option value="<?php echo $anak['id']; ?>" 
-                                        <?php echo $selected_anak_id == $anak['id'] ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($anak['nama_lengkap']); ?> 
-                                    (<?php echo $anak['kelas']; ?>)
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </form>
-                    </div>
+                                        <?php foreach ($anak_data as $anak): ?>
+                                                <option value="<?php echo $anak['id']; ?>" <?php echo $selected_anak_id == $anak['id'] ? 'selected' : ''; ?>>
+                                                    <?php echo htmlspecialchars($anak['nama_lengkap']); ?>
+                                                    (<?php echo $anak['kelas']; ?>)
+                                                </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </form>
+                            </div>
                     <?php endif; ?>
                 </div>
             </div>
@@ -926,465 +971,493 @@ if (!empty($riwayat_data)) {
         <!-- Content -->
         <div class="container mx-auto p-4 md:p-6">
             <?php if (empty($anak_data)): ?>
-                <!-- Tidak Ada Data Anak -->
-                <div class="text-center py-12 md:py-16">
-                    <i class="fas fa-child text-5xl md:text-6xl text-gray-400 mb-4"></i>
-                    <h3 class="text-xl md:text-2xl font-bold text-gray-700 mb-2">Belum ada data anak</h3>
-                    <p class="text-gray-600 mb-6 text-sm md:text-base">Hubungi admin untuk mendaftarkan anak Anda ke bimbel.</p>
-                    <a href="dashboardOrtu.php" class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm md:text-base">
-                        <i class="fas fa-arrow-left mr-2"></i> Kembali ke Dashboard
-                    </a>
-                </div>
-            
+                    <!-- Tidak Ada Data Anak -->
+                    <div class="text-center py-12 md:py-16">
+                        <i class="fas fa-child text-5xl md:text-6xl text-gray-400 mb-4"></i>
+                        <h3 class="text-xl md:text-2xl font-bold text-gray-700 mb-2">Belum ada data anak</h3>
+                        <p class="text-gray-600 mb-6 text-sm md:text-base">Hubungi admin untuk mendaftarkan anak Anda ke bimbel.
+                        </p>
+                        <a href="dashboardOrtu.php"
+                            class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm md:text-base">
+                            <i class="fas fa-arrow-left mr-2"></i> Kembali ke Dashboard
+                        </a>
+                    </div>
+
             <?php elseif ($selected_anak_id == 0): ?>
-                <!-- Pilih Anak Terlebih Dahulu -->
-                <div class="text-center py-12 md:py-16">
-                    <i class="fas fa-user-graduate text-5xl md:text-6xl text-gray-400 mb-4"></i>
-                    <h3 class="text-xl md:text-2xl font-bold text-gray-700 mb-2">Pilih anak terlebih dahulu</h3>
-                    <p class="text-gray-600 text-sm md:text-base">Silakan pilih salah satu anak untuk melihat riwayat penilaian mereka.</p>
-                </div>
-            
+                    <!-- Pilih Anak Terlebih Dahulu -->
+                    <div class="text-center py-12 md:py-16">
+                        <i class="fas fa-user-graduate text-5xl md:text-6xl text-gray-400 mb-4"></i>
+                        <h3 class="text-xl md:text-2xl font-bold text-gray-700 mb-2">Pilih anak terlebih dahulu</h3>
+                        <p class="text-gray-600 text-sm md:text-base">Silakan pilih salah satu anak untuk melihat riwayat
+                            penilaian mereka.</p>
+                    </div>
+
             <?php else: ?>
-                <!-- ADA DATA - TAMPILKAN DASHBOARD RIWAYAT -->
-                
-                <!-- Header Anak -->
-                <div class="mb-6 md:mb-8">
-                    <div class="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-4 md:p-6 text-white shadow-lg">
-                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
-                            <div class="flex-1">
-                                <h2 class="text-xl md:text-2xl lg:text-3xl font-bold mb-2">
-                                    <?php echo htmlspecialchars($selected_anak_name); ?>
-                                </h2>
-                                <div class="flex flex-wrap gap-2 md:gap-3">
-                                    <span class="bg-white/20 px-2 py-1 md:px-3 md:py-1 rounded-full text-xs md:text-sm">
-                                        <i class="fas fa-clipboard-list mr-1"></i>
-                                        Total: <?php echo $stats['total']; ?> Penilaian
-                                    </span>
-                                    <span class="bg-white/20 px-2 py-1 md:px-3 md:py-1 rounded-full text-xs md:text-sm">
+                    <!-- ADA DATA - TAMPILKAN DASHBOARD RIWAYAT -->
+
+                    <!-- Header Anak -->
+                    <div class="mb-6 md:mb-8">
+                        <div class="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-4 md:p-6 text-white shadow-lg">
+                            <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
+                                <div class="flex-1">
+                                    <h2 class="text-xl md:text-2xl lg:text-3xl font-bold mb-4 ms-2">
+                                        <?php echo htmlspecialchars($selected_anak_name); ?>
+                                    </h2>
+                                    <div class="flex flex-wrap gap-2 md:gap-3">
+                                        <span class="bg-white/20 px-2 py-1 md:px-3 md:py-1 rounded-full text-xs md:text-sm">
+                                            <i class="fas fa-clipboard-list mr-1"></i>
+                                            Total: <?php echo $stats['total']; ?> Penilaian
+                                        </span>
+                                        <!-- <span class="bg-white/20 px-2 py-1 md:px-3 md:py-1 rounded-full text-xs md:text-sm">
                                         <i class="fas fa-star mr-1"></i>
                                         Rata-rata: <?php echo $stats['rata_skor']; ?>/50
-                                    </span>
+                                    </span> -->
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
 
-<!-- Filter Section -->
-<div class="card bg-white rounded-xl shadow p-4 md:p-6 mb-6">
-    <h3 class="text-base md:text-lg font-semibold text-gray-800 mb-3 md:mb-4">
-        <i class="fas fa-filter mr-2"></i> Filter & Pencarian
-    </h3>
-    
-    <form method="GET" class="space-y-3 md:space-y-4" id="filterForm">
-        <input type="hidden" name="anak_id" value="<?php echo $selected_anak_id; ?>">
-        <input type="hidden" name="page" value="1">
-        
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
-            <!-- Filter Guru -->
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Filter Guru</label>
-                <select name="guru" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
-                    <option value="">Semua Guru</option>
-                    <?php foreach ($guru_list as $guru): ?>
-                    <option value="<?php echo htmlspecialchars($guru); ?>"
-                            <?php echo $filter_guru == $guru ? 'selected' : ''; ?>>
-                        <?php echo htmlspecialchars($guru); ?>
-                    </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            
-            <!-- Filter Kategori -->
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Filter Kategori</label>
-                <select name="kategori" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
-                    <option value="">Semua Kategori</option>
-                    <?php foreach ($kategori_list as $kategori): ?>
-                    <option value="<?php echo $kategori; ?>"
-                            <?php echo $filter_kategori == $kategori ? 'selected' : ''; ?>>
-                        <?php echo $kategori; ?>
-                    </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            
-            <!-- Filter Bulan -->
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Filter Bulan</label>
-                <select name="bulan" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
-                    <option value="">Semua Bulan</option>
-                    <?php foreach ($bulan_options as $value => $label): ?>
-                    <option value="<?php echo $value; ?>"
-                            <?php echo $filter_bulan == $value ? 'selected' : ''; ?>>
-                        <?php echo $label; ?>
-                    </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            
-        </div>
-        
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
-            <div class="text-sm text-gray-600">
-                Menampilkan <?php echo $start_record; ?>-<?php echo $end_record; ?> dari <?php echo $total_records; ?> penilaian
-            </div>
-            <div class="flex space-x-2">
-                <button type="submit" 
-                        class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm md:text-base">
-                    <i class="fas fa-filter mr-1 md:mr-2"></i> Terapkan Filter
-                </button>
-                <a href="riwayatNilai.php?anak_id=<?php echo $selected_anak_id; ?>" 
-                   class="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm md:text-base">
-                    <i class="fas fa-redo mr-1 md:mr-2"></i> Reset
-                </a>
-            </div>
-        </div>
-    </form>
-</div>
-
-                <!-- Statistik Cards -->
-                <div class="grid stat-cards grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
-                    <div class="bg-gradient-to-r from-green-50 to-green-100 border border-green-200 rounded-lg p-3 md:p-4">
-                        <div class="flex items-center">
-                            <div class="p-2 bg-green-100 rounded-lg mr-2 md:mr-3">
-                                <i class="fas fa-trophy text-green-600"></i>
-                            </div>
-                            <div>
-                                <p class="text-xs md:text-sm text-gray-600">Sangat Baik</p>
-                                <p class="text-lg md:text-xl font-bold text-gray-800"><?php echo $stats['sangat_baik']; ?></p>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-lg p-3 md:p-4">
-                        <div class="flex items-center">
-                            <div class="p-2 bg-blue-100 rounded-lg mr-2 md:mr-3">
-                                <i class="fas fa-thumbs-up text-blue-600"></i>
-                            </div>
-                            <div>
-                                <p class="text-xs md:text-sm text-gray-600">Baik</p>
-                                <p class="text-lg md:text-xl font-bold text-gray-800"><?php echo $stats['baik']; ?></p>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="bg-gradient-to-r from-yellow-50 to-yellow-100 border border-yellow-200 rounded-lg p-3 md:p-4">
-                        <div class="flex items-center">
-                            <div class="p-2 bg-yellow-100 rounded-lg mr-2 md:mr-3">
-                                <i class="fas fa-balance-scale text-yellow-600"></i>
-                            </div>
-                            <div>
-                                <p class="text-xs md:text-sm text-gray-600">Cukup</p>
-                                <p class="text-lg md:text-xl font-bold text-gray-800"><?php echo $stats['cukup']; ?></p>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="bg-gradient-to-r from-red-50 to-red-100 border border-red-200 rounded-lg p-3 md:p-4">
-                        <div class="flex items-center">
-                            <div class="p-2 bg-red-100 rounded-lg mr-2 md:mr-3">
-                                <i class="fas fa-exclamation-triangle text-red-600"></i>
-                            </div>
-                            <div>
-                                <p class="text-xs md:text-sm text-gray-600">Kurang</p>
-                                <p class="text-lg md:text-xl font-bold text-gray-800"><?php echo $stats['kurang']; ?></p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Daftar Penilaian -->
-                <div class="card bg-white rounded-xl shadow mb-6 md:mb-8">
-                    <div class="p-4 md:p-6 border-b flex flex-col md:flex-row justify-between items-start md:items-center">
-                        <h3 class="text-base md:text-lg font-semibold text-gray-800">
-                            <i class="fas fa-list-alt mr-2"></i> Daftar Penilaian
+                    <!-- Filter Section -->
+                    <div class="card bg-white rounded-xl shadow p-4 md:p-6 mb-6">
+                        <h3 class="text-base md:text-lg font-semibold text-gray-800 mb-3 md:mb-4">
+                            <i class="fas fa-filter mr-2"></i> Filter & Pencarian
                         </h3>
-                        <div class="text-sm text-gray-500 mt-2 md:mt-0">
-                            <?php echo $total_records; ?> data ditemukan
+
+                        <form method="GET" class="space-y-3 md:space-y-4" id="filterForm">
+                            <input type="hidden" name="anak_id" value="<?php echo $selected_anak_id; ?>">
+                            <input type="hidden" name="page" value="1">
+
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+                                <!-- Filter Guru -->
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Filter Guru</label>
+                                    <select name="guru"
+                                        class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
+                                        <option value="">Semua Guru</option>
+                                        <?php foreach ($guru_list as $guru): ?>
+                                                <option value="<?php echo htmlspecialchars($guru); ?>" <?php echo $filter_guru == $guru ? 'selected' : ''; ?>>
+                                                    <?php echo htmlspecialchars($guru); ?>
+                                                </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+
+                                <!-- Filter Kategori -->
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Filter Kategori</label>
+                                    <select name="kategori"
+                                        class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
+                                        <option value="">Semua Kategori</option>
+                                        <?php foreach ($kategori_list as $kategori): ?>
+                                                <option value="<?php echo $kategori; ?>" <?php echo $filter_kategori == $kategori ? 'selected' : ''; ?>>
+                                                    <?php echo $kategori; ?>
+                                                </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+
+                                <!-- Filter Bulan -->
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Filter Bulan</label>
+                                    <select name="bulan"
+                                        class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
+                                        <option value="">Semua Bulan</option>
+                                        <?php foreach ($bulan_options as $value => $label): ?>
+                                                <option value="<?php echo $value; ?>" <?php echo $filter_bulan == $value ? 'selected' : ''; ?>>
+                                                    <?php echo $label; ?>
+                                                </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+
+                            </div>
+
+                            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+                                <div class="text-sm text-gray-600">
+                                    Menampilkan <?php echo $start_record; ?>-<?php echo $end_record; ?> dari
+                                    <?php echo $total_records; ?> penilaian
+                                </div>
+                                <div class="flex space-x-2">
+                                    <button type="submit"
+                                        class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm md:text-base">
+                                        <i class="fas fa-filter mr-1 md:mr-2"></i> Terapkan Filter
+                                    </button>
+                                    <a href="riwayatNilai.php?anak_id=<?php echo $selected_anak_id; ?>"
+                                        class="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm md:text-base">
+                                        <i class="fas fa-redo mr-1 md:mr-2"></i> Reset
+                                    </a>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Statistik Cards -->
+                    <div class="grid stat-cards grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
+                        <div class="bg-gradient-to-r from-green-50 to-green-100 border border-green-200 rounded-lg p-3 md:p-4">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-green-100 rounded-lg mr-2 md:mr-3">
+                                    <i class="fas fa-trophy text-green-600"></i>
+                                </div>
+                                <div>
+                                    <p class="text-xs md:text-sm text-gray-600">Sangat Baik</p>
+                                    <p class="text-lg md:text-xl font-bold text-gray-800"><?php echo $stats['sangat_baik']; ?>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-lg p-3 md:p-4">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-blue-100 rounded-lg mr-2 md:mr-3">
+                                    <i class="fas fa-thumbs-up text-blue-600"></i>
+                                </div>
+                                <div>
+                                    <p class="text-xs md:text-sm text-gray-600">Baik</p>
+                                    <p class="text-lg md:text-xl font-bold text-gray-800"><?php echo $stats['baik']; ?></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            class="bg-gradient-to-r from-yellow-50 to-yellow-100 border border-yellow-200 rounded-lg p-3 md:p-4">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-yellow-100 rounded-lg mr-2 md:mr-3">
+                                    <i class="fas fa-balance-scale text-yellow-600"></i>
+                                </div>
+                                <div>
+                                    <p class="text-xs md:text-sm text-gray-600">Cukup</p>
+                                    <p class="text-lg md:text-xl font-bold text-gray-800"><?php echo $stats['cukup']; ?></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-gradient-to-r from-red-50 to-red-100 border border-red-200 rounded-lg p-3 md:p-4">
+                            <div class="flex items-center">
+                                <div class="p-2 bg-red-100 rounded-lg mr-2 md:mr-3">
+                                    <i class="fas fa-exclamation-triangle text-red-600"></i>
+                                </div>
+                                <div>
+                                    <p class="text-xs md:text-sm text-gray-600">Kurang</p>
+                                    <p class="text-lg md:text-xl font-bold text-gray-800"><?php echo $stats['kurang']; ?></p>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    
-                    <?php if (empty($riwayat_data)): ?>
-                        <!-- Tidak Ada Data -->
-                        <div class="p-6 md:p-8 text-center">
-                            <i class="fas fa-clipboard-list text-4xl text-gray-400 mb-3"></i>
-                            <h4 class="text-lg font-medium text-gray-700 mb-2">Tidak ada data penilaian</h4>
-                            <p class="text-gray-500 text-sm md:text-base">
-                                <?php echo !empty($filter_guru) || !empty($filter_kategori) || !empty($filter_bulan) || !empty($filter_minggu) || !empty($search_keyword) 
-                                    ? 'Coba ubah filter atau kata kunci pencarian' 
-                                    : 'Belum ada penilaian untuk anak ini'; ?>
-                            </p>
+
+                    <!-- Daftar Penilaian -->
+                    <div class="card bg-white rounded-xl shadow mb-6 md:mb-8">
+                        <div class="p-4 md:p-6 border-b flex flex-col md:flex-row justify-between items-start md:items-center">
+                            <h3 class="text-base md:text-lg font-semibold text-gray-800">
+                                <i class="fas fa-list-alt mr-2"></i> Daftar Penilaian
+                            </h3>
+                            <div class="text-sm text-gray-500 mt-2 md:mt-0">
+                                <?php echo $total_records; ?> data ditemukan
+                            </div>
                         </div>
-                    <?php else: ?>
-                        <!-- Desktop View: Tabel -->
-                        <div class="desktop-table">
-                            <div class="table-container">
-                                <table class="min-w-full divide-y divide-gray-200">
-                                    <thead class="bg-gray-50">
-                                        <tr>
-                                            <th class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Tanggal
-                                            </th>
-                                            <th class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Guru & Pelajaran
-                                            </th>
-                                            <th class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Total Skor
-                                            </th>
-                                            <th class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Kategori
-                                            </th>
-                                            <th class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Catatan
-                                            </th>
-                                            <th class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                Aksi
-                                            </th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="bg-white divide-y divide-gray-200">
-                                        <?php foreach ($riwayat_data as $data): 
+
+                        <?php if (empty($riwayat_data)): ?>
+                                <!-- Tidak Ada Data -->
+                                <div class="p-6 md:p-8 text-center">
+                                    <i class="fas fa-clipboard-list text-4xl text-gray-400 mb-3"></i>
+                                    <h4 class="text-lg font-medium text-gray-700 mb-2">Tidak ada data penilaian</h4>
+                                    <p class="text-gray-500 text-sm md:text-base">
+                                        <?php echo !empty($filter_guru) || !empty($filter_kategori) || !empty($filter_bulan) || !empty($filter_minggu) || !empty($search_keyword)
+                                            ? 'Coba ubah filter atau kata kunci pencarian'
+                                            : 'Belum ada penilaian untuk anak ini'; ?>
+                                    </p>
+                                </div>
+                        <?php else: ?>
+                                <!-- Desktop View: Tabel -->
+                                <div class="desktop-table">
+                                    <div class="table-container">
+                                        <table class="min-w-full divide-y divide-gray-200">
+                                            <thead class="bg-gray-50">
+                                                <tr>
+                                                    <th
+                                                        class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                        Tanggal
+                                                    </th>
+                                                    <th
+                                                        class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                        Guru & Pelajaran
+                                                    </th>
+                                                    <th
+                                                        class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                        Total Skor
+                                                    </th>
+                                                    <th
+                                                        class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                        Kategori
+                                                    </th>
+                                                    <th
+                                                        class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                        Catatan
+                                                    </th>
+                                                    <th
+                                                        class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                        Aksi
+                                                    </th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="bg-white divide-y divide-gray-200">
+                                                <?php foreach ($riwayat_data as $data):
+                                                    $badge_class = '';
+                                                    if ($data['kategori'] == 'Sangat Baik')
+                                                        $badge_class = 'badge-sangat-baik';
+                                                    elseif ($data['kategori'] == 'Baik')
+                                                        $badge_class = 'badge-baik';
+                                                    elseif ($data['kategori'] == 'Cukup')
+                                                        $badge_class = 'badge-cukup';
+                                                    else
+                                                        $badge_class = 'badge-kurang';
+
+                                                    $persentase = $data['persentase'] ?? round(($data['total_score'] / 50) * 100);
+                                                    $tanggal_lengkap = formatTanggalLengkap($data['tanggal_original']);
+                                                    ?>
+                                                        <tr class="hover:bg-gray-50">
+                                                            <td class="px-4 md:px-6 py-3 md:py-4 whitespace-nowrap">
+                                                                <div class="text-sm font-medium text-gray-900"><?php echo $tanggal_lengkap; ?>
+                                                                </div>
+                                                                <!-- <div class="text-xs text-gray-500"><?php echo $data['jam_format']; ?></div> -->
+                                                            </td>
+                                                            <td class="px-4 md:px-6 py-3 md:py-4">
+                                                                <div class="text-sm font-medium text-gray-900"><?php echo $data['nama_guru']; ?>
+                                                                </div>
+                                                                <div class="text-xs text-gray-500"><?php echo $data['nama_pelajaran'] ?? '-'; ?>
+                                                                </div>
+                                                            </td>
+                                                            <td class="px-4 md:px-6 py-3 md:py-4 whitespace-nowrap">
+                                                                <div class="text-lg font-bold text-gray-900">
+                                                                    <?php echo $data['total_score']; ?>/50</div>
+                                                                <!-- <div class="text-xs text-gray-500"><?php echo $persentase; ?>%</div> -->
+                                                            </td>
+                                                            <td class="px-4 md:px-6 py-3 md:py-4 whitespace-nowrap">
+                                                                <span class="badge <?php echo $badge_class; ?>">
+                                                                    <?php echo $data['kategori']; ?>
+                                                                </span>
+                                                            </td>
+                                                            <td class="px-4 md:px-6 py-3 md:py-4">
+                                                                <div class="text-sm text-gray-900 max-w-xs truncate-multiline">
+                                                                    <?php
+                                                                    $catatan = $data['catatan_guru'] ?? 'Tidak ada catatan';
+                                                                    echo strlen($catatan) > 100 ? substr($catatan, 0, 100) . '...' : $catatan;
+                                                                    ?>
+                                                                </div>
+                                                            </td>
+                                                            <td class="px-4 md:px-6 py-3 md:py-4 whitespace-nowrap text-sm font-medium">
+                                                                <button onclick="showDetailPenilaian(<?php echo $data['id']; ?>)"
+                                                                    class="text-blue-600 hover:text-blue-900 mr-3">
+                                                                    <i class="fas fa-eye"></i> Detail
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                <?php endforeach; ?>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <!-- Mobile View: Card Layout -->
+                                <div class="mobile-card">
+                                    <div class="divide-y divide-gray-200">
+                                        <?php foreach ($riwayat_data as $data):
                                             $badge_class = '';
-                                            if ($data['kategori'] == 'Sangat Baik') $badge_class = 'badge-sangat-baik';
-                                            elseif ($data['kategori'] == 'Baik') $badge_class = 'badge-baik';
-                                            elseif ($data['kategori'] == 'Cukup') $badge_class = 'badge-cukup';
-                                            else $badge_class = 'badge-kurang';
-                                            
+                                            if ($data['kategori'] == 'Sangat Baik')
+                                                $badge_class = 'badge-sangat-baik';
+                                            elseif ($data['kategori'] == 'Baik')
+                                                $badge_class = 'badge-baik';
+                                            elseif ($data['kategori'] == 'Cukup')
+                                                $badge_class = 'badge-cukup';
+                                            else
+                                                $badge_class = 'badge-kurang';
+
                                             $persentase = $data['persentase'] ?? round(($data['total_score'] / 50) * 100);
                                             $tanggal_lengkap = formatTanggalLengkap($data['tanggal_original']);
-                                        ?>
-                                        <tr class="hover:bg-gray-50">
-                                            <td class="px-4 md:px-6 py-3 md:py-4 whitespace-nowrap">
-                                                <div class="text-sm font-medium text-gray-900"><?php echo $tanggal_lengkap; ?></div>
-                                                <!-- <div class="text-xs text-gray-500"><?php echo $data['jam_format']; ?></div> -->
-                                            </td>
-                                            <td class="px-4 md:px-6 py-3 md:py-4">
-                                                <div class="text-sm font-medium text-gray-900"><?php echo $data['nama_guru']; ?></div>
-                                                <div class="text-xs text-gray-500"><?php echo $data['nama_pelajaran'] ?? '-'; ?></div>
-                                            </td>
-                                            <td class="px-4 md:px-6 py-3 md:py-4 whitespace-nowrap">
-                                                <div class="text-lg font-bold text-gray-900"><?php echo $data['total_score']; ?>/50</div>
-                                                <!-- <div class="text-xs text-gray-500"><?php echo $persentase; ?>%</div> -->
-                                            </td>
-                                            <td class="px-4 md:px-6 py-3 md:py-4 whitespace-nowrap">
-                                                <span class="badge <?php echo $badge_class; ?>">
-                                                    <?php echo $data['kategori']; ?>
-                                                </span>
-                                            </td>
-                                            <td class="px-4 md:px-6 py-3 md:py-4">
-                                                <div class="text-sm text-gray-900 max-w-xs truncate-multiline">
-                                                    <?php 
-                                                    $catatan = $data['catatan_guru'] ?? 'Tidak ada catatan';
-                                                    echo strlen($catatan) > 100 ? substr($catatan, 0, 100) . '...' : $catatan;
-                                                    ?>
-                                                </div>
-                                            </td>
-                                            <td class="px-4 md:px-6 py-3 md:py-4 whitespace-nowrap text-sm font-medium">
-                                                <button onclick="showDetailPenilaian(<?php echo $data['id']; ?>)"
-                                                        class="text-blue-600 hover:text-blue-900 mr-3">
-                                                    <i class="fas fa-eye"></i> Detail
-                                                </button>
-                                            </td>
-                                        </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                        
-                        <!-- Mobile View: Card Layout -->
-                        <div class="mobile-card">
-                            <div class="divide-y divide-gray-200">
-                                <?php foreach ($riwayat_data as $data): 
-                                    $badge_class = '';
-                                    if ($data['kategori'] == 'Sangat Baik') $badge_class = 'badge-sangat-baik';
-                                    elseif ($data['kategori'] == 'Baik') $badge_class = 'badge-baik';
-                                    elseif ($data['kategori'] == 'Cukup') $badge_class = 'badge-cukup';
-                                    else $badge_class = 'badge-kurang';
-                                    
-                                    $persentase = $data['persentase'] ?? round(($data['total_score'] / 50) * 100);
-                                    $tanggal_lengkap = formatTanggalLengkap($data['tanggal_original']);
-                                ?>
-                                <div class="mobile-card-item">
-                                    <div class="flex justify-between items-start mb-2">
-                                        <div>
-                                            <div class="mobile-card-label">Tanggal</div>
-                                            <div class="mobile-card-value font-medium">
-                                                <?php echo $tanggal_lengkap; ?>
-                                            </div>
-                                            <div class="text-xs text-gray-500"><?php echo $data['jam_format']; ?></div>
-                                        </div>
-                                        <div>
-                                            <span class="badge <?php echo $badge_class; ?> text-xs">
-                                                <?php echo $data['kategori']; ?>
-                                            </span>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="mb-3">
-                                        <div class="mobile-card-label">Guru & Pelajaran</div>
-                                        <div class="mobile-card-value">
-                                            <div class="font-medium"><?php echo $data['nama_guru']; ?></div>
-                                            <div class="text-sm text-gray-600"><?php echo $data['nama_pelajaran'] ?? '-'; ?></div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="mb-3">
-                                        <div class="mobile-card-label">Total Skor</div>
-                                        <div class="mobile-card-value">
-                                            <div class="text-lg font-bold text-gray-900"><?php echo $data['total_score']; ?>/50</div>
-                                            <div class="text-sm text-gray-600"><?php echo $persentase; ?>%</div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="mb-3">
-                                        <div class="mobile-card-label">Catatan</div>
-                                        <div class="mobile-card-value text-sm text-gray-600 line-clamp-2">
-                                            <?php 
-                                            $catatan = $data['catatan_guru'] ?? 'Tidak ada catatan';
-                                            echo strlen($catatan) > 80 ? substr($catatan, 0, 80) . '...' : $catatan;
                                             ?>
+                                                <div class="mobile-card-item">
+                                                    <div class="flex justify-between items-start mb-2">
+                                                        <div>
+                                                            <div class="mobile-card-label">Tanggal</div>
+                                                            <div class="mobile-card-value font-medium">
+                                                                <?php echo $tanggal_lengkap; ?>
+                                                            </div>
+                                                            <div class="text-xs text-gray-500"><?php echo $data['jam_format']; ?></div>
+                                                        </div>
+                                                        <div>
+                                                            <span class="badge <?php echo $badge_class; ?> text-xs">
+                                                                <?php echo $data['kategori']; ?>
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="mb-3">
+                                                        <div class="mobile-card-label">Guru & Pelajaran</div>
+                                                        <div class="mobile-card-value">
+                                                            <div class="font-medium"><?php echo $data['nama_guru']; ?></div>
+                                                            <div class="text-sm text-gray-600"><?php echo $data['nama_pelajaran'] ?? '-'; ?>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="mb-3">
+                                                        <div class="mobile-card-label">Total Skor</div>
+                                                        <div class="mobile-card-value">
+                                                            <div class="text-lg font-bold text-gray-900"><?php echo $data['total_score']; ?>/50
+                                                            </div>
+                                                            <div class="text-sm text-gray-600"><?php echo $persentase; ?>%</div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="mb-3">
+                                                        <div class="mobile-card-label">Catatan</div>
+                                                        <div class="mobile-card-value text-sm text-gray-600 line-clamp-2">
+                                                            <?php
+                                                            $catatan = $data['catatan_guru'] ?? 'Tidak ada catatan';
+                                                            echo strlen($catatan) > 80 ? substr($catatan, 0, 80) . '...' : $catatan;
+                                                            ?>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="mobile-card-actions">
+                                                        <button onclick="showDetailPenilaian(<?php echo $data['id']; ?>)"
+                                                            class="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
+                                                            <i class="fas fa-eye mr-2"></i> Lihat Detail
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </div>
+
+                                <!-- Pagination -->
+                                <?php if ($total_pages > 1): ?>
+                                        <div class="px-4 md:px-6 py-4 border-t border-gray-200">
+                                            <div class="flex flex-col md:flex-row justify-between items-center">
+                                                <div class="text-sm text-gray-700 mb-4 md:mb-0">
+                                                    Menampilkan <?php echo $start_record; ?>-<?php echo $end_record; ?> dari
+                                                    <?php echo $total_records; ?> penilaian
+                                                </div>
+                                                <div class="flex items-center space-x-1">
+                                                    <?php if ($page > 1): ?>
+                                                            <a href="?<?php
+                                                            $params = $_GET;
+                                                            $params['page'] = $page - 1;
+                                                            echo http_build_query($params);
+                                                            ?>" class="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50">
+                                                                <i class="fas fa-chevron-left"></i>
+                                                            </a>
+                                                    <?php endif; ?>
+
+                                                    <?php
+                                                    $start_page = max(1, $page - 2);
+                                                    $end_page = min($total_pages, $page + 2);
+
+                                                    if ($start_page > 1): ?>
+                                                            <a href="?<?php
+                                                            $params = $_GET;
+                                                            $params['page'] = 1;
+                                                            echo http_build_query($params);
+                                                            ?>" class="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50">1</a>
+                                                            <?php if ($start_page > 2): ?>
+                                                                    <span class="px-3 py-1">...</span>
+                                                            <?php endif; ?>
+                                                    <?php endif; ?>
+
+                                                    <?php for ($i = $start_page; $i <= $end_page; $i++): ?>
+                                                            <a href="?<?php
+                                                            $params = $_GET;
+                                                            $params['page'] = $i;
+                                                            echo http_build_query($params);
+                                                            ?>"
+                                                                class="px-3 py-1 border rounded-lg <?php echo $i == $page ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-gray-50'; ?>">
+                                                                <?php echo $i; ?>
+                                                            </a>
+                                                    <?php endfor; ?>
+
+                                                    <?php if ($end_page < $total_pages): ?>
+                                                            <?php if ($end_page < $total_pages - 1): ?>
+                                                                    <span class="px-3 py-1">...</span>
+                                                            <?php endif; ?>
+                                                            <a href="?<?php
+                                                            $params = $_GET;
+                                                            $params['page'] = $total_pages;
+                                                            echo http_build_query($params);
+                                                            ?>" class="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50">
+                                                                <?php echo $total_pages; ?>
+                                                            </a>
+                                                    <?php endif; ?>
+
+                                                    <?php if ($page < $total_pages): ?>
+                                                            <a href="?<?php
+                                                            $params = $_GET;
+                                                            $params['page'] = $page + 1;
+                                                            echo http_build_query($params);
+                                                            ?>" class="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50">
+                                                                <i class="fas fa-chevron-right"></i>
+                                                            </a>
+                                                    <?php endif; ?>
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                    
-                                    <div class="mobile-card-actions">
-                                        <button onclick="showDetailPenilaian(<?php echo $data['id']; ?>)"
-                                                class="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
-                                            <i class="fas fa-eye mr-2"></i> Lihat Detail
-                                        </button>
-                                    </div>
-                                </div>
-                                <?php endforeach; ?>
-                            </div>
-                        </div>
-                        
-                        <!-- Pagination -->
-                        <?php if ($total_pages > 1): ?>
-                        <div class="px-4 md:px-6 py-4 border-t border-gray-200">
-                            <div class="flex flex-col md:flex-row justify-between items-center">
-                                <div class="text-sm text-gray-700 mb-4 md:mb-0">
-                                    Menampilkan <?php echo $start_record; ?>-<?php echo $end_record; ?> dari <?php echo $total_records; ?> penilaian
-                                </div>
-                                <div class="flex items-center space-x-1">
-                                    <?php if ($page > 1): ?>
-                                    <a href="?<?php 
-                                        $params = $_GET;
-                                        $params['page'] = $page - 1;
-                                        echo http_build_query($params);
-                                    ?>" class="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50">
-                                        <i class="fas fa-chevron-left"></i>
-                                    </a>
-                                    <?php endif; ?>
-                                    
-                                    <?php 
-                                    $start_page = max(1, $page - 2);
-                                    $end_page = min($total_pages, $page + 2);
-                                    
-                                    if ($start_page > 1): ?>
-                                        <a href="?<?php 
-                                            $params = $_GET;
-                                            $params['page'] = 1;
-                                            echo http_build_query($params);
-                                        ?>" class="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50">1</a>
-                                        <?php if ($start_page > 2): ?>
-                                            <span class="px-3 py-1">...</span>
-                                        <?php endif; ?>
-                                    <?php endif; ?>
-                                    
-                                    <?php for ($i = $start_page; $i <= $end_page; $i++): ?>
-                                        <a href="?<?php 
-                                            $params = $_GET;
-                                            $params['page'] = $i;
-                                            echo http_build_query($params);
-                                        ?>" class="px-3 py-1 border rounded-lg <?php echo $i == $page ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-gray-50'; ?>">
-                                            <?php echo $i; ?>
-                                        </a>
-                                    <?php endfor; ?>
-                                    
-                                    <?php if ($end_page < $total_pages): ?>
-                                        <?php if ($end_page < $total_pages - 1): ?>
-                                            <span class="px-3 py-1">...</span>
-                                        <?php endif; ?>
-                                        <a href="?<?php 
-                                            $params = $_GET;
-                                            $params['page'] = $total_pages;
-                                            echo http_build_query($params);
-                                        ?>" class="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50">
-                                            <?php echo $total_pages; ?>
-                                        </a>
-                                    <?php endif; ?>
-                                    
-                                    <?php if ($page < $total_pages): ?>
-                                    <a href="?<?php 
-                                        $params = $_GET;
-                                        $params['page'] = $page + 1;
-                                        echo http_build_query($params);
-                                    ?>" class="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50">
-                                        <i class="fas fa-chevron-right"></i>
-                                    </a>
-                                    <?php endif; ?>
-                                </div>
-                            </div>
-                        </div>
+                                <?php endif; ?>
                         <?php endif; ?>
-                    <?php endif; ?>
-                </div>
+                    </div>
 
-                <!-- Tips & Saran -->
-                <div class="card bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow p-4 md:p-6">
-                    <h3 class="text-base md:text-lg font-semibold text-gray-800 mb-3 md:mb-4">
-                        <i class="fas fa-lightbulb text-yellow-600 mr-2"></i> Tips untuk Orang Tua
-                    </h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-                        <div>
-                            <h4 class="font-medium text-gray-700 mb-1 md:mb-2 text-sm md:text-base">Berdasarkan Data:</h4>
-                            <ul class="space-y-1 md:space-y-2">
-                                <?php if (isset($insights['trend']) && $insights['trend']['score_change'] > 0): ?>
+                    <!-- Tips & Saran -->
+                    <div class="card bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow p-4 md:p-6">
+                        <h3 class="text-base md:text-lg font-semibold text-gray-800 mb-3 md:mb-4">
+                            <i class="fas fa-lightbulb text-yellow-600 mr-2"></i> Tips untuk Orang Tua
+                        </h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+                            <div>
+                                <h4 class="font-medium text-gray-700 mb-1 md:mb-2 text-sm md:text-base">Berdasarkan Data:</h4>
+                                <ul class="space-y-1 md:space-y-2">
+                                    <?php if (isset($insights['trend']) && $insights['trend']['score_change'] > 0): ?>
+                                            <li class="flex items-start">
+                                                <i
+                                                    class="fas fa-check text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                                <span class="text-xs md:text-sm">Berikan apresiasi untuk perkembangan positif</span>
+                                            </li>
+                                    <?php endif; ?>
+
+                                    <?php if (isset($insights['weaknesses'])): ?>
+                                            <li class="flex items-start">
+                                                <i
+                                                    class="fas fa-exclamation-triangle text-yellow-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                                <span class="text-xs md:text-sm">Diskusikan area perbaikan dengan guru bimbel</span>
+                                            </li>
+                                    <?php endif; ?>
+
                                     <li class="flex items-start">
                                         <i
-                                            class="fas fa-check text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                        <span class="text-xs md:text-sm">Berikan apresiasi untuk perkembangan positif</span>
+                                            class="fas fa-clock text-blue-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                        <span class="text-xs md:text-sm">Pantau perkembangan bulanan secara konsisten</span>
                                     </li>
-                                <?php endif; ?>
-
-                                <?php if (isset($insights['weaknesses'])): ?>
+                                </ul>
+                            </div>
+                            <div>
+                                <h4 class="font-medium text-gray-700 mb-1 md:mb-2 text-sm md:text-base">Strategi Belajar:</h4>
+                                <ul class="space-y-1 md:space-y-2">
                                     <li class="flex items-start">
                                         <i
-                                            class="fas fa-exclamation-triangle text-yellow-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                        <span class="text-xs md:text-sm">Diskusikan area perbaikan dengan guru bimbel</span>
+                                            class="fas fa-book text-purple-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                        <span class="text-xs md:text-sm">Buat jadwal belajar rutin di rumah</span>
                                     </li>
-                                <?php endif; ?>
-
-                                <li class="flex items-start">
-                                    <i
-                                        class="fas fa-clock text-blue-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                    <span class="text-xs md:text-sm">Pantau perkembangan bulanan secara konsisten</span>
-                                </li>
-                            </ul>
-                        </div>
-                        <div>
-                            <h4 class="font-medium text-gray-700 mb-1 md:mb-2 text-sm md:text-base">Strategi Belajar:</h4>
-                            <ul class="space-y-1 md:space-y-2">
-                                <li class="flex items-start">
-                                    <i
-                                        class="fas fa-book text-purple-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                    <span class="text-xs md:text-sm">Buat jadwal belajar rutin di rumah</span>
-                                </li>
-                                <li class="flex items-start">
-                                    <i
-                                        class="fas fa-gamepad text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                    <span class="text-xs md:text-sm">Gunakan metode belajar yang menyenangkan</span>
-                                </li>
-                                <li class="flex items-start">
-                                    <i
-                                        class="fas fa-comments text-red-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                    <span class="text-xs md:text-sm">Komunikasi intens dengan guru bimbel</span>
-                                </li>
-                            </ul>
+                                    <li class="flex items-start">
+                                        <i
+                                            class="fas fa-gamepad text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                        <span class="text-xs md:text-sm">Gunakan metode belajar yang menyenangkan</span>
+                                    </li>
+                                    <li class="flex items-start">
+                                        <i
+                                            class="fas fa-comments text-red-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
+                                        <span class="text-xs md:text-sm">Komunikasi intens dengan guru bimbel</span>
+                                    </li>
+                                </ul>
+                            </div>
                         </div>
                     </div>
-                </div>
 
             <?php endif; ?>
         </div>
@@ -1422,7 +1495,7 @@ if (!empty($riwayat_data)) {
             <div class="modal-body" id="detailPenilaianContent"></div>
             <div class="modal-footer">
                 <button onclick="closeModal('detailPenilaianModal')"
-                        class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+                    class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
                     Tutup
                 </button>
             </div>
@@ -1471,14 +1544,14 @@ if (!empty($riwayat_data)) {
 
         // Dropdown functionality
         document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-            toggle.addEventListener('click', function(e) {
+            toggle.addEventListener('click', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
-                
+
                 const dropdownGroup = this.closest('.mb-1');
                 const submenu = dropdownGroup.querySelector('.dropdown-submenu');
                 const arrow = this.querySelector('.arrow');
-                
+
                 // Toggle current dropdown
                 if (submenu.style.display === 'block') {
                     submenu.style.display = 'none';
@@ -1493,7 +1566,7 @@ if (!empty($riwayat_data)) {
                         t.classList.remove('open');
                         t.querySelector('.arrow').style.transform = 'rotate(0deg)';
                     });
-                    
+
                     // Open this dropdown
                     submenu.style.display = 'block';
                     arrow.style.transform = 'rotate(-90deg)';
@@ -1503,7 +1576,7 @@ if (!empty($riwayat_data)) {
         });
 
         // Close dropdowns when clicking outside
-        document.addEventListener('click', function(e) {
+        document.addEventListener('click', function (e) {
             if (!e.target.closest('.mb-1')) {
                 document.querySelectorAll('.dropdown-submenu').forEach(submenu => {
                     submenu.style.display = 'none';
@@ -1516,36 +1589,36 @@ if (!empty($riwayat_data)) {
         });
 
         // Filter Minggu - Enable/Disable berdasarkan bulan
-$(document).ready(function() {
-    $('select[name="bulan"]').change(function() {
-        if ($(this).val()) {
-            $('select[name="minggu"]').prop('disabled', false);
-        } else {
-            $('select[name="minggu"]').prop('disabled', true);
-            $('select[name="minggu"]').val('');
-        }
-    });
-});
+        $(document).ready(function () {
+            $('select[name="bulan"]').change(function () {
+                if ($(this).val()) {
+                    $('select[name="minggu"]').prop('disabled', false);
+                } else {
+                    $('select[name="minggu"]').prop('disabled', true);
+                    $('select[name="minggu"]').val('');
+                }
+            });
+        });
 
         // Functionality for penilaian detail
         function showDetailPenilaian(penilaianId) {
             const modal = document.getElementById('detailPenilaianModal');
             const content = document.getElementById('detailPenilaianContent');
-            
+
             // Ensure mobile menu is closed
             mobileMenu.classList.remove('menu-open');
             menuOverlay.classList.remove('active');
             document.body.style.overflow = 'hidden';
-            
+
             content.innerHTML = `
                 <div class="text-center py-8">
                     <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
                     <p class="mt-4 text-gray-600">Memuat detail penilaian...</p>
                 </div>
             `;
-            
+
             modal.style.display = 'block';
-            
+
             fetch(`riwayatNilai.php?action=get_detail_penilaian&id=${penilaianId}`)
                 .then(response => {
                     if (!response.ok) {
@@ -1577,12 +1650,12 @@ $(document).ready(function() {
                         </div>
                     `;
                 });
-                    
+
             function displayDetailPenilaian(d) {
                 const kategoriClass = d.kategori === 'Sangat Baik' ? 'bg-green-500' :
-                                    d.kategori === 'Baik' ? 'bg-blue-500' :
-                                    d.kategori === 'Cukup' ? 'bg-yellow-500' : 'bg-red-500';
-                
+                    d.kategori === 'Baik' ? 'bg-blue-500' :
+                        d.kategori === 'Cukup' ? 'bg-yellow-500' : 'bg-red-500';
+
                 const indicators = [
                     { name: 'Willingness to Learn', value: d.willingness_learn },
                     { name: 'Problem Solving', value: d.problem_solving },
@@ -1590,11 +1663,11 @@ $(document).ready(function() {
                     { name: 'Konsentrasi', value: d.concentration },
                     { name: 'Independensi', value: d.independence }
                 ];
-                
-                const tanggalLengkap = d.tanggal_original ? 
-                    `${getHariIndonesia(d.tanggal_original)}, ${d.tanggal_format}` : 
+
+                const tanggalLengkap = d.tanggal_original ?
+                    `${getHariIndonesia(d.tanggal_original)}, ${d.tanggal_format}` :
                     d.tanggal_format;
-                
+
                 content.innerHTML = `
                     <div class="space-y-6">
                         <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-6 rounded-lg">
@@ -1611,7 +1684,7 @@ $(document).ready(function() {
                             <div class="text-4xl md:text-5xl font-bold text-green-600 mb-2">${d.total_score}/50</div>
                             <div class="mt-4">
                                 <span class="px-4 py-2 rounded-full text-white font-bold ${kategoriClass} text-base md:text-lg">
-                                    ${d.kategori} (${d.persentase || Math.round((d.total_score/50)*100)}%)
+                                    ${d.kategori} (${d.persentase || Math.round((d.total_score / 50) * 100)}%)
                                 </span>
                             </div>
                         </div>
@@ -1620,12 +1693,12 @@ $(document).ready(function() {
                             <h4 class="text-lg font-semibold text-gray-800 mb-4">Detail Indikator</h4>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 ${indicators.map(ind => {
-                                    const percentage = (ind.value / 10) * 100;
-                                    let barColor = 'bg-green-500';
-                                    if (percentage < 40) barColor = 'bg-red-500';
-                                    else if (percentage < 70) barColor = 'bg-yellow-500';
-                                    
-                                    return `
+                    const percentage = (ind.value / 10) * 100;
+                    let barColor = 'bg-green-500';
+                    if (percentage < 40) barColor = 'bg-red-500';
+                    else if (percentage < 70) barColor = 'bg-yellow-500';
+
+                    return `
                                     <div class="bg-white border border-gray-200 rounded-lg p-4">
                                         <div class="flex justify-between items-center mb-2">
                                             <span class="font-medium text-gray-700 text-sm md:text-base">${ind.name}</span>
@@ -1636,7 +1709,7 @@ $(document).ready(function() {
                                         </div>
                                     </div>
                                     `;
-                                }).join('')}
+                }).join('')}
                             </div>
                         </div>
                         
@@ -1667,7 +1740,7 @@ $(document).ready(function() {
             if (!tanggal) return '';
             const hariInggris = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
             const hariIndonesia = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-            
+
             const date = new Date(tanggal + 'T00:00:00');
             const dayIndex = date.getDay();
             return hariIndonesia[dayIndex] || hariInggris[dayIndex];
@@ -1687,12 +1760,12 @@ $(document).ready(function() {
                 timeElement.textContent = timeString;
             }
         }
-        
+
         setInterval(updateServerTime, 1000);
         updateServerTime();
 
         // Close modal when clicking outside
-        window.onclick = function(event) {
+        window.onclick = function (event) {
             if (event.target.classList.contains('modal')) {
                 event.target.style.display = 'none';
                 document.body.style.overflow = 'auto';
@@ -1700,4 +1773,5 @@ $(document).ready(function() {
         };
     </script>
 </body>
+
 </html>

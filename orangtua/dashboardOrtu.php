@@ -772,7 +772,7 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
             </div>
 
             <!-- Informasi Cards -->
-            <div class="grid info-cards grid-cols-1 md:grid-cols-3 gap-3 md:gap-6">
+            <div class="grid info-cards grid-cols-1 md:grid-cols-2 gap-3 md:gap-6">
                 <div class="card bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg shadow p-3 md:p-6">
                     <div class="flex items-center mb-3 md:mb-4">
                         <div class="p-2 bg-blue-100 rounded-lg mr-2 md:mr-3">
@@ -807,26 +807,6 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                         </div>
                     </div>
                 </div>
-                <div class="card bg-gradient-to-r from-purple-50 to-violet-50 rounded-lg shadow p-3 md:p-6">
-                    <div class="flex items-center mb-3 md:mb-4">
-                        <div class="p-2 bg-purple-100 rounded-lg mr-2 md:mr-3">
-                            <i class="fas fa-chart-pie text-purple-600"></i>
-                        </div>
-                        <h4 class="font-semibold text-gray-800 text-sm md:text-base">Statistik Singkat</h4>
-                    </div>
-                    <div class="space-y-2 md:space-y-3">
-                        <div>
-                            <p class="text-xs md:text-sm text-gray-600">Penilaian Terbaru</p>
-                            <p class="text-lg md:text-xl font-bold text-gray-800"><?php echo $statistik['total_penilaian']; ?></p>
-                        </div>
-                        <div>
-                            <p class="text-xs md:text-sm text-gray-600">Info</p>
-                            <p class="text-xs md:text-sm text-gray-700">
-                                Pantau terus perkembangan anak Anda melalui menu "Nilai Anak" untuk melihat detail.
-                            </p>
-                        </div>
-                    </div>
-                </div>
             </div>
         </div>
 
@@ -836,7 +816,7 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                 <div class="md:flex md:items-center md:justify-between">
                     <div class="text-sm text-gray-500">
                         <p>© <?php echo date('Y'); ?> Bimbel Esc - Dashboard Orang Tua</p>
-                        <p class="mt-1 text-xs text-gray-400">Login sebagai: <?php echo htmlspecialchars($nama_ortu ?: $full_name); ?></p>
+                        <!-- <p class="mt-1 text-xs text-gray-400">Login sebagai: <?php echo htmlspecialchars($nama_ortu ?: $full_name); ?></p> -->
                     </div>
                     <div class="mt-3 md:mt-0">
                         <div class="flex items-center space-x-4">
@@ -1112,11 +1092,6 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                                 ${pelajaran.map(p => `
                                 <div class="border border-gray-200 rounded-lg p-3 md:p-4">
                                     <div class="font-medium text-gray-800 mb-1">${p.nama_pelajaran}</div>
-                                    ${p.nama_guru ? `
-                                    <div class="text-xs text-gray-600">
-                                        <i class="fas fa-user-tie mr-1"></i> ${p.nama_guru}
-                                    </div>
-                                    ` : ''}
                                 </div>
                                 `).join('')}
                             </div>

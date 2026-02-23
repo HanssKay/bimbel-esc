@@ -68,11 +68,7 @@ if ($selected_siswa_id == 0 && !empty($siswa_list)) {
 // Filter bulan
 $bulan_filter = isset($_GET['bulan']) ? $_GET['bulan'] : date('Y-m');
 
-// Filter tahun ajaran
-$tahun_ajaran_filter = isset($_GET['tahun_ajaran']) ? $_GET['tahun_ajaran'] : '';
-
 // Inisialisasi variabel
-$rekap_data = [];
 $statistik_total = [
     'total_sesi' => 0,
     'total_hadir' => 0,
@@ -83,6 +79,7 @@ $statistik_total = [
 ];
 $siswa_detail = [];
 $detail_absensi = [];
+$pelajaran_list = [];
 
 if ($selected_siswa_id > 0 && $orangtua_id > 0) {
     // Verifikasi bahwa siswa ini benar milik orangtua ini
@@ -120,83 +117,43 @@ if ($selected_siswa_id > 0 && $orangtua_id > 0) {
         $siswa_detail = $result_detail->fetch_assoc() ?? [];
         $stmt_detail->close();
         
-        // AMBIL REKAP ABSENSI PER MINGGU UNTUK BULAN YANG DIPILIH
-        // Query yang aman dengan prepared statement
-        $sql_rekap = "SELECT 
-                        DATE_FORMAT(a.tanggal_absensi, '%Y-%m') as bulan,
-                        WEEK(a.tanggal_absensi, 1) as minggu_ke,
-                        MIN(a.tanggal_absensi) as minggu_mulai,
-                        MAX(a.tanggal_absensi) as minggu_selesai,
-                        COUNT(*) as total_sesi,
-                        SUM(CASE WHEN a.status = 'hadir' THEN 1 ELSE 0 END) as total_hadir,
-                        SUM(CASE WHEN a.status = 'izin' THEN 1 ELSE 0 END) as total_izin,
-                        SUM(CASE WHEN a.status = 'sakit' THEN 1 ELSE 0 END) as total_sakit,
-                        SUM(CASE WHEN a.status = 'alpha' THEN 1 ELSE 0 END) as total_alpha
-                    FROM absensi_siswa a
-                    WHERE a.siswa_id = ?
-                    AND DATE_FORMAT(a.tanggal_absensi, '%Y-%m') = ?
-                    GROUP BY DATE_FORMAT(a.tanggal_absensi, '%Y-%m'), WEEK(a.tanggal_absensi, 1)
-                    ORDER BY minggu_ke";
+        // AMBIL DETAIL ABSENSI UNTUK BULAN YANG DIPILIH
+        $sql_detail_absensi = "SELECT 
+                                a.*,
+                                DATE_FORMAT(a.tanggal_absensi, '%W') as hari_nama,
+                                DATE_FORMAT(a.tanggal_absensi, '%d') as tanggal,
+                                sp.nama_pelajaran,
+                                u.full_name as nama_guru,
+                                WEEK(a.tanggal_absensi, 1) as minggu_ke
+                            FROM absensi_siswa a
+                            LEFT JOIN siswa_pelajaran sp ON a.siswa_pelajaran_id = sp.id
+                            LEFT JOIN guru g ON a.guru_id = g.id
+                            LEFT JOIN users u ON g.user_id = u.id
+                            WHERE a.siswa_id = ?
+                            AND DATE_FORMAT(a.tanggal_absensi, '%Y-%m') = ?
+                            ORDER BY a.tanggal_absensi DESC";
         
-        $stmt_rekap = $conn->prepare($sql_rekap);
-        $stmt_rekap->bind_param("is", $selected_siswa_id, $bulan_filter);
-        $stmt_rekap->execute();
-        $result_rekap = $stmt_rekap->get_result();
+        $stmt_detail_absensi = $conn->prepare($sql_detail_absensi);
+        $stmt_detail_absensi->bind_param("is", $selected_siswa_id, $bulan_filter);
+        $stmt_detail_absensi->execute();
+        $result_detail_absensi = $stmt_detail_absensi->get_result();
         
-        while ($row = $result_rekap->fetch_assoc()) {
-            // Hitung persentase
-            $total_sesi = $row['total_sesi'] ?? 0;
-            $total_hadir = $row['total_hadir'] ?? 0;
-            $persentase = $total_sesi > 0 ? round(($total_hadir / $total_sesi) * 100, 2) : 0;
+        while ($row = $result_detail_absensi->fetch_assoc()) {
+            $detail_absensi[] = $row;
             
-            $row['persentase_hadir'] = $persentase;
-            $rekap_data[] = $row;
-            
-            // Akumulasi total
-            $statistik_total['total_sesi'] += $total_sesi;
-            $statistik_total['total_hadir'] += $total_hadir;
-            $statistik_total['total_izin'] += $row['total_izin'] ?? 0;
-            $statistik_total['total_sakit'] += $row['total_sakit'] ?? 0;
-            $statistik_total['total_alpha'] += $row['total_alpha'] ?? 0;
+            // Hitung statistik
+            $statistik_total['total_sesi']++;
+            $status = $row['status'];
+            $statistik_total['total_' . $status]++;
         }
-        $stmt_rekap->close();
+        $stmt_detail_absensi->close();
         
         // Hitung persentase total
         if ($statistik_total['total_sesi'] > 0) {
             $statistik_total['persentase_hadir'] = round(($statistik_total['total_hadir'] / $statistik_total['total_sesi']) * 100, 2);
         }
         
-        // AMBIL DETAIL ABSENSI UNTUK TABEL DETAIL
-        if (!empty($rekap_data)) {
-            // Ambil semua data absensi untuk bulan ini
-            $sql_detail_absensi = "SELECT 
-                                    a.*,
-                                    DATE_FORMAT(a.tanggal_absensi, '%W') as hari_nama,
-                                    DATE_FORMAT(a.tanggal_absensi, '%d') as tanggal,
-                                    sp.nama_pelajaran,
-                                    u.full_name as nama_guru,
-                                    WEEK(a.tanggal_absensi, 1) as minggu_ke
-                                FROM absensi_siswa a
-                                LEFT JOIN siswa_pelajaran sp ON a.siswa_pelajaran_id = sp.id
-                                LEFT JOIN guru g ON a.guru_id = g.id
-                                LEFT JOIN users u ON g.user_id = u.id
-                                WHERE a.siswa_id = ?
-                                AND DATE_FORMAT(a.tanggal_absensi, '%Y-%m') = ?
-                                ORDER BY a.tanggal_absensi DESC";
-            
-            $stmt_detail_absensi = $conn->prepare($sql_detail_absensi);
-            $stmt_detail_absensi->bind_param("is", $selected_siswa_id, $bulan_filter);
-            $stmt_detail_absensi->execute();
-            $result_detail_absensi = $stmt_detail_absensi->get_result();
-            
-            while ($row = $result_detail_absensi->fetch_assoc()) {
-                $detail_absensi[] = $row;
-            }
-            $stmt_detail_absensi->close();
-        }
-        
         // Ambil daftar pelajaran yang diambil siswa
-        $pelajaran_list = [];
         $sql_pelajaran = "SELECT DISTINCT sp.id, sp.nama_pelajaran, g.user_id, u.full_name as nama_guru
                           FROM siswa_pelajaran sp
                           JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
@@ -721,15 +678,27 @@ for ($i = 0; $i < 12; $i++) {
             </div>
 
             <!-- Statistik Summary -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+                <div class="stat-card bg-white rounded-lg p-5 shadow">
+                    <div class="flex items-center">
+                        <div class="p-3 bg-blue-100 rounded-lg mr-4">
+                            <i class="fas fa-calendar-check text-blue-600 text-2xl"></i>
+                        </div>
+                        <div>
+                            <p class="text-gray-600 text-sm">Total Sesi</p>
+                            <h3 class="text-2xl font-bold text-gray-800"><?php echo $statistik_total['total_sesi']; ?></h3>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="stat-card bg-white rounded-lg p-5 shadow">
                     <div class="flex items-center">
                         <div class="p-3 bg-green-100 rounded-lg mr-4">
                             <i class="fas fa-check-circle text-green-600 text-2xl"></i>
                         </div>
                         <div>
-                            <p class="text-gray-600 text-sm">Total Hadir</p>
-                            <h3 class="text-2xl font-bold text-gray-800"><?php echo $statistik_total['total_hadir']; ?></h3>
+                            <p class="text-gray-600 text-sm">Hadir</p>
+                            <h3 class="text-2xl font-bold text-green-600"><?php echo $statistik_total['total_hadir']; ?></h3>
                             
                         </div>
                     </div>
@@ -741,7 +710,7 @@ for ($i = 0; $i < 12; $i++) {
                             <i class="fas fa-envelope text-yellow-600 text-2xl"></i>
                         </div>
                         <div>
-                            <p class="text-gray-600 text-sm">Total Izin</p>
+                            <p class="text-gray-600 text-sm">Izin</p>
                             <h3 class="text-2xl font-bold text-gray-800"><?php echo $statistik_total['total_izin']; ?></h3>
                             
                         </div>
@@ -754,7 +723,7 @@ for ($i = 0; $i < 12; $i++) {
                             <i class="fas fa-thermometer text-blue-600 text-2xl"></i>
                         </div>
                         <div>
-                            <p class="text-gray-600 text-sm">Total Sakit</p>
+                            <p class="text-gray-600 text-sm">Sakit</p>
                             <h3 class="text-2xl font-bold text-gray-800"><?php echo $statistik_total['total_sakit']; ?></h3>
                             
                         </div>
@@ -767,7 +736,7 @@ for ($i = 0; $i < 12; $i++) {
                             <i class="fas fa-times-circle text-red-600 text-2xl"></i>
                         </div>
                         <div>
-                            <p class="text-gray-600 text-sm">Total Alpha</p>
+                            <p class="text-gray-600 text-sm">Alpha</p>
                             <h3 class="text-2xl font-bold text-gray-800"><?php echo $statistik_total['total_alpha']; ?></h3>
                             
                         </div>
@@ -775,133 +744,51 @@ for ($i = 0; $i < 12; $i++) {
                 </div>
             </div>
 
-            <!-- Progress Bar Persentase -->
-            <div class="bg-white shadow rounded-lg p-6 mb-6">
-                <h3 class="text-lg font-medium text-gray-900 mb-4">
-                    <i class="fas fa-chart-line mr-2"></i> Tingkat Kehadiran
-                </h3>
-                <div class="space-y-4">
-                    
-                    
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                        <div>
-                            <p class="text-sm text-gray-600">Total Sesi</p>
-                            <p class="text-xl font-bold text-gray-800"><?php echo $statistik_total['total_sesi']; ?></p>
-                        </div>
-                        <div>
-                            <p class="text-sm text-gray-600">Hadir</p>
-                            <p class="text-xl font-bold text-green-600"><?php echo $statistik_total['total_hadir']; ?></p>
-                        </div>
-                        <div>
-                            <p class="text-sm text-gray-600">Tidak Hadir</p>
-                            <p class="text-xl font-bold text-red-600"><?php echo $statistik_total['total_izin'] + $statistik_total['total_sakit'] + $statistik_total['total_alpha']; ?></p>
-                        </div>
-                        <div>
-                            <p class="text-sm text-gray-600">Rata-rata/Minggu</p>
-                            <p class="text-xl font-bold text-blue-600">
-                                <?php 
-                                $jumlah_minggu = count($rekap_data);
-                                echo $jumlah_minggu > 0 ? round($statistik_total['total_sesi'] / $jumlah_minggu, 1) : 0; 
-                                ?>
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Tabel Rekap Per Minggu -->
-            <div class="bg-white shadow rounded-lg mb-6">
-                <div class="px-6 py-5 border-b border-gray-200">
-                    <h3 class="text-lg font-medium leading-6 text-gray-900">
-                        <i class="fas fa-table mr-2"></i> Rekap Absensi Per Minggu - <?php echo date('F Y', strtotime($bulan_filter . '-01')); ?>
-                    </h3>
-                    <p class="mt-1 text-sm text-gray-500">
-                        <?php echo count($rekap_data); ?> minggu ditemukan
-                    </p>
-                </div>
-                
-                <div class="p-6">
-                    <?php if (empty($rekap_data)): ?>
-                    <div class="text-center py-8 text-gray-500">
-                        <i class="fas fa-calendar-times text-4xl mb-4"></i>
-                        <h3 class="text-lg font-medium mb-2">Belum Ada Data Absensi</h3>
-                        <p class="mb-4">
-                            Tidak ada data absensi untuk <?php echo htmlspecialchars($siswa_detail['nama_lengkap'] ?? ''); ?> pada bulan <?php echo date('F Y', strtotime($bulan_filter . '-01')); ?>.
-                        </p>
-                        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 max-w-md mx-auto">
-                            <p class="text-yellow-800 text-sm">
-                                <i class="fas fa-clock mr-2"></i>
-                                Data absensi akan muncul setelah guru menginput kehadiran.
-                            </p>
-                        </div>
-                    </div>
-                    <?php else: ?>
-                    <div class="table-container">
-                        <table class="table-jadwal">
-                            <thead>
-                                <tr>
-                                    <th>Minggu ke</th>
-                                    <th>Periode</th>
-                                    <th>Total Sesi</th>
-                                    <th>Hadir</th>
-                                    <th>Izin</th>
-                                    <th>Sakit</th>
-                                    <th>Alpha</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($rekap_data as $rekap): 
-                                    $persentase = $rekap['persentase_hadir'];
-                                    $status_class = $persentase >= 80 ? 'text-green-600' : ($persentase >= 60 ? 'text-yellow-600' : 'text-red-600');
-                                    $status_text = $persentase >= 80 ? 'Baik' : ($persentase >= 60 ? 'Cukup' : 'Perlu Perhatian');
-                                ?>
-                                <tr>
-                                    <td class="font-medium"><?php echo $rekap['minggu_ke']; ?></td>
-                                    <td>
-                                        <?php echo date('d', strtotime($rekap['minggu_mulai'])) . ' - ' . date('d M', strtotime($rekap['minggu_selesai'])); ?>
-                                    </td>
-                                    <td class="font-bold"><?php echo $rekap['total_sesi']; ?></td>
-                                    <td>
-                                        <span class="badge bg-green-100 text-green-800">
-                                            <i class="fas fa-check mr-1"></i> <?php echo $rekap['total_hadir']; ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <span class="badge bg-yellow-100 text-yellow-800">
-                                            <i class="fas fa-envelope mr-1"></i> <?php echo $rekap['total_izin']; ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <span class="badge bg-blue-100 text-blue-800">
-                                            <i class="fas fa-thermometer mr-1"></i> <?php echo $rekap['total_sakit']; ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <span class="badge bg-red-100 text-red-800">
-                                            <i class="fas fa-times mr-1"></i> <?php echo $rekap['total_alpha']; ?>
-                                        </span>
-                                    </td>
-                                </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-
             <!-- Detail Absensi Harian -->
-            <?php if (!empty($detail_absensi)): ?>
-            <div class="bg-white shadow rounded-lg">
+            <div class="bg-white shadow rounded-lg overflow-hidden">
                 <div class="px-6 py-5 border-b border-gray-200">
-                    <h3 class="text-lg font-medium leading-6 text-gray-900">
-                        <i class="fas fa-calendar-day mr-2"></i> Detail Absensi Harian
-                    </h3>
-                    <p class="mt-1 text-sm text-gray-500">
-                        <?php echo count($detail_absensi); ?> catatan absensi ditemukan
-                    </p>
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="text-lg font-medium leading-6 text-gray-900">
+                                <i class="fas fa-history mr-2 text-blue-600"></i> Riwayat Absensi Harian
+                            </h3>
+                            <p class="mt-1 text-sm text-gray-500">
+                                <?php if (!empty($detail_absensi)): ?>
+                                    <?php echo count($detail_absensi); ?> catatan absensi ditemukan
+                                <?php else: ?>
+                                    Belum ada catatan absensi
+                                <?php endif; ?>
+                            </p>
+                        </div>
+                        <div class="text-sm text-gray-500">
+                            <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full">
+                                <i class="fas fa-calendar mr-1"></i> <?php echo date('F Y', strtotime($bulan_filter . '-01')); ?>
+                            </span>
+                        </div>
+                    </div>
                 </div>
                 
+                <?php if (empty($detail_absensi)): ?>
+                <!-- TAMPILAN KETIKA TIDAK ADA DATA -->
+                <div class="p-12 text-center">
+                    <div class="mb-4">
+                        <i class="fas fa-calendar-times text-gray-300 text-5xl mb-3"></i>
+                    </div>
+                    <h4 class="text-lg font-medium text-gray-700 mb-2">Belum Ada Data Absensi</h4>
+                    <p class="text-gray-500 max-w-md mx-auto mb-4">
+                        Tidak ditemukan catatan absensi untuk 
+                        <span class="font-semibold"><?php echo htmlspecialchars($siswa_detail['nama_lengkap'] ?? ''); ?></span> 
+                        pada bulan <span class="font-semibold"><?php echo date('F Y', strtotime($bulan_filter . '-01')); ?></span>.
+                    </p>
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 max-w-md mx-auto">
+                        <p class="text-yellow-700 text-sm">
+                            <i class="fas fa-clock mr-2"></i>
+                            Data absensi akan muncul setelah guru menginput kehadiran.
+                        </p>
+                    </div>
+                </div>
+                <?php else: ?>
+                <!-- TAMPILAN TABEL KETIKA ADA DATA -->
                 <div class="p-6">
                     <div class="table-container">
                         <table class="table-jadwal">
@@ -924,16 +811,13 @@ for ($i = 0; $i < 12; $i++) {
                                         <div class="font-medium text-gray-900">
                                             <?php echo date('d/m/Y', strtotime($absensi['tanggal_absensi'])); ?>
                                         </div>
-                                        <div class="text-xs text-gray-500">
-                                            Minggu ke-<?php echo $absensi['minggu_ke'] ?? '-'; ?>
-                                        </div>
                                     </td>
                                     <td><?php echo $hari_indo; ?></td>
                                     <td>
                                         <?php if (!empty($absensi['nama_pelajaran'])): ?>
                                         <div class="font-medium"><?php echo htmlspecialchars($absensi['nama_pelajaran']); ?></div>
                                         <?php else: ?>
-                                        <div class="text-gray-500 italic">-</div>
+                                        <div class="text-gray-400 italic">-</div>
                                         <?php endif; ?>
                                     </td>
                                     <td>
@@ -946,12 +830,17 @@ for ($i = 0; $i < 12; $i++) {
                                         <?php if (!empty($absensi['nama_guru'])): ?>
                                         <div class="text-sm"><?php echo htmlspecialchars($absensi['nama_guru']); ?></div>
                                         <?php else: ?>
-                                        <div class="text-gray-500 italic">-</div>
+                                        <div class="text-gray-400 italic">-</div>
                                         <?php endif; ?>
                                     </td>
                                     <td>
                                         <div class="text-sm text-gray-600 max-w-xs truncate">
-                                            <?php echo !empty($absensi['keterangan']) ? htmlspecialchars($absensi['keterangan']) : '-'; ?>
+                                            <?php if (!empty($absensi['keterangan'])): ?>
+                                                <i class="fas fa-quote-left text-gray-300 mr-1"></i>
+                                                <?php echo htmlspecialchars($absensi['keterangan']); ?>
+                                            <?php else: ?>
+                                                <span class="text-gray-400 italic">-</span>
+                                            <?php endif; ?>
                                         </div>
                                     </td>
                                 </tr>
@@ -960,8 +849,8 @@ for ($i = 0; $i < 12; $i++) {
                         </table>
                     </div>
                 </div>
+                <?php endif; ?>
             </div>
-            <?php endif; ?>
             <?php endif; ?>
         </div>
 

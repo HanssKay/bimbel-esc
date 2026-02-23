@@ -26,51 +26,169 @@ $currentPage = basename($_SERVER['PHP_SELF']);
 // HANDLE AJAX SEARCH REQUEST
 // ============================================
 if (isset($_GET['ajax_search']) && isset($_GET['query'])) {
-    // Cek apakah request AJAX
     $query = trim($_GET['query']);
-    
+
     if (strlen($query) < 2) {
         echo json_encode([]);
         exit();
     }
-    
-    // Cari siswa yang diajar oleh guru ini berdasarkan nama atau kelas
-    $sql = "SELECT DISTINCT 
+
+    $sql = "SELECT 
                 s.id, 
                 s.nama_lengkap, 
-                s.kelas as kelas_sekolah,
-                sp.nama_pelajaran
+                s.kelas as kelas_sekolah
             FROM siswa s
-            JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
-            JOIN siswa_pelajaran sp ON ps.id = sp.pendaftaran_id
-            WHERE sp.guru_id = ? 
-            AND ps.status = 'aktif'
-            AND sp.status = 'aktif'
+            INNER JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
+            WHERE ps.status = 'aktif'
             AND s.status = 'aktif'
-            AND (s.nama_lengkap LIKE ? OR s.kelas LIKE ?)
+            AND EXISTS (
+                SELECT 1 
+                FROM jadwal_belajar jb
+                INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                WHERE jb.pendaftaran_id = ps.id
+                AND jb.status = 'aktif'
+                AND smg.guru_id = ?
+            )
+            AND s.nama_lengkap LIKE ?
             ORDER BY s.nama_lengkap
             LIMIT 10";
-    
+
     $stmt = $conn->prepare($sql);
-    $search_term = "%{$query}%";
-    $stmt->bind_param("iss", $guru_id, $search_term, $search_term);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    
-    $siswa_list = [];
-    while ($row = $result->fetch_assoc()) {
-        $siswa_list[] = [
-            'id' => $row['id'],
-            'nama_lengkap' => htmlspecialchars($row['nama_lengkap']),
-            'kelas_sekolah' => htmlspecialchars($row['kelas_sekolah']),
-            'nama_pelajaran' => htmlspecialchars($row['nama_pelajaran'])
-        ];
+    if ($stmt) {
+        $search_term = "%{$query}%";
+        $stmt->bind_param("is", $guru_id, $search_term);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        $siswa_list = [];
+        while ($row = $result->fetch_assoc()) {
+            $siswa_list[] = [
+                'id' => $row['id'],
+                'nama_lengkap' => htmlspecialchars($row['nama_lengkap']),
+                'kelas_sekolah' => htmlspecialchars($row['kelas_sekolah'])
+            ];
+        }
+        $stmt->close();
     }
-    
-    $stmt->close();
-    
+
     header('Content-Type: application/json');
-    echo json_encode($siswa_list);
+    echo json_encode($siswa_list ?? []);
+    exit();
+}
+
+// ============================================
+// HANDLE GET MATA PELAJARAN PER SISWA
+// ============================================
+if (isset($_GET['get_mapel']) && isset($_GET['siswa_id'])) {
+    $siswa_id = intval($_GET['siswa_id']);
+
+    $sql = "SELECT sp.id, sp.nama_pelajaran
+            FROM siswa_pelajaran sp
+            WHERE sp.siswa_id = ?
+            AND sp.status = 'aktif'
+            ORDER BY sp.nama_pelajaran";
+
+    $stmt = $conn->prepare($sql);
+    if ($stmt) {
+        $stmt->bind_param("i", $siswa_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        $mapel_list = [];
+        while ($row = $result->fetch_assoc()) {
+            $mapel_list[] = [
+                'id' => $row['id'],
+                'nama' => htmlspecialchars($row['nama_pelajaran'])
+            ];
+        }
+        $stmt->close();
+    }
+
+    header('Content-Type: application/json');
+    echo json_encode($mapel_list ?? []);
+    exit();
+}
+
+// ============================================
+// HANDLE GET SISWA BY TANGGAL (untuk AJAX)
+// ============================================
+if (isset($_GET['get_siswa_by_tanggal']) && isset($_GET['tanggal'])) {
+    $tanggal_filter = $_GET['tanggal'];
+
+    $sql = "SELECT 
+                s.id,
+                s.nama_lengkap,
+                s.kelas as kelas_sekolah
+            FROM siswa s
+            INNER JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
+            WHERE ps.status = 'aktif'
+            AND s.status = 'aktif'
+            AND EXISTS (
+                SELECT 1 
+                FROM jadwal_belajar jb
+                INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                WHERE jb.pendaftaran_id = ps.id
+                AND jb.status = 'aktif'
+                AND smg.guru_id = ?
+            )
+            ORDER BY s.nama_lengkap";
+
+    $stmt = $conn->prepare($sql);
+    if ($stmt) {
+        $stmt->bind_param("i", $guru_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        $siswa_list = [];
+        while ($row = $result->fetch_assoc()) {
+            $sql_absensi = "SELECT status, keterangan, siswa_pelajaran_id 
+                           FROM absensi_siswa 
+                           WHERE siswa_id = ? 
+                           AND guru_id = ?
+                           AND tanggal_absensi = ?
+                           LIMIT 1";
+
+            $stmt_abs = $conn->prepare($sql_absensi);
+            $stmt_abs->bind_param("iis", $row['id'], $guru_id, $tanggal_filter);
+            $stmt_abs->execute();
+            $absensi = $stmt_abs->get_result()->fetch_assoc();
+            $stmt_abs->close();
+            
+            $sql_mapel = "SELECT sp.id, sp.nama_pelajaran
+                         FROM siswa_pelajaran sp
+                         WHERE sp.siswa_id = ?
+                         AND sp.status = 'aktif'
+                         ORDER BY sp.nama_pelajaran";
+            
+            $stmt_mapel = $conn->prepare($sql_mapel);
+            $stmt_mapel->bind_param("i", $row['id']);
+            $stmt_mapel->execute();
+            $mapel_result = $stmt_mapel->get_result();
+            
+            $mapel_list = [];
+            while ($mapel = $mapel_result->fetch_assoc()) {
+                $mapel_list[] = [
+                    'id' => $mapel['id'],
+                    'nama' => $mapel['nama_pelajaran']
+                ];
+            }
+            $stmt_mapel->close();
+
+            $siswa_list[] = [
+                'id' => $row['id'],
+                'nama_lengkap' => htmlspecialchars($row['nama_lengkap']),
+                'kelas_sekolah' => htmlspecialchars($row['kelas_sekolah']),
+                'mapel_list' => $mapel_list,
+                'selected_mapel_id' => $absensi['siswa_pelajaran_id'] ?? '',
+                'status' => $absensi['status'] ?? '',
+                'keterangan' => $absensi['keterangan'] ?? ''
+            ];
+        }
+        $stmt->close();
+    }
+
+    header('Content-Type: application/json');
+    echo json_encode($siswa_list ?? []);
     exit();
 }
 
@@ -84,20 +202,10 @@ if (isset($_GET['tanggal']) && !empty($_GET['tanggal'])) {
     $tanggal = $_GET['tanggal'];
 }
 
-// Dapatkan hari dari tanggal yang dipilih
-$hari = date('l', strtotime($tanggal));
-$hari_indonesia = '';
-switch($hari) {
-    case 'Monday': $hari_indonesia = 'Senin'; break;
-    case 'Tuesday': $hari_indonesia = 'Selasa'; break;
-    case 'Wednesday': $hari_indonesia = 'Rabu'; break;
-    case 'Thursday': $hari_indonesia = 'Kamis'; break;
-    case 'Friday': $hari_indonesia = 'Jumat'; break;
-    case 'Saturday': $hari_indonesia = 'Sabtu'; break;
-    case 'Sunday': $hari_indonesia = 'Minggu'; break;
-}
+// Filter pencarian
+$search_query = isset($_GET['search']) ? trim($_GET['search']) : '';
 
-// Cek apakah ada parameter sukses dari redirect
+// Cek apakah ada parameter sukses
 if (isset($_GET['success']) && $_GET['success'] == 1) {
     $success_message = "Absensi berhasil disimpan!";
 }
@@ -106,386 +214,268 @@ if (isset($_GET['success']) && $_GET['success'] == 1) {
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_absensi'])) {
     try {
         $conn->begin_transaction();
-        
-        // Simpan filter yang aktif untuk validasi
-        $filter_hari = $_POST['filter_hari'] ?? '';
-        $filter_jam = $_POST['filter_jam'] ?? '';
-        
-        foreach ($_POST['siswa'] as $siswa_id => $data) {
-            // Dapatkan siswa_pelajaran_id, jadwal_id, dan sesi_guru_id dari POST
-            $siswa_pelajaran_id = $data['siswa_pelajaran_id'];
-            $jadwal_id = $data['jadwal_id'] ?? null;
-            $sesi_guru_id = $data['sesi_guru_id'] ?? null;
-            $pendaftaran_id = $data['pendaftaran_id']; // Untuk referensi tambahan
-            
-            // Validasi: Jika ada filter hari/jam, pastikan sesi sesuai
-            $skip_this = false;
-            if (!empty($filter_hari) || !empty($filter_jam)) {
-                // Ambil info sesi untuk validasi
-                $validate_sql = "SELECT smg.hari, smg.jam_mulai, smg.jam_selesai 
-                               FROM sesi_mengajar_guru smg
-                               WHERE smg.id = ?";
-                $validate_stmt = $conn->prepare($validate_sql);
-                $validate_stmt->bind_param("i", $sesi_guru_id);
-                $validate_stmt->execute();
-                $validate_result = $validate_stmt->get_result();
-                
-                if ($sesi_row = $validate_result->fetch_assoc()) {
-                    // Validasi hari
-                    if (!empty($filter_hari) && $sesi_row['hari'] != $filter_hari) {
-                        $skip_this = true;
-                    }
-                    
-                    // Validasi jam
-                    if (!empty($filter_jam) && !$skip_this) {
-                        list($jam_mulai_filter, $jam_selesai_filter) = explode('-', $filter_jam);
-                        $jam_mulai_db = date('H:i', strtotime($sesi_row['jam_mulai']));
-                        $jam_selesai_db = date('H:i', strtotime($sesi_row['jam_selesai']));
-                        
-                        if ($jam_mulai_db != $jam_mulai_filter || $jam_selesai_db != $jam_selesai_filter) {
-                            $skip_this = true;
-                        }
-                    }
-                } else {
-                    $skip_this = true;
-                }
-                $validate_stmt->close();
-            }
-            
-            if ($skip_this) {
+
+        $tanggal_absensi = $_POST['tanggal'] ?? date('Y-m-d');
+        $siswa_data = $_POST['siswa'] ?? [];
+
+        foreach ($siswa_data as $siswa_id => $data) {
+            $status = $data['status'] ?? '';
+            $keterangan = $data['keterangan'] ?? '';
+            $siswa_pelajaran_id = !empty($data['siswa_pelajaran_id']) ? intval($data['siswa_pelajaran_id']) : null;
+
+            if (empty($status)) {
                 continue;
             }
-            
-            // Cek apakah sudah ada absensi untuk siswa ini hari ini pada siswa_pelajaran dan sesi ini
+
+            // Cek apakah sudah ada absensi
             $check_sql = "SELECT id FROM absensi_siswa 
                          WHERE siswa_id = ? 
-                         AND siswa_pelajaran_id = ?
-                         AND sesi_guru_id = ?
+                         AND guru_id = ?
                          AND tanggal_absensi = ?";
             $check_stmt = $conn->prepare($check_sql);
-            $check_stmt->bind_param("iiis", $siswa_id, $siswa_pelajaran_id, $sesi_guru_id, $tanggal);
+            $check_stmt->bind_param("iis", $siswa_id, $guru_id, $tanggal_absensi);
             $check_stmt->execute();
             $check_result = $check_stmt->get_result();
-            
+
+            // Ambil pendaftaran_id
+            $pendaftaran_sql = "SELECT DISTINCT ps.id as pendaftaran_id 
+                               FROM pendaftaran_siswa ps
+                               INNER JOIN jadwal_belajar jb ON ps.id = jb.pendaftaran_id
+                               INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                               WHERE ps.siswa_id = ? 
+                               AND smg.guru_id = ?
+                               AND ps.status = 'aktif'
+                               AND jb.status = 'aktif'
+                               LIMIT 1";
+            $pendaftaran_stmt = $conn->prepare($pendaftaran_sql);
+            $pendaftaran_stmt->bind_param("ii", $siswa_id, $guru_id);
+            $pendaftaran_stmt->execute();
+            $pendaftaran_result = $pendaftaran_stmt->get_result();
+            $pendaftaran_data = $pendaftaran_result->fetch_assoc();
+            $pendaftaran_id = $pendaftaran_data['pendaftaran_id'] ?? 0;
+            $pendaftaran_stmt->close();
+
+            if ($pendaftaran_id == 0) {
+                $pendaftaran_sql2 = "SELECT id as pendaftaran_id 
+                                    FROM pendaftaran_siswa 
+                                    WHERE siswa_id = ? 
+                                    AND status = 'aktif'
+                                    LIMIT 1";
+                $pendaftaran_stmt2 = $conn->prepare($pendaftaran_sql2);
+                $pendaftaran_stmt2->bind_param("i", $siswa_id);
+                $pendaftaran_stmt2->execute();
+                $pendaftaran_result2 = $pendaftaran_stmt2->get_result();
+                $pendaftaran_data2 = $pendaftaran_result2->fetch_assoc();
+                $pendaftaran_id = $pendaftaran_data2['pendaftaran_id'] ?? 0;
+                $pendaftaran_stmt2->close();
+            }
+
             if ($check_result->num_rows > 0) {
-                // Update absensi yang sudah ada
+                // Update
                 $row = $check_result->fetch_assoc();
                 $update_sql = "UPDATE absensi_siswa 
-                              SET status = ?, keterangan = ?, updated_at = NOW()
+                              SET status = ?, 
+                                  keterangan = ?,
+                                  siswa_pelajaran_id = ?,
+                                  updated_at = NOW()
                               WHERE id = ?";
                 $update_stmt = $conn->prepare($update_sql);
-                $update_stmt->bind_param("ssi", $data['status'], $data['keterangan'], $row['id']);
+                $update_stmt->bind_param("ssii", $status, $keterangan, $siswa_pelajaran_id, $row['id']);
                 $update_stmt->execute();
                 $update_stmt->close();
             } else {
-                // Insert absensi baru
+                // Insert
                 $insert_sql = "INSERT INTO absensi_siswa 
-                              (siswa_id, pendaftaran_id, siswa_pelajaran_id, guru_id, sesi_guru_id,
-                               tanggal_absensi, status, keterangan, created_at, updated_at)
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                              (siswa_id, pendaftaran_id, siswa_pelajaran_id, guru_id, tanggal_absensi, status, keterangan, created_at, updated_at)
+                              VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
                 $insert_stmt = $conn->prepare($insert_sql);
-                $insert_stmt->bind_param("iiiiisss", 
-                    $siswa_id, 
+                $insert_stmt->bind_param(
+                    "iiiisss",
+                    $siswa_id,
                     $pendaftaran_id,
                     $siswa_pelajaran_id,
                     $guru_id,
-                    $sesi_guru_id,
-                    $tanggal, 
-                    $data['status'], 
-                    $data['keterangan']
+                    $tanggal_absensi,
+                    $status,
+                    $keterangan
                 );
                 $insert_stmt->execute();
                 $insert_stmt->close();
             }
             $check_stmt->close();
         }
-        
+
         $conn->commit();
+
+        $params = ["tanggal=" . urlencode($tanggal_absensi), "success=1"];
+        if (!empty($search_query)) {
+            $params[] = "search=" . urlencode($search_query);
+        }
         
-        // Redirect untuk menghindari resubmit dengan parameter lengkap
-        $redirect_params = [];
-        if (!empty($_GET['siswa_id'])) $redirect_params[] = "siswa_id=" . urlencode($_GET['siswa_id']);
-        if (!empty($_GET['hari'])) $redirect_params[] = "hari=" . urlencode($_GET['hari']);
-        if (!empty($_GET['jam'])) $redirect_params[] = "jam=" . urlencode($_GET['jam']);
-        if (!empty($tanggal)) $redirect_params[] = "tanggal=" . urlencode($tanggal);
-        $redirect_params[] = "success=1";
-        
-        header("Location: absensiSiswa.php?" . implode('&', $redirect_params));
+        header("Location: absensiSiswa.php?" . implode('&', $params));
         exit();
-        
+
     } catch (Exception $e) {
         $conn->rollback();
         $error_message = "Terjadi kesalahan: " . $e->getMessage();
     }
 }
 
-// Ambil parameter filter dari GET
-$filter_siswa_id = isset($_GET['siswa_id']) ? intval($_GET['siswa_id']) : 0;
-$filter_hari = isset($_GET['hari']) ? $_GET['hari'] : '';
-$filter_jam = isset($_GET['jam']) ? $_GET['jam'] : '';
-
-// Jika ada filter siswa ID, ambil nama siswa untuk ditampilkan
-$selected_siswa_name = '';
-if ($filter_siswa_id > 0) {
-    $sql_siswa_info = "SELECT s.nama_lengkap, s.kelas 
-                      FROM siswa s 
-                      WHERE s.id = ?";
-    $stmt_siswa_info = $conn->prepare($sql_siswa_info);
-    $stmt_siswa_info->bind_param("i", $filter_siswa_id);
-    $stmt_siswa_info->execute();
-    $result_siswa_info = $stmt_siswa_info->get_result();
-    if ($siswa_info = $result_siswa_info->fetch_assoc()) {
-        $selected_siswa_name = $siswa_info['nama_lengkap'] . ' - ' . $siswa_info['kelas'];
-    }
-    $stmt_siswa_info->close();
-}
-
-// Ambil daftar mata pelajaran yang diajar oleh guru ini
-$sql_pelajaran_list = "SELECT DISTINCT sp.nama_pelajaran
-                       FROM siswa_pelajaran sp
-                       WHERE sp.guru_id = ?
-                       AND sp.status = 'aktif'
-                       ORDER BY sp.nama_pelajaran";
-
-$stmt_pelajaran_list = $conn->prepare($sql_pelajaran_list);
-$stmt_pelajaran_list->bind_param("i", $guru_id);
-$stmt_pelajaran_list->execute();
-$result_pelajaran_list = $stmt_pelajaran_list->get_result();
-$pelajaran_list = [];
-while ($row = $result_pelajaran_list->fetch_assoc()) {
-    $pelajaran_list[] = $row['nama_pelajaran'];
-}
-$stmt_pelajaran_list->close();
-
-// Ambil daftar hari yang tersedia untuk guru ini (berdasarkan sesi_mengajar_guru)
-$sql_hari_list = "SELECT DISTINCT smg.hari
-                  FROM sesi_mengajar_guru smg
-                  WHERE smg.guru_id = ?
-                  AND smg.status != 'tidak_aktif'
-                  ORDER BY FIELD(smg.hari, 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu')";
-
-$stmt_hari_list = $conn->prepare($sql_hari_list);
-$stmt_hari_list->bind_param("i", $guru_id);
-$stmt_hari_list->execute();
-$result_hari_list = $stmt_hari_list->get_result();
-$hari_list = [];
-while ($row = $result_hari_list->fetch_assoc()) {
-    $hari_list[] = $row['hari'];
-}
-$stmt_hari_list->close();
-
-// list jam sesi yang tersedia untuk guru ini
-$sql_jam_list = "SELECT 
-                  TIME_FORMAT(smg.jam_mulai, '%H:%i') as jam_mulai,
-                  TIME_FORMAT(smg.jam_selesai, '%H:%i') as jam_selesai,
-                  CONCAT(TIME_FORMAT(smg.jam_mulai, '%H:%i'), '-', TIME_FORMAT(smg.jam_selesai, '%H:%i')) as jam_range
-                 FROM sesi_mengajar_guru smg
-                 WHERE smg.guru_id = ?
-                 AND smg.status != 'tidak_aktif'
-                 GROUP BY TIME_FORMAT(smg.jam_mulai, '%H:%i'), TIME_FORMAT(smg.jam_selesai, '%H:%i'), 
-                          CONCAT(TIME_FORMAT(smg.jam_mulai, '%H:%i'), '-', TIME_FORMAT(smg.jam_selesai, '%H:%i'))
-                 ORDER BY TIME_FORMAT(smg.jam_mulai, '%H:%i')";
-
-$stmt_jam_list = $conn->prepare($sql_jam_list);
-$stmt_jam_list->bind_param("i", $guru_id);
-$stmt_jam_list->execute();
-$result_jam_list = $stmt_jam_list->get_result();
-$jam_list = [];
-while ($row = $result_jam_list->fetch_assoc()) {
-    $jam_list[] = $row;
-}
-$stmt_jam_list->close();
-
-// Ambil daftar siswa berdasarkan filter
+// ============================================
+// AMBIL DAFTAR SISWA (FIXED - TANPA DUPLIKAT)
+// ============================================
 $daftar_siswa = [];
-$absensi_hari_ini = [];
-$sesi_info = [];
-
-if (!empty($filter_siswa_id) || !empty($filter_hari) || !empty($filter_jam)) {
-    // Build query berdasarkan filter
-    $sql_siswa = "SELECT 
-                    s.id, 
-                    s.nama_lengkap, 
-                    s.kelas as kelas_sekolah,
-                    ps.id as pendaftaran_id,
-                    ps.tingkat,
-                    sp.id as siswa_pelajaran_id,
-                    sp.nama_pelajaran,
-                    jb.id as jadwal_id,
-                    smg.id as sesi_guru_id,
-                    smg.hari,
-                    smg.jam_mulai,
-                    smg.jam_selesai,
-                    u.full_name as nama_guru
-                 FROM siswa s
-                 JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
-                 JOIN siswa_pelajaran sp ON ps.id = sp.pendaftaran_id
-                 LEFT JOIN jadwal_belajar jb ON sp.id = jb.siswa_pelajaran_id AND jb.status = 'aktif'
-                 LEFT JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id AND smg.status != 'tidak_aktif'
-                 JOIN guru g ON sp.guru_id = g.id
-                 JOIN users u ON g.user_id = u.id
-                 WHERE sp.guru_id = ?
-                 AND ps.status = 'aktif'
-                 AND sp.status = 'aktif'
-                 AND s.status = 'aktif'";
-    
-    $params = [$guru_id];
-    $types = "i";
-    
-    // Tambahkan filter siswa jika ada
-    if (!empty($filter_siswa_id)) {
-        $sql_siswa .= " AND s.id = ?";
-        $params[] = $filter_siswa_id;
-        $types .= "i";
-    }
-    
-    // Tambahkan filter hari jika ada
-    if (!empty($filter_hari)) {
-        $sql_siswa .= " AND smg.hari = ?";
-        $params[] = $filter_hari;
-        $types .= "s";
-    }
-    
-    // Tambahkan filter jam jika ada
-    if (!empty($filter_jam)) {
-        list($jam_mulai_filter, $jam_selesai_filter) = explode('-', $filter_jam);
-        $sql_siswa .= " AND smg.jam_mulai = ? AND smg.jam_selesai = ?";
-        $params[] = $jam_mulai_filter;
-        $params[] = $jam_selesai_filter;
-        $types .= "ss";
-    }
-    
-    $sql_siswa .= " ORDER BY smg.hari, smg.jam_mulai, s.nama_lengkap";
-    
-    $stmt_siswa = $conn->prepare($sql_siswa);
-    if ($params) {
-        $stmt_siswa->bind_param($types, ...$params);
-    }
-    $stmt_siswa->execute();
-    $result_siswa = $stmt_siswa->get_result();
-    
-    while ($row = $result_siswa->fetch_assoc()) {
-        // Hanya tambahkan jika memiliki sesi (sesi_guru_id tidak null)
-        if ($row['sesi_guru_id'] !== null) {
-            $daftar_siswa[] = $row;
-            // Simpan info sesi untuk statistik
-            $sesi_info = [
-                'hari' => $row['hari'],
-                'jam_mulai' => $row['jam_mulai'],
-                'jam_selesai' => $row['jam_selesai'],
-                'nama_guru' => $row['nama_guru']
-            ];
-        }
-    }
-    $stmt_siswa->close();
-    
-    // Ambil data absensi hari ini untuk siswa yang difilter
-    if (!empty($daftar_siswa)) {
-        foreach ($daftar_siswa as $siswa) {
-            if (!empty($siswa['sesi_guru_id'])) {
-                $sql_absensi = "SELECT siswa_id, status, keterangan 
-                               FROM absensi_siswa 
-                               WHERE siswa_id = ? 
-                               AND siswa_pelajaran_id = ?
-                               AND sesi_guru_id = ?
-                               AND tanggal_absensi = ?";
-                
-                $stmt_absensi = $conn->prepare($sql_absensi);
-                $stmt_absensi->bind_param("iiis", 
-                    $siswa['id'], 
-                    $siswa['siswa_pelajaran_id'], 
-                    $siswa['sesi_guru_id'],
-                    $tanggal
-                );
-                $stmt_absensi->execute();
-                $result_absensi = $stmt_absensi->get_result();
-                
-                if ($row = $result_absensi->fetch_assoc()) {
-                    $absensi_hari_ini[$siswa['id'] . '_' . $siswa['sesi_guru_id']] = $row;
-                }
-                $stmt_absensi->close();
-            }
-        }
-    }
-}
-
-// Jika filter kosong, pilih hari ini secara default
-if (empty($filter_hari) && in_array($hari_indonesia, $hari_list)) {
-    $filter_hari = $hari_indonesia;
-}
-
-// Hitung statistik absensi hari ini
 $statistik = [
-    'total_siswa' => count($daftar_siswa),
+    'total_siswa' => 0,
     'hadir' => 0,
     'izin' => 0,
     'sakit' => 0,
-    'alpha' => 0
+    'alpha' => 0,
+    'belum_absen' => 0
 ];
 
-foreach ($absensi_hari_ini as $absensi) {
-    $status = $absensi['status'];
-    if (isset($statistik[$status])) {
-        $statistik[$status]++;
+if (!empty($tanggal)) {
+    // Ambil siswa UNIQUE
+    $sql_siswa = "SELECT 
+                    s.id,
+                    s.nama_lengkap,
+                    s.kelas as kelas_sekolah
+                 FROM siswa s
+                 INNER JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
+                 WHERE ps.status = 'aktif'
+                 AND s.status = 'aktif'
+                 AND EXISTS (
+                     SELECT 1 
+                     FROM jadwal_belajar jb
+                     INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
+                     WHERE jb.pendaftaran_id = ps.id
+                     AND jb.status = 'aktif'
+                     AND smg.guru_id = ?
+                 )";
+
+    $params = [$guru_id];
+    $types = "i";
+
+    if (!empty($search_query)) {
+        $sql_siswa .= " AND s.nama_lengkap LIKE ?";
+        $params[] = "%{$search_query}%";
+        $types .= "s";
     }
+
+    $sql_siswa .= " ORDER BY s.nama_lengkap";
+
+    $stmt_siswa = $conn->prepare($sql_siswa);
+    if ($stmt_siswa) {
+        $stmt_siswa->bind_param($types, ...$params);
+        $stmt_siswa->execute();
+        $result_siswa = $stmt_siswa->get_result();
+
+        while ($row = $result_siswa->fetch_assoc()) {
+            $daftar_siswa[] = $row;
+        }
+        $stmt_siswa->close();
+    }
+
+    $statistik['total_siswa'] = count($daftar_siswa);
+
+    // Ambil data absensi dan mapel
+    if (!empty($daftar_siswa)) {
+        foreach ($daftar_siswa as $key => $siswa) {
+            // Ambil absensi
+            $sql_absensi = "SELECT status, keterangan, siswa_pelajaran_id 
+                           FROM absensi_siswa 
+                           WHERE siswa_id = ? 
+                           AND guru_id = ?
+                           AND tanggal_absensi = ?
+                           LIMIT 1";
+            $stmt_abs = $conn->prepare($sql_absensi);
+            $stmt_abs->bind_param("iis", $siswa['id'], $guru_id, $tanggal);
+            $stmt_abs->execute();
+            $absensi = $stmt_abs->get_result()->fetch_assoc();
+            $stmt_abs->close();
+
+            // Update array
+            $daftar_siswa[$key]['status'] = $absensi['status'] ?? '';
+            $daftar_siswa[$key]['keterangan'] = $absensi['keterangan'] ?? '';
+            $daftar_siswa[$key]['selected_mapel_id'] = $absensi['siswa_pelajaran_id'] ?? '';
+
+            // Hitung statistik
+            $status = $absensi['status'] ?? '';
+            if (!empty($status) && isset($statistik[$status])) {
+                $statistik[$status]++;
+            }
+
+            // Ambil mapel
+            $sql_mapel = "SELECT sp.id, sp.nama_pelajaran
+                         FROM siswa_pelajaran sp
+                         WHERE sp.siswa_id = ?
+                         AND sp.status = 'aktif'
+                         ORDER BY sp.nama_pelajaran";
+            
+            $stmt_mapel = $conn->prepare($sql_mapel);
+            $stmt_mapel->bind_param("i", $siswa['id']);
+            $stmt_mapel->execute();
+            $mapel_result = $stmt_mapel->get_result();
+
+            $daftar_siswa[$key]['mapel_list'] = [];
+            while ($mapel = $mapel_result->fetch_assoc()) {
+                $daftar_siswa[$key]['mapel_list'][] = $mapel;
+            }
+            $stmt_mapel->close();
+        }
+    }
+
+    // Hitung belum_absen
+    $statistik['belum_absen'] = $statistik['total_siswa'] -
+        ($statistik['hadir'] + $statistik['izin'] + $statistik['sakit'] + $statistik['alpha']);
 }
-$statistik['belum_absen'] = $statistik['total_siswa'] - 
-                           ($statistik['hadir'] + $statistik['izin'] + $statistik['sakit'] + $statistik['alpha']);
 ?>
 
 <!DOCTYPE html>
 <html lang="id">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Absensi Harian - Bimbel Esc</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <style>
-        .status-hadir { background-color: #d1fae5; color: #065f46; }
-        .status-izin { background-color: #fef3c7; color: #92400e; }
-        .status-sakit { background-color: #dbeafe; color: #1e40af; }
-        .status-alpha { background-color: #fee2e2; color: #991b1b; }
-        .status-default { background-color: #f3f4f6; color: #6b7280; }
-        
-        .status-badge {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
+        .status-hadir {
+            background-color: #d1fae5;
+            color: #065f46;
         }
-        
-        .btn-hadir:hover { background-color: #10b981; }
-        .btn-izin:hover { background-color: #f59e0b; }
-        .btn-sakit:hover { background-color: #3b82f6; }
-        .btn-alpha:hover { background-color: #ef4444; }
-        
+
+        .status-izin {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+
+        .status-sakit {
+            background-color: #dbeafe;
+            color: #1e40af;
+        }
+
+        .status-alpha {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+
+        .status-default {
+            background-color: #f3f4f6;
+            color: #6b7280;
+        }
+
         .table-responsive {
             overflow-x: auto;
         }
-        
+
         @media (max-width: 768px) {
             .table-responsive table {
-                min-width: 800px;
+                min-width: 900px;
             }
         }
-        
-        .jadwal-option {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .jadwal-time {
-            font-size: 12px;
-            color: #6b7280;
-            background-color: #f3f4f6;
-            padding: 2px 8px;
-            border-radius: 4px;
-        }
-        
+
         /* Dropdown styles */
         .dropdown-submenu {
             display: none;
@@ -546,15 +536,15 @@ $statistik['belum_absen'] = $statistik['total_siswa'] -
             .desktop-sidebar {
                 display: block;
             }
-            
+
             .mobile-header {
                 display: none;
             }
-            
+
             #mobileMenu {
                 display: none;
             }
-            
+
             .menu-overlay {
                 display: none !important;
             }
@@ -564,134 +554,59 @@ $statistik['belum_absen'] = $statistik['total_siswa'] -
             .desktop-sidebar {
                 display: none;
             }
-            
-            .stat-card {
-                padding: 1rem !important;
-            }
-            
-            .quick-action-btn {
-                padding: 0.75rem !important;
-            }
-            
+
             .filter-grid {
                 grid-template-columns: 1fr !important;
             }
         }
-        
-        .row-disabled {
-            background-color: #f9fafb !important;
-        }
-        
-        .row-disabled select,
-        .row-disabled input {
-            background-color: #f3f4f6 !important;
-            color: #9ca3af !important;
-            cursor: not-allowed;
-        }
-        
+
         /* Search input styles */
         .search-container {
             position: relative;
+            flex: 1;
         }
-        
-        .search-results {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            max-height: 300px;
-            overflow-y: auto;
-            background-color: white;
+
+        .search-input {
+            width: 100%;
+            padding: 0.5rem 2.5rem 0.5rem 1rem;
             border: 1px solid #d1d5db;
             border-radius: 0.375rem;
-            z-index: 50;
-            display: none;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            outline: none;
         }
-        
-        .search-results.active {
-            display: block;
+
+        .search-input:focus {
+            border-color: #3b82f6;
+            ring: 2px solid #3b82f6;
         }
-        
-        .search-result-item {
-            padding: 0.75rem 1rem;
-            cursor: pointer;
-            border-bottom: 1px solid #f3f4f6;
-            transition: background-color 0.2s;
-        }
-        
-        .search-result-item:hover {
-            background-color: #eff6ff;
-        }
-        
-        .search-result-item.active {
-            background-color: #dbeafe;
-        }
-        
-        .search-result-item:last-child {
-            border-bottom: none;
-        }
-        
-        .search-result-name {
-            font-weight: 500;
-            color: #1f2937;
-        }
-        
-        .search-result-details {
-            font-size: 0.875rem;
-            color: #6b7280;
-            margin-top: 0.25rem;
-        }
-        
-        .no-results {
-            padding: 0.75rem 1rem;
-            color: #6b7280;
-            font-style: italic;
-        }
-        
-        .clear-search {
+
+        .search-icon {
             position: absolute;
             right: 0.75rem;
             top: 50%;
             transform: translateY(-50%);
-            cursor: pointer;
             color: #9ca3af;
-            background: none;
-            border: none;
-            padding: 0;
-            font-size: 1rem;
         }
-        
+
+        .clear-search {
+            position: absolute;
+            right: 2rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #9ca3af;
+            text-decoration: none;
+        }
+
         .clear-search:hover {
             color: #6b7280;
         }
-        
-        .loading-spinner {
-            display: none;
-            position: absolute;
-            right: 2.5rem;
-            top: 50%;
-            transform: translateY(-50%);
-        }
-        
-        .loading-spinner.active {
-            display: block;
-        }
-        
-        .spinner {
-            width: 1rem;
-            height: 1rem;
-            border: 2px solid #e5e7eb;
-            border-top-color: #3b82f6;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+
+        .mapel-select {
+            min-width: 150px;
+            max-width: 200px;
         }
     </style>
 </head>
+
 <body class="bg-gray-100">
     <!-- Desktop Sidebar -->
     <div class="desktop-sidebar w-64 bg-blue-800 text-white fixed h-full z-40">
@@ -779,18 +694,12 @@ $statistik['belum_absen'] = $statistik['total_siswa'] -
                     <h1 class="text-2xl font-bold text-gray-800">
                         <i class="fas fa-calendar-check mr-2"></i> Absensi Harian
                     </h1>
-                    <p class="text-gray-600">Input absensi siswa berdasarkan jadwal mengajar</p>
+                    <p class="text-gray-600">Input absensi siswa - Lengkap dengan mata pelajaran</p>
                 </div>
-                <div class="mt-2 md:mt-0 flex items-center space-x-2">
-                    <span class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-800">
-                        <i class="fas fa-calendar-alt mr-2"></i>
-                        <?php echo date('d F Y', strtotime($tanggal)); ?>
-                        <span class="ml-2 bg-blue-200 px-2 py-1 rounded text-xs">
-                            <?php echo $hari_indonesia; ?>
-                        </span>
-                    </span>
-                    <a href="rekapAbsensi.php" class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-green-100 text-green-800 hover:bg-green-200">
-                        <i class="fas fa-chart-bar mr-2"></i> Rekap
+                <div class="mt-2 md:mt-0">
+                    <a href="rekapAbsensi.php"
+                        class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-green-100 text-green-800 hover:bg-green-200">
+                        <i class="fas fa-chart-bar mr-2"></i> Rekap Absensi
                     </a>
                 </div>
             </div>
@@ -799,439 +708,360 @@ $statistik['belum_absen'] = $statistik['total_siswa'] -
         <!-- Content -->
         <div class="container mx-auto p-4 md:p-6">
             <?php if (isset($success_message)): ?>
-            <div id="successMessage" class="mb-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded-lg">
-                <div class="flex items-center">
-                    <i class="fas fa-check-circle mr-2"></i>
-                    <span><?php echo $success_message; ?></span>
-                    <button onclick="hideSuccessMessage()" class="ml-auto text-green-700 hover:text-green-900">
-                        <i class="fas fa-times"></i>
-                    </button>
+                <div id="successMessage" class="mb-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded-lg">
+                    <div class="flex items-center">
+                        <i class="fas fa-check-circle mr-2"></i>
+                        <span><?php echo $success_message; ?></span>
+                        <button onclick="this.parentElement.parentElement.style.display='none'"
+                            class="ml-auto text-green-700 hover:text-green-900">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
                 </div>
-            </div>
             <?php endif; ?>
-            
+
             <?php if (isset($error_message)): ?>
-            <div class="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg">
-                <div class="flex items-center">
-                    <i class="fas fa-exclamation-circle mr-2"></i>
-                    <span><?php echo $error_message; ?></span>
+                <div class="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg">
+                    <div class="flex items-center">
+                        <i class="fas fa-exclamation-circle mr-2"></i>
+                        <span><?php echo $error_message; ?></span>
+                    </div>
                 </div>
-            </div>
             <?php endif; ?>
 
             <!-- Filter Section -->
             <div class="bg-white shadow rounded-lg p-6 mb-6">
-                <h3 class="text-lg font-medium text-gray-900 mb-4">Filter Absensi</h3>
-                <form method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-4 filter-grid">
-                    <div>
+                <form method="GET" class="flex flex-col md:flex-row gap-4">
+                    <div class="flex-1">
                         <label class="block text-sm font-medium text-gray-700 mb-1">
-                            <i class="fas fa-calendar mr-1"></i> Tanggal
+                            <i class="fas fa-calendar mr-1"></i> Tanggal Absensi
                         </label>
-                        <input type="date" name="tanggal" value="<?php echo $tanggal; ?>" 
+                        <input type="date" name="tanggal" value="<?php echo $tanggal; ?>"
                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                     </div>
-                    <div>
+                    <div class="flex-1">
                         <label class="block text-sm font-medium text-gray-700 mb-1">
-                            <i class="fas fa-user-graduate mr-1"></i> Cari Siswa
+                            <i class="fas fa-search mr-1"></i> Cari Nama Siswa
                         </label>
                         <div class="search-container">
-                            <input type="text" 
-                                   id="searchSiswa" 
-                                   placeholder="Ketik nama siswa..."
-                                   value="<?php echo htmlspecialchars($selected_siswa_name); ?>"
-                                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                   autocomplete="off">
-                            <input type="hidden" id="selectedSiswaId" name="siswa_id" value="<?php echo $filter_siswa_id; ?>">
-                            
-                            <div class="loading-spinner" id="loadingSpinner">
-                                <div class="spinner"></div>
-                            </div>
-                            
-                            <?php if ($selected_siswa_name): ?>
-                            <button type="button" class="clear-search" onclick="clearSiswaSearch()">
-                                <i class="fas fa-times"></i>
-                            </button>
+                            <input type="text" name="search" value="<?php echo htmlspecialchars($search_query); ?>"
+                                   placeholder="Ketik nama siswa..." 
+                                   class="search-input">
+                            <?php if (!empty($search_query)): ?>
+                                <a href="absensiSiswa.php?tanggal=<?php echo $tanggal; ?>" class="clear-search">
+                                    <i class="fas fa-times"></i>
+                                </a>
                             <?php endif; ?>
-                            
-                            <div id="searchResults" class="search-results"></div>
+                            <i class="fas fa-search search-icon"></i>
                         </div>
-                        <p class="text-xs text-gray-500 mt-1">Cari siswa berdasarkan nama atau kelas</p>
                     </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">
-                            <i class="fas fa-calendar-day mr-1"></i> Hari
-                        </label>
-                        <select name="hari" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="">Semua Hari</option>
-                            <?php foreach ($hari_list as $hari_opt): ?>
-                            <option value="<?php echo $hari_opt; ?>" 
-                                <?php echo ($filter_hari == $hari_opt) ? 'selected' : ''; ?>>
-                                <?php echo $hari_opt; ?>
-                            </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">
-                            <i class="fas fa-clock mr-1"></i> Jam Sesi
-                        </label>
-                        <select name="jam" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="">Semua Jam</option>
-                            <?php foreach ($jam_list as $jam): ?>
-                            <option value="<?php echo htmlspecialchars($jam['jam_range']); ?>" 
-                                <?php echo ($filter_jam == $jam['jam_range']) ? 'selected' : ''; ?>>
-                                <?php echo $jam['jam_range']; ?>
-                            </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="md:col-span-4 flex items-end space-x-2">
-                        <button type="submit" class="w-full md:w-auto px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <div class="flex items-end">
+                        <button type="submit" 
+                                class="w-full md:w-auto px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
                             <i class="fas fa-search mr-2"></i> Tampilkan
                         </button>
-                        <a href="absensiSiswa.php?tanggal=<?php echo $tanggal; ?>" 
-                           class="w-full md:w-auto px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">
-                            <i class="fas fa-redo mr-2"></i> Reset
-                        </a>
                     </div>
                 </form>
                 
-                <?php if (!empty($filter_siswa_id) || !empty($filter_hari) || !empty($filter_jam)): ?>
-                <div class="mt-4 p-3 bg-blue-50 rounded-md">
-                    <p class="text-sm text-blue-700">
-                        <i class="fas fa-info-circle mr-1"></i>
-                        Filter aktif: 
-                        <?php 
-                        $filters_active = [];
-                        if (!empty($filter_siswa_id) && !empty($selected_siswa_name)) {
-                            $filters_active[] = "Siswa: " . $selected_siswa_name;
-                        }
-                        if (!empty($filter_hari)) {
-                            $filters_active[] = "Hari: " . $filter_hari;
-                        }
-                        if (!empty($filter_jam)) {
-                            $filters_active[] = "Jam: " . $filter_jam;
-                        }
-                        echo implode(' | ', $filters_active);
-                        ?>
-                    </p>
-                </div>
+                <?php if (!empty($search_query)): ?>
+                    <div class="mt-3 text-sm text-blue-600">
+                        <i class="fas fa-filter mr-1"></i> Filter aktif: Pencarian "<?php echo htmlspecialchars($search_query); ?>"
+                    </div>
                 <?php endif; ?>
             </div>
 
             <!-- Stats Cards -->
             <?php if (!empty($daftar_siswa)): ?>
-            <div class="mb-6 bg-white rounded-lg shadow p-6">
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4">
-                    <div>
+                <div class="mb-6 bg-white rounded-lg shadow p-6">
+                    <div class="flex justify-between items-center mb-4">
                         <h3 class="text-lg font-medium text-gray-900">
                             <i class="fas fa-calendar-alt mr-2"></i>
-                            <?php if (!empty($sesi_info['hari']) && !empty($sesi_info['jam_mulai'])): ?>
-                            Jadwal: <span class="text-blue-600">
-                                <?php echo htmlspecialchars($sesi_info['hari'] ?? ''); ?>
-                                <?php echo date('H:i', strtotime($sesi_info['jam_mulai'] ?? '')); ?> - 
-                                <?php echo date('H:i', strtotime($sesi_info['jam_selesai'] ?? '')); ?>
-                            </span>
-                            <?php else: ?>
-                            Hasil Filter
-                            <?php endif; ?>
+                            Absensi Tanggal: <?php echo date('d F Y', strtotime($tanggal)); ?>
                         </h3>
-                        <p class="text-gray-600">
-                            Total <?php echo $statistik['total_siswa']; ?> siswa ditemukan
-                            <?php if (!empty($sesi_info['nama_guru'])): ?>
-                            | Guru: <span class="font-medium"><?php echo htmlspecialchars($sesi_info['nama_guru']); ?></span>
-                            <?php endif; ?>
-                        </p>
-                    </div>
-                    <div class="mt-2 md:mt-0">
                         <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                            <i class="fas fa-users mr-1"></i>
-                            <?php echo $statistik['total_siswa']; ?> Siswa
+                            <i class="fas fa-users mr-1"></i> <?php echo $statistik['total_siswa']; ?> Siswa
                         </span>
                     </div>
-                </div>
                 
-                <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
-                    <div class="bg-gray-50 rounded-lg p-4">
-                        <div class="flex items-center">
-                            <div class="p-2 bg-gray-100 rounded-lg mr-3">
-                                <i class="fas fa-users text-gray-600"></i>
-                            </div>
-                            <div>
-                                <p class="text-sm text-gray-600">Total Siswa</p>
-                                <p class="text-xl font-bold text-gray-800"><?php echo $statistik['total_siswa']; ?></p>
-                            </div>
+                    <div class="grid grid-cols-2 md:grid-cols-6 gap-4">
+                        <div class="bg-gray-50 rounded-lg p-4">
+                            <p class="text-sm text-gray-600">Total Siswa</p>
+                            <p class="text-2xl font-bold text-gray-800"><?php echo $statistik['total_siswa']; ?></p>
                         </div>
-                    </div>
-                    <div class="bg-white rounded-lg p-4 shadow">
-                        <div class="flex items-center">
-                            <div class="p-2 bg-green-100 rounded-lg mr-3">
-                                <i class="fas fa-check text-green-600"></i>
-                            </div>
-                            <div>
-                                <p class="text-sm text-gray-600">Hadir</p>
-                                <p class="text-xl font-bold text-gray-800"><?php echo $statistik['hadir']; ?></p>
-                            </div>
+                        <div class="bg-green-50 rounded-lg p-4">
+                            <p class="text-sm text-green-600">Hadir</p>
+                            <p class="text-2xl font-bold text-green-800"><?php echo $statistik['hadir']; ?></p>
                         </div>
-                    </div>
-                    <div class="bg-white rounded-lg p-4 shadow">
-                        <div class="flex items-center">
-                            <div class="p-2 bg-yellow-100 rounded-lg mr-3">
-                                <i class="fas fa-envelope text-yellow-600"></i>
-                            </div>
-                            <div>
-                                <p class="text-sm text-gray-600">Izin</p>
-                                <p class="text-xl font-bold text-gray-800"><?php echo $statistik['izin']; ?></p>
-                            </div>
+                        <div class="bg-yellow-50 rounded-lg p-4">
+                            <p class="text-sm text-yellow-600">Izin</p>
+                            <p class="text-2xl font-bold text-yellow-800"><?php echo $statistik['izin']; ?></p>
                         </div>
-                    </div>
-                    <div class="bg-white rounded-lg p-4 shadow">
-                        <div class="flex items-center">
-                            <div class="p-2 bg-blue-100 rounded-lg mr-3">
-                                <i class="fas fa-thermometer text-blue-600"></i>
-                            </div>
-                            <div>
-                                <p class="text-sm text-gray-600">Sakit</p>
-                                <p class="text-xl font-bold text-gray-800"><?php echo $statistik['sakit']; ?></p>
-                            </div>
+                        <div class="bg-blue-50 rounded-lg p-4">
+                            <p class="text-sm text-blue-600">Sakit</p>
+                            <p class="text-2xl font-bold text-blue-800"><?php echo $statistik['sakit']; ?></p>
                         </div>
-                    </div>
-                    <div class="bg-white rounded-lg p-4 shadow">
-                        <div class="flex items-center">
-                            <div class="p-2 bg-red-100 rounded-lg mr-3">
-                                <i class="fas fa-times text-red-600"></i>
-                            </div>
-                            <div>
-                                <p class="text-sm text-gray-600">Alpha</p>
-                                <p class="text-xl font-bold text-gray-800"><?php echo $statistik['alpha']; ?></p>
-                            </div>
+                        <div class="bg-red-50 rounded-lg p-4">
+                            <p class="text-sm text-red-600">Alpha</p>
+                            <p class="text-2xl font-bold text-red-800"><?php echo $statistik['alpha']; ?></p>
+                        </div>
+                        <div class="bg-orange-50 rounded-lg p-4">
+                            <p class="text-sm text-orange-600">Belum Absen</p>
+                            <p class="text-2xl font-bold text-orange-800"><?php echo $statistik['belum_absen']; ?></p>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Form Absensi -->
-            <div class="bg-white shadow rounded-lg">
-                <div class="px-6 py-4 border-b border-gray-200">
-                    <div class="flex justify-between items-center">
-                        <h3 class="text-lg font-medium text-gray-900">
-                            <i class="fas fa-list mr-2"></i> 
-                            Daftar Siswa
-                            <?php if (!empty($sesi_info['jam_mulai'])): ?>
-                            - Sesi <?php echo date('H:i', strtotime($sesi_info['jam_mulai'])); ?>
-                            <?php endif; ?>
-                            
-                            <?php if (!empty($filter_hari) || !empty($filter_jam)): ?>
-                            <span class="text-sm text-blue-600 ml-2">
-                                (<?php 
-                                if (!empty($filter_hari)) echo $filter_hari . ' ';
-                                if (!empty($filter_jam)) echo $filter_jam;
-                                ?>)
-                            </span>
-                            <?php endif; ?>
-                        </h3>
-                        <div class="text-sm <?php echo $statistik['belum_absen'] > 0 ? 'text-orange-500' : 'text-green-500'; ?>">
-                            <?php if ($statistik['belum_absen'] > 0): ?>
-                                <i class="fas fa-exclamation-triangle mr-1"></i>
-                                <?php echo $statistik['belum_absen']; ?> siswa belum diabsensi
-                            <?php else: ?>
-                                <i class="fas fa-check-circle mr-1"></i>
-                                Semua siswa sudah diabsensi
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                </div>
-                
-                <form method="POST" id="formAbsensi">
-                    <input type="hidden" name="simpan_absensi" value="1">
-                    <input type="hidden" name="tanggal" value="<?php echo $tanggal; ?>">
-                    <!-- Simpan filter aktif untuk validasi -->
-                    <input type="hidden" name="filter_hari" value="<?php echo htmlspecialchars($filter_hari); ?>">
-                    <input type="hidden" name="filter_jam" value="<?php echo htmlspecialchars($filter_jam); ?>">
-                    
-                    <?php if (empty($filter_hari) && empty($filter_jam)): ?>
-                    <div class="px-6 py-3 bg-yellow-50 border-y border-yellow-200">
-                        <div class="flex items-center text-yellow-700">
-                            <i class="fas fa-exclamation-triangle mr-2"></i>
-                            <div>
-                                <p class="font-medium">Perhatian!</p>
-                                <p class="text-sm">Anda tidak memfilter hari/jam spesifik. Pastikan Anda hanya mengabsensi jadwal yang sesuai.</p>
+                <!-- Form Absensi -->
+                <div class="bg-white shadow rounded-lg">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <div class="flex justify-between items-center">
+                            <h3 class="text-lg font-medium text-gray-900">
+                                <i class="fas fa-list mr-2"></i> Daftar Siswa
+                            </h3>
+                            <div class="flex items-center space-x-2">
+                                <button type="button" onclick="setAllStatus('hadir')" 
+                                        class="px-3 py-1 bg-green-100 text-green-800 rounded-md hover:bg-green-200 text-sm">
+                                    <i class="fas fa-check mr-1"></i>Semua Hadir
+                                </button>
+                                <button type="button" onclick="saveAbsensi()" 
+                                        class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm">
+                                    <i class="fas fa-save mr-1"></i>Simpan Absensi
+                                </button>
                             </div>
                         </div>
                     </div>
-                    <?php endif; ?>
                     
+                    <form id="formAbsensi" method="POST" style="display: none;">
+                        <input type="hidden" name="simpan_absensi" value="1">
+                        <input type="hidden" name="tanggal" value="<?php echo $tanggal; ?>">
+                    </form>
+                
                     <div class="table-responsive">
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama Siswa</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kelas Sekolah</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Mata Pelajaran</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tingkat</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hari & Jam</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Keterangan</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">No</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nama Siswa</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Kelas</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mata Pelajaran</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Keterangan</th>
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
-                                <?php foreach ($daftar_siswa as $index => $siswa): 
-                                    $absensi_key = $siswa['id'] . '_' . $siswa['sesi_guru_id'];
-                                    $current_status = $absensi_hari_ini[$absensi_key]['status'] ?? '';
-                                    $current_keterangan = $absensi_hari_ini[$absensi_key]['keterangan'] ?? '';
-                                    
-                                    // Cek apakah sesi ini sesuai dengan filter aktif
-                                    $is_filtered_sesi = true;
-                                    if (!empty($filter_hari) && $siswa['hari'] != $filter_hari) {
-                                        $is_filtered_sesi = false;
-                                    }
-                                    if (!empty($filter_jam)) {
-                                        list($jam_mulai_filter, $jam_selesai_filter) = explode('-', $filter_jam);
-                                        $jam_mulai_db = date('H:i', strtotime($siswa['jam_mulai']));
-                                        $jam_selesai_db = date('H:i', strtotime($siswa['jam_selesai']));
-                                        
-                                        if ($jam_mulai_db != $jam_mulai_filter || $jam_selesai_db != $jam_selesai_filter) {
-                                            $is_filtered_sesi = false;
-                                        }
-                                    }
-                                ?>
-                                <tr class="hover:bg-gray-50 <?php echo !$is_filtered_sesi ? 'row-disabled' : ''; ?>" id="row-<?php echo $siswa['id']; ?>-<?php echo $siswa['sesi_guru_id']; ?>">
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        <?php echo $index + 1; ?>
-                                        <?php if (!$is_filtered_sesi): ?>
-                                        <span class="text-xs text-gray-500 ml-1" title="Sesi ini tidak sesuai filter aktif">
-                                            <i class="fas fa-info-circle"></i>
-                                        </span>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <div class="text-sm font-medium text-gray-900">
-                                            <?php echo htmlspecialchars($siswa['nama_lengkap']); ?>
-                                        </div>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                        <?php echo htmlspecialchars($siswa['kelas_sekolah']); ?>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                        <?php echo htmlspecialchars($siswa['nama_pelajaran']); ?>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                        <?php echo htmlspecialchars($siswa['tingkat']); ?>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                        <div class="font-medium"><?php echo htmlspecialchars($siswa['hari']); ?></div>
-                                        <div class="text-xs text-gray-400">
-                                            <?php echo date('H:i', strtotime($siswa['jam_mulai'])); ?> - 
-                                            <?php echo date('H:i', strtotime($siswa['jam_selesai'])); ?>
-                                        </div>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <input type="hidden" name="siswa[<?php echo $siswa['id']; ?>][pendaftaran_id]" value="<?php echo $siswa['pendaftaran_id']; ?>">
-                                        <input type="hidden" name="siswa[<?php echo $siswa['id']; ?>][siswa_pelajaran_id]" value="<?php echo $siswa['siswa_pelajaran_id']; ?>">
-                                        <input type="hidden" name="siswa[<?php echo $siswa['id']; ?>][jadwal_id]" value="<?php echo $siswa['jadwal_id']; ?>">
-                                        <input type="hidden" name="siswa[<?php echo $siswa['id']; ?>][sesi_guru_id]" value="<?php echo $siswa['sesi_guru_id']; ?>">
-                                        <select name="siswa[<?php echo $siswa['id']; ?>][status]" 
-                                                class="status-select w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500
-                                                       <?php echo $current_status ? 'status-' . $current_status : 'status-default'; ?>"
-                                                onchange="updateRowStatus(this)"
-                                                <?php echo !$is_filtered_sesi ? 'disabled' : ''; ?>
-                                                data-sesi-id="<?php echo $siswa['sesi_guru_id']; ?>"
-                                                title="<?php echo !$is_filtered_sesi ? 'Sesi tidak sesuai filter aktif' : ''; ?>">
-                                            <option value="">Pilih Status</option>
-                                            <option value="hadir" <?php echo ($current_status == 'hadir') ? 'selected' : ''; ?>>Hadir</option>
-                                            <option value="izin" <?php echo ($current_status == 'izin') ? 'selected' : ''; ?>>Izin</option>
-                                            <option value="sakit" <?php echo ($current_status == 'sakit') ? 'selected' : ''; ?>>Sakit</option>
-                                            <option value="alpha" <?php echo ($current_status == 'alpha') ? 'selected' : ''; ?>>Alpha</option>
-                                        </select>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <input type="text" 
-                                               name="siswa[<?php echo $siswa['id']; ?>][keterangan]" 
-                                               value="<?php echo htmlspecialchars($current_keterangan); ?>"
-                                               placeholder="Alasan jika tidak hadir"
-                                               class="keterangan-input w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                               <?php echo !$is_filtered_sesi ? 'disabled' : ''; ?>
-                                               data-sesi-id="<?php echo $siswa['sesi_guru_id']; ?>"
-                                               title="<?php echo !$is_filtered_sesi ? 'Sesi tidak sesuai filter aktif' : ''; ?>">
-                                    </td>
-                                </tr>
+                                <?php foreach ($daftar_siswa as $index => $siswa): ?>
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                            <?php echo $index + 1; ?>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <div class="text-sm font-medium text-gray-900">
+                                                <?php echo htmlspecialchars($siswa['nama_lengkap']); ?>
+                                            </div>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            <?php echo htmlspecialchars($siswa['kelas_sekolah']); ?>
+                                        </td>
+                                        <td class="px-3 py-4 whitespace-nowrap">
+                                            <select class="mapel-select px-2 py-1 border border-gray-300 rounded-md text-sm"
+                                                    data-siswa-id="<?php echo $siswa['id']; ?>">
+                                                <option value="">Pilih Mapel</option>
+                                                <?php foreach ($siswa['mapel_list'] as $mapel): ?>
+                                                    <option value="<?php echo $mapel['id']; ?>" 
+                                                        <?php echo ($siswa['selected_mapel_id'] == $mapel['id']) ? 'selected' : ''; ?>>
+                                                        <?php echo htmlspecialchars($mapel['nama_pelajaran']); ?>
+                                                    </option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <select onchange="updateRowStatus(this)" 
+                                                    class="status-select w-32 px-2 py-1 border rounded-md text-sm
+                                                           <?php echo $siswa['status'] ? 'status-' . $siswa['status'] : 'status-default'; ?>"
+                                                    data-siswa-id="<?php echo $siswa['id']; ?>">
+                                                <option value="" <?php echo empty($siswa['status']) ? 'selected' : ''; ?>>Pilih</option>
+                                                <option value="hadir" <?php echo $siswa['status'] == 'hadir' ? 'selected' : ''; ?>>Hadir</option>
+                                                <option value="izin" <?php echo $siswa['status'] == 'izin' ? 'selected' : ''; ?>>Izin</option>
+                                                <option value="sakit" <?php echo $siswa['status'] == 'sakit' ? 'selected' : ''; ?>>Sakit</option>
+                                                <option value="alpha" <?php echo $siswa['status'] == 'alpha' ? 'selected' : ''; ?>>Alpha</option>
+                                            </select>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <input type="text" 
+                                                   class="keterangan-input w-40 px-2 py-1 border border-gray-300 rounded-md text-sm"
+                                                   placeholder="Alasan"
+                                                   value="<?php echo htmlspecialchars($siswa['keterangan']); ?>"
+                                                   data-siswa-id="<?php echo $siswa['id']; ?>">
+                                        </td>
+                                    </tr>
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
                     </div>
-                    
-                    <div class="px-6 py-4 bg-gray-50 border-t border-gray-200">
-                        <div class="flex justify-between items-center">
-                            <div class="text-sm text-gray-500">
-                                <i class="fas fa-info-circle mr-1"></i>
-                                <?php if (!empty($filter_hari) || !empty($filter_jam)): ?>
-                                Hanya sesi sesuai filter yang akan disimpan
-                                <?php else: ?>
-                                Semua sesi akan disimpan
-                                <?php endif; ?>
-                            </div>
-                            <div class="space-x-3">
-                                <button type="button" onclick="setAllStatus('hadir')" 
-                                        class="px-4 py-2 bg-green-100 text-green-800 rounded-md hover:bg-green-200">
-                                    <i class="fas fa-check mr-2"></i>Semua Hadir
-                                </button>
-                                <button type="submit" 
-                                        class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                    <i class="fas fa-save mr-2"></i>Simpan Absensi
-                                </button>
-                            </div>
-                        </div>
+                </div>
+            <?php elseif (!empty($tanggal)): ?>
+                <div class="bg-white shadow rounded-lg p-8 text-center">
+                    <div class="mb-4">
+                        <i class="fas fa-users text-4xl text-gray-400"></i>
                     </div>
-                </form>
-            </div>
-            <?php elseif (!empty($filter_siswa_id) || !empty($filter_hari) || !empty($filter_jam)): ?>
-            <div class="bg-white shadow rounded-lg p-8 text-center">
-                <div class="mb-4">
-                    <i class="fas fa-search text-4xl text-gray-400"></i>
+                    <h3 class="text-lg font-medium text-gray-900 mb-2">Tidak Ada Siswa</h3>
+                    <p class="text-gray-600 mb-4">
+                        <?php if (!empty($search_query)): ?>
+                            Tidak ditemukan siswa dengan nama "<?php echo htmlspecialchars($search_query); ?>"
+                        <?php else: ?>
+                            Anda belum memiliki siswa yang terdaftar
+                        <?php endif; ?>
+                    </p>
+                    <?php if (!empty($search_query)): ?>
+                        <a href="absensiSiswa.php?tanggal=<?php echo $tanggal; ?>" 
+                           class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                            <i class="fas fa-times mr-2"></i> Hapus Filter
+                        </a>
+                    <?php endif; ?>
                 </div>
-                <h3 class="text-lg font-medium text-gray-900 mb-2">Tidak Ada Data</h3>
-                <p class="text-gray-600 mb-4">Tidak ditemukan siswa dengan filter yang dipilih</p>
-                <a href="absensiSiswa.php?tanggal=<?php echo $tanggal; ?>" 
-                   class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
-                    <i class="fas fa-redo mr-2"></i> Reset Filter
-                </a>
-            </div>
-            <?php else: ?>
-            <div class="bg-white shadow rounded-lg p-8 text-center">
-                <div class="mb-4">
-                    <i class="fas fa-filter text-4xl text-gray-400"></i>
-                </div>
-                <h3 class="text-lg font-medium text-gray-900 mb-2">Gunakan Filter</h3>
-                <p class="text-gray-600 mb-4">Silakan pilih filter di atas untuk menampilkan daftar siswa</p>
-                <div class="text-sm text-gray-500">
-                    <i class="fas fa-info-circle mr-1"></i>
-                    Sistem akan otomatis memfilter hari berdasarkan tanggal yang dipilih
-                </div>
-            </div>
             <?php endif; ?>
         </div>
 
         <!-- Footer -->
-        <footer class="bg-white border-t border-gray-200">
+        <footer class="bg-white border-t border-gray-200 mt-6">
             <div class="container mx-auto py-4 px-4">
-                <div class="md:flex md:items-center md:justify-between">
-                    <div class="text-sm text-gray-500">
-                        <p>© <?php echo date('Y'); ?> Bimbel Esc - Absensi Harian</p>
-                    </div>
-                    <div class="mt-3 md:mt-0">
-                        <span class="text-sm text-gray-500">
-                            <i class="fas fa-clock mr-1"></i>
-                            <?php echo date('H:i:s'); ?>
-                        </span>
-                    </div>
-                </div>
+                <p class="text-sm text-gray-500 text-center">
+                    © <?php echo date('Y'); ?> Bimbel Esc - Absensi Harian
+                </p>
             </div>
         </footer>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script>
+        // Data storage untuk absensi
+        let absensiData = {};
+        
+        // Inisialisasi data dari PHP
+        <?php foreach ($daftar_siswa as $siswa): ?>
+            absensiData[<?php echo $siswa['id']; ?>] = {
+                status: '<?php echo $siswa['status']; ?>',
+                keterangan: '<?php echo addslashes($siswa['keterangan']); ?>',
+                mapel_id: '<?php echo $siswa['selected_mapel_id']; ?>'
+            };
+        <?php endforeach; ?>
+
+        // Update class saat status berubah
+        function updateRowStatus(select) {
+            const status = select.value;
+            const statusClasses = {
+                'hadir': 'status-hadir',
+                'izin': 'status-izin',
+                'sakit': 'status-sakit',
+                'alpha': 'status-alpha',
+                '': 'status-default'
+            };
+            
+            // Reset class
+            Object.values(statusClasses).forEach(cls => {
+                select.classList.remove(cls);
+            });
+            
+            // Tambah class baru
+            select.classList.add(statusClasses[status] || 'status-default');
+            
+            // Simpan data
+            const siswaId = select.getAttribute('data-siswa-id');
+            if (!absensiData[siswaId]) absensiData[siswaId] = {};
+            absensiData[siswaId].status = status;
+        }
+
+        // Update keterangan
+        document.querySelectorAll('.keterangan-input').forEach(input => {
+            input.addEventListener('input', function() {
+                const siswaId = this.getAttribute('data-siswa-id');
+                if (!absensiData[siswaId]) absensiData[siswaId] = {};
+                absensiData[siswaId].keterangan = this.value;
+            });
+        });
+
+        // Update mapel
+        document.querySelectorAll('.mapel-select').forEach(select => {
+            select.addEventListener('change', function() {
+                const siswaId = this.getAttribute('data-siswa-id');
+                const mapelId = this.value;
+                if (!absensiData[siswaId]) absensiData[siswaId] = {};
+                absensiData[siswaId].mapel_id = mapelId;
+            });
+        });
+
+        // Set semua status
+        function setAllStatus(status) {
+            const selects = document.querySelectorAll('.status-select');
+            selects.forEach(select => {
+                select.value = status;
+                updateRowStatus(select);
+            });
+        }
+
+        // Simpan absensi
+        function saveAbsensi() {
+            const form = document.getElementById('formAbsensi');
+            
+            // Hapus input lama
+            while (form.firstChild) {
+                form.removeChild(form.firstChild);
+            }
+            
+            // Tambah input hidden dasar
+            const inputs = [
+                { name: 'simpan_absensi', value: '1' },
+                { name: 'tanggal', value: '<?php echo $tanggal; ?>' }
+            ];
+            
+            inputs.forEach(data => {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = data.name;
+                input.value = data.value;
+                form.appendChild(input);
+            });
+            
+            // Tambah data siswa
+            let hasData = false;
+            document.querySelectorAll('.status-select').forEach(select => {
+                const siswaId = select.getAttribute('data-siswa-id');
+                const status = select.value;
+                
+                if (status) {
+                    hasData = true;
+                    
+                    // Status
+                    const statusInput = document.createElement('input');
+                    statusInput.type = 'hidden';
+                    statusInput.name = `siswa[${siswaId}][status]`;
+                    statusInput.value = status;
+                    form.appendChild(statusInput);
+                    
+                    // Keterangan
+                    const ketInput = document.createElement('input');
+                    ketInput.type = 'hidden';
+                    ketInput.name = `siswa[${siswaId}][keterangan]`;
+                    ketInput.value = absensiData[siswaId]?.keterangan || '';
+                    form.appendChild(ketInput);
+                    
+                    // Mapel
+                    const mapelInput = document.createElement('input');
+                    mapelInput.type = 'hidden';
+                    mapelInput.name = `siswa[${siswaId}][siswa_pelajaran_id]`;
+                    mapelInput.value = absensiData[siswaId]?.mapel_id || '';
+                    form.appendChild(mapelInput);
+                }
+            });
+            
+            if (!hasData) {
+                if (!confirm('Tidak ada data status yang dipilih. Lanjutkan?')) {
+                    return;
+                }
+            }
+            
+            form.submit();
+        }
+
         // Mobile Menu Toggle
         const menuToggle = document.getElementById('menuToggle');
         const menuClose = document.getElementById('menuClose');
@@ -1261,19 +1091,6 @@ $statistik['belum_absen'] = $statistik['total_siswa'] -
                 document.body.style.overflow = 'auto';
             });
         }
-
-        // Close menu when clicking on menu items (mobile)
-        document.querySelectorAll('.menu-item').forEach(item => {
-            item.addEventListener('click', () => {
-                if (window.innerWidth < 768) {
-                    mobileMenu.classList.remove('menu-open');
-                    if (menuOverlay) {
-                        menuOverlay.classList.remove('active');
-                    }
-                    document.body.style.overflow = 'auto';
-                }
-            });
-        });
         
         // Dropdown functionality
         document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
@@ -1285,13 +1102,11 @@ $statistik['belum_absen'] = $statistik['total_siswa'] -
                 const submenu = dropdownGroup.querySelector('.dropdown-submenu');
                 const arrow = this.querySelector('.arrow');
                 
-                // Toggle current dropdown
                 if (submenu.style.display === 'block') {
                     submenu.style.display = 'none';
                     arrow.style.transform = 'rotate(0deg)';
                     this.classList.remove('open');
                 } else {
-                    // Close other dropdowns
                     document.querySelectorAll('.dropdown-submenu').forEach(sm => {
                         sm.style.display = 'none';
                     });
@@ -1300,7 +1115,6 @@ $statistik['belum_absen'] = $statistik['total_siswa'] -
                         t.querySelector('.arrow').style.transform = 'rotate(0deg)';
                     });
                     
-                    // Open this dropdown
                     submenu.style.display = 'block';
                     arrow.style.transform = 'rotate(-90deg)';
                     this.classList.add('open');
@@ -1308,298 +1122,13 @@ $statistik['belum_absen'] = $statistik['total_siswa'] -
             });
         });
 
-        // Close dropdowns when clicking outside
-        document.addEventListener('click', function(e) {
-            if (!e.target.closest('.mb-1')) {
-                document.querySelectorAll('.dropdown-submenu').forEach(submenu => {
-                    submenu.style.display = 'none';
-                });
-                document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-                    toggle.classList.remove('open');
-                    toggle.querySelector('.arrow').style.transform = 'rotate(0deg)';
-                });
-            }
-        });
-
-        // Update kelas CSS saat status berubah
-        function updateRowStatus(selectElement) {
-            const status = selectElement.value;
-            const statusClasses = {
-                'hadir': 'status-hadir',
-                'izin': 'status-izin',
-                'sakit': 'status-sakit',
-                'alpha': 'status-alpha',
-                '': 'status-default'
-            };
-            
-            // Reset semua kelas status
-            Object.values(statusClasses).forEach(cls => {
-                selectElement.classList.remove(cls);
-            });
-            
-            // Tambah kelas baru
-            selectElement.classList.add(statusClasses[status] || 'status-default');
-        }
-
-        // Set semua siswa ke status tertentu (hanya yang aktif/enabled)
-        function setAllStatus(status) {
-            const selectElements = document.querySelectorAll('.status-select:not(:disabled)');
-            selectElements.forEach(select => {
-                select.value = status;
-                updateRowStatus(select);
-            });
-        }
-
-        // Inisialisasi semua select
-        document.querySelectorAll('.status-select').forEach(select => {
-            updateRowStatus(select);
-        });
-
-        // Konfirmasi sebelum submit
-        document.getElementById('formAbsensi')?.addEventListener('submit', function(e) {
-            const aktifElements = document.querySelectorAll('.status-select:not(:disabled)');
-            const belumDipilih = Array.from(aktifElements).filter(select => !select.value).length;
-            const disabledCount = document.querySelectorAll('.status-select:disabled').length;
-            
-            if (aktifElements.length === 0) {
-                alert('Tidak ada sesi yang sesuai filter untuk disimpan!');
-                e.preventDefault();
-                return;
-            }
-            
-            if (belumDipilih > 0) {
-                if (!confirm(`Masih ada ${belumDipilih} siswa yang belum dipilih statusnya. Lanjutkan simpan?`)) {
-                    e.preventDefault();
-                }
-            }
-            
-            if (disabledCount > 0) {
-                const filterHari = document.querySelector('input[name="filter_hari"]').value;
-                const filterJam = document.querySelector('input[name="filter_jam"]').value;
-                
-                if (filterHari || filterJam) {
-                    if (!confirm(`Ada ${disabledCount} sesi yang tidak sesuai filter (${filterHari} ${filterJam}) dan tidak akan disimpan. Lanjutkan?`)) {
-                        e.preventDefault();
-                    }
-                }
-            }
-        });
-
-        // Sembunyikan notifikasi sukses setelah 5 detik
+        // Auto hide success message
         setTimeout(function() {
             const successMessage = document.getElementById('successMessage');
             if (successMessage) {
                 successMessage.style.display = 'none';
             }
         }, 5000);
-
-        // Fungsi untuk menyembunyikan notifikasi sukses
-        function hideSuccessMessage() {
-            const successMessage = document.getElementById('successMessage');
-            if (successMessage) {
-                successMessage.style.display = 'none';
-            }
-        }
-
-        // Auto-fill hari berdasarkan tanggal
-        document.querySelector('input[name="tanggal"]').addEventListener('change', function() {
-            const date = new Date(this.value);
-            const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-            const hariIndo = days[date.getDay()];
-            
-            // Cari option hari yang sesuai
-            const hariSelect = document.querySelector('select[name="hari"]');
-            const options = hariSelect.options;
-            for (let i = 0; i < options.length; i++) {
-                if (options[i].value === hariIndo) {
-                    hariSelect.value = hariIndo;
-                    break;
-                }
-            }
-        });
-
-        // AJAX Search Functionality
-        let searchTimeout;
-        const searchInput = document.getElementById('searchSiswa');
-        const searchResults = document.getElementById('searchResults');
-        const selectedSiswaId = document.getElementById('selectedSiswaId');
-        const loadingSpinner = document.getElementById('loadingSpinner');
-        
-        if (searchInput) {
-            // Event untuk pencarian real-time
-            searchInput.addEventListener('input', function(e) {
-                clearTimeout(searchTimeout);
-                const query = this.value.trim();
-                
-                if (query.length < 2) {
-                    searchResults.classList.remove('active');
-                    return;
-                }
-                
-                // Tampilkan loading spinner
-                loadingSpinner.classList.add('active');
-                
-                searchTimeout = setTimeout(() => {
-                    searchSiswa(query);
-                }, 300);
-            });
-            
-            // Event untuk menutup dropdown saat klik di luar
-            document.addEventListener('click', function(e) {
-                if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
-                    searchResults.classList.remove('active');
-                }
-            });
-            
-            // Event untuk menampilkan dropdown saat fokus
-            searchInput.addEventListener('focus', function() {
-                const query = this.value.trim();
-                if (query.length >= 2 && !searchResults.classList.contains('active')) {
-                    searchSiswa(query);
-                }
-            });
-            
-            // Event untuk navigasi keyboard
-            searchInput.addEventListener('keydown', function(e) {
-                const items = searchResults.querySelectorAll('.search-result-item');
-                let activeIndex = -1;
-                
-                items.forEach((item, index) => {
-                    if (item.classList.contains('active')) {
-                        activeIndex = index;
-                    }
-                });
-                
-                if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    if (activeIndex < items.length - 1) {
-                        items.forEach(item => item.classList.remove('active'));
-                        items[activeIndex + 1].classList.add('active');
-                    } else if (activeIndex === -1 && items.length > 0) {
-                        items[0].classList.add('active');
-                    }
-                } else if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    if (activeIndex > 0) {
-                        items.forEach(item => item.classList.remove('active'));
-                        items[activeIndex - 1].classList.add('active');
-                    }
-                } else if (e.key === 'Enter' && activeIndex !== -1) {
-                    e.preventDefault();
-                    items[activeIndex].click();
-                } else if (e.key === 'Escape') {
-                    searchResults.classList.remove('active');
-                }
-            });
-        }
-        
-        // Fungsi untuk mencari siswa
-        function searchSiswa(query) {
-            if (!query || query.length < 2) return;
-            
-            const xhr = new XMLHttpRequest();
-            xhr.open('GET', `absensiSiswa.php?ajax_search=1&query=${encodeURIComponent(query)}`, true);
-            xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
-            
-            xhr.onload = function() {
-                loadingSpinner.classList.remove('active');
-                
-                if (xhr.status === 200) {
-                    try {
-                        const data = JSON.parse(xhr.responseText);
-                        displaySearchResults(data);
-                    } catch (e) {
-                        console.error('Error parsing JSON:', e);
-                        searchResults.innerHTML = '<div class="no-results">Terjadi kesalahan saat memproses data</div>';
-                        searchResults.classList.add('active');
-                    }
-                } else {
-                    searchResults.innerHTML = '<div class="no-results">Terjadi kesalahan saat mencari</div>';
-                    searchResults.classList.add('active');
-                }
-            };
-            
-            xhr.onerror = function() {
-                loadingSpinner.classList.remove('active');
-                searchResults.innerHTML = '<div class="no-results">Terjadi kesalahan koneksi</div>';
-                searchResults.classList.add('active');
-            };
-            
-            xhr.send();
-        }
-        
-        // Fungsi untuk menampilkan hasil pencarian
-        function displaySearchResults(results) {
-            if (!results || results.length === 0) {
-                searchResults.innerHTML = '<div class="no-results">Tidak ditemukan siswa yang sesuai</div>';
-                searchResults.classList.add('active');
-                return;
-            }
-            
-            let html = '';
-            results.forEach(siswa => {
-                html += `
-                    <div class="search-result-item" data-id="${siswa.id}" data-name="${siswa.nama_lengkap} - ${siswa.kelas_sekolah}">
-                        <div class="search-result-name">${siswa.nama_lengkap}</div>
-                        <div class="search-result-details">
-                            ${siswa.kelas_sekolah} | ${siswa.nama_pelajaran}
-                        </div>
-                    </div>
-                `;
-            });
-            
-            searchResults.innerHTML = html;
-            searchResults.classList.add('active');
-            
-            // Tambahkan event listener untuk setiap item hasil
-            const resultItems = searchResults.querySelectorAll('.search-result-item');
-            resultItems.forEach(item => {
-                item.addEventListener('click', function() {
-                    const id = this.getAttribute('data-id');
-                    const name = this.getAttribute('data-name');
-                    
-                    selectSiswa(id, name);
-                    searchResults.classList.remove('active');
-                    
-                    // Tambahkan tombol clear jika belum ada
-                    const searchContainer = document.querySelector('.search-container');
-                    let clearBtn = searchContainer.querySelector('.clear-search');
-                    
-                    if (!clearBtn) {
-                        clearBtn = document.createElement('button');
-                        clearBtn.type = 'button';
-                        clearBtn.className = 'clear-search';
-                        clearBtn.innerHTML = '<i class="fas fa-times"></i>';
-                        clearBtn.onclick = clearSiswaSearch;
-                        searchContainer.appendChild(clearBtn);
-                    }
-                });
-                
-                // Hover effect
-                item.addEventListener('mouseenter', function() {
-                    resultItems.forEach(i => i.classList.remove('active'));
-                    this.classList.add('active');
-                });
-            });
-        }
-        
-        // Fungsi untuk memilih siswa
-        function selectSiswa(id, name) {
-            searchInput.value = name;
-            selectedSiswaId.value = id;
-        }
-        
-        // Fungsi untuk menghapus pilihan siswa
-        function clearSiswaSearch() {
-            searchInput.value = '';
-            selectedSiswaId.value = '';
-            searchResults.classList.remove('active');
-            
-            const clearBtn = document.querySelector('.clear-search');
-            if (clearBtn) {
-                clearBtn.remove();
-            }
-        }
     </script>
 </body>
 </html>
