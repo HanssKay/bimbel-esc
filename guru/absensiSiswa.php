@@ -604,6 +604,21 @@ if (!empty($tanggal)) {
             min-width: 150px;
             max-width: 200px;
         }
+
+        /* Loading indicator */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(0,0,0,.1);
+            border-radius: 50%;
+            border-top-color: #3b82f6;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 
@@ -729,15 +744,17 @@ if (!empty($tanggal)) {
                 </div>
             <?php endif; ?>
 
-            <!-- Filter Section -->
+            <!-- Filter Section dengan Auto Reload -->
             <div class="bg-white shadow rounded-lg p-6 mb-6">
-                <form method="GET" class="flex flex-col md:flex-row gap-4">
+                <form method="GET" id="filterForm" class="flex flex-col md:flex-row gap-4">
                     <div class="flex-1">
                         <label class="block text-sm font-medium text-gray-700 mb-1">
                             <i class="fas fa-calendar mr-1"></i> Tanggal Absensi
                         </label>
                         <input type="date" name="tanggal" value="<?php echo $tanggal; ?>"
-                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                               id="tanggalInput"
+                               onchange="submitForm()"> <!-- Auto submit saat tanggal berubah -->
                     </div>
                     <div class="flex-1">
                         <label class="block text-sm font-medium text-gray-700 mb-1">
@@ -746,17 +763,23 @@ if (!empty($tanggal)) {
                         <div class="search-container">
                             <input type="text" name="search" value="<?php echo htmlspecialchars($search_query); ?>"
                                    placeholder="Ketik nama siswa..." 
-                                   class="search-input">
+                                   class="search-input"
+                                   id="searchInput"
+                                   autocomplete="off"
+                                   onkeyup="handleSearch(event)"> <!-- Handle pencarian -->
                             <?php if (!empty($search_query)): ?>
-                                <a href="absensiSiswa.php?tanggal=<?php echo $tanggal; ?>" class="clear-search">
+                                <a href="absensiSiswa.php?tanggal=<?php echo $tanggal; ?>" class="clear-search" id="clearSearch">
                                     <i class="fas fa-times"></i>
                                 </a>
                             <?php endif; ?>
                             <i class="fas fa-search search-icon"></i>
+                            <div id="searchLoading" class="loading-spinner" style="display: none;">
+                                <div class="loading"></div>
+                            </div>
                         </div>
                     </div>
                     <div class="flex items-end">
-                        <button type="submit" 
+                        <button type="submit" id="submitBtn"
                                 class="w-full md:w-auto px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
                             <i class="fas fa-search mr-2"></i> Tampilkan
                         </button>
@@ -935,6 +958,7 @@ if (!empty($tanggal)) {
     <script>
         // Data storage untuk absensi
         let absensiData = {};
+        let searchTimeout = null;
         
         // Inisialisasi data dari PHP
         <?php foreach ($daftar_siswa as $siswa): ?>
@@ -944,6 +968,32 @@ if (!empty($tanggal)) {
                 mapel_id: '<?php echo $siswa['selected_mapel_id']; ?>'
             };
         <?php endforeach; ?>
+
+        // Fungsi untuk submit form
+        function submitForm() {
+            document.getElementById('filterForm').submit();
+        }
+
+        // Handle pencarian dengan delay
+        function handleSearch(event) {
+            const searchInput = document.getElementById('searchInput');
+            const loading = document.getElementById('searchLoading');
+            
+            // Clear timeout sebelumnya
+            if (searchTimeout) {
+                clearTimeout(searchTimeout);
+            }
+            
+            // Tampilkan loading
+            if (loading) {
+                loading.style.display = 'block';
+            }
+            
+            // Set timeout baru (500ms delay)
+            searchTimeout = setTimeout(function() {
+                submitForm();
+            }, 500);
+        }
 
         // Update class saat status berubah
         function updateRowStatus(select) {
