@@ -898,16 +898,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
                             <label class="font-medium text-gray-700 text-sm md:text-base">Bulan:</label>
                         </div>
                         <div class="md:ml-4">
-                            <select id="monthSelect" onchange="changeMonth(this.value)"
-                                class="w-full md:w-auto border rounded-lg px-3 md:px-4 py-2.5 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base">
-                                <?php for ($i = 0; $i < 6; $i++):
-                                    $date = date('Y-m', strtotime("-$i months"));
-                                    $selected = ($date == $selected_month) ? 'selected' : ''; ?>
-                                    <option value="<?= $date ?>" <?= $selected ?>>
-                                        <?= date('F Y', strtotime($date . '-01')) ?>
-                                    </option>
-                                <?php endfor; ?>
-                            </select>
+                            <input type="month" id="monthInput" value="<?= $selected_month ?>" min="2020-01"
+                                max="<?= date('Y-m', strtotime('+2 years')) ?>" onchange="changeMonth(this.value)"
+                                class="flex-1 md:w-64 border rounded-lg px-3 py-2.5 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
                         </div>
                     </div>
 
