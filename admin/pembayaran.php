@@ -324,10 +324,10 @@ if ($siswa_result) {
 // AJAX Handler untuk autocomplete
 if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
     header('Content-Type: application/json');
-    
+
     $search = isset($_GET['search']) ? $conn->real_escape_string($_GET['search']) : '';
     $filtered_siswa = [];
-    
+
     if (!empty($search)) {
         $sql_search = "SELECT 
             s.id,
@@ -350,7 +350,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
         GROUP BY s.id
         ORDER BY s.nama_lengkap
         LIMIT 20";
-        
+
         $result_search = $conn->query($sql_search);
         if ($result_search) {
             $filtered_siswa = $result_search->fetch_all(MYSQLI_ASSOC);
@@ -358,7 +358,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
     } else {
         $filtered_siswa = $siswa_list;
     }
-    
+
     echo json_encode($filtered_siswa);
     exit();
 }
@@ -904,7 +904,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
                                     $date = date('Y-m', strtotime("-$i months"));
                                     $selected = ($date == $selected_month) ? 'selected' : ''; ?>
                                     <option value="<?= $date ?>" <?= $selected ?>>
-                                        <?= date('F Y', strtotime($date . '-01')) ?></option>
+                                        <?= date('F Y', strtotime($date . '-01')) ?>
+                                    </option>
                                 <?php endfor; ?>
                             </select>
                         </div>
@@ -935,7 +936,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
                         <div>
                             <p class="text-xs md:text-sm text-gray-600">Terkumpul</p>
                             <h3 class="text-lg md:text-2xl font-bold text-gray-800">Rp
-                                <?= number_format($total_dibayar, 0, ',', '.') ?></h3>
+                                <?= number_format($total_dibayar, 0, ',', '.') ?>
+                            </h3>
                         </div>
                     </div>
                 </div>
@@ -1049,10 +1051,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
                                                 <div class="ml-2 md:ml-4">
                                                     <div
                                                         class="text-sm font-medium text-gray-900 truncate max-w-[120px] md:max-w-none">
-                                                        <?= htmlspecialchars($p['nama_lengkap']) ?></div>
+                                                        <?= htmlspecialchars($p['nama_lengkap']) ?>
+                                                    </div>
                                                     <div class="text-xs text-gray-500"><?= $p['kelas'] ?></div>
                                                     <div class="text-xs text-gray-500 mt-0.5 hidden sm:block">
-                                                        <?= $p['jenis_kelas'] ?> (<?= $p['tingkat'] ?>)</div>
+                                                        <?= $p['jenis_kelas'] ?> (<?= $p['tingkat'] ?>)
+                                                    </div>
                                                     <!-- Mobile tagihan info -->
                                                     <div class="text-xs text-gray-700 mt-1 sm:hidden">
                                                         <div>Tagihan: <span class="font-semibold">Rp
@@ -1096,7 +1100,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
                                         <td class="px-3 md:px-6 py-3 md:py-4 hidden md:table-cell">
                                             <div class="space-y-1">
                                                 <div class="text-sm font-medium text-gray-900 truncate max-w-[150px]">
-                                                    <?= htmlspecialchars($p['nama_ortu'] ?? 'Tidak ada data') ?></div>
+                                                    <?= htmlspecialchars($p['nama_ortu'] ?? 'Tidak ada data') ?>
+                                                </div>
                                                 <div class="text-xs text-gray-500"><i
                                                         class="fas fa-phone mr-1"></i><?= $p['no_hp'] ?? '-' ?></div>
                                             </div>
@@ -1171,8 +1176,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
                     </label>
 
                     <div class="autocomplete-container">
-                        <input type="text" id="searchSiswa" class="autocomplete-input"
-                            placeholder="Ketik nama siswa..." autocomplete="off">
+                        <input type="text" id="searchSiswa" class="autocomplete-input" placeholder="Ketik nama siswa..."
+                            autocomplete="off">
                         <input type="hidden" name="siswa_id" id="selectedSiswaId">
                         <button type="button" id="clearSearch" class="autocomplete-clear">
                             <i class="fas fa-times"></i>
@@ -1205,14 +1210,13 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
                     <label class="block text-gray-700 mb-1 md:mb-2 font-medium text-sm md:text-base">
                         Bulan Tagihan: <span class="text-red-500">*</span>
                     </label>
-                    <select name="bulan" required
-                        class="w-full border rounded-lg px-3 md:px-4 py-2.5 md:py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base">
-                        <?php for ($i = 0; $i < 6; $i++):
-                            $date = date('Y-m', strtotime("+$i months")); ?>
-                            <option value="<?= $date ?>" <?= ($date == $current_month) ? 'selected' : '' ?>>
-                                <?= date('F Y', strtotime($date . '-01')) ?></option>
-                        <?php endfor; ?>
-                    </select>
+                    <input type="month" name="bulan" value="<?= date('Y-m') ?>" required
+                        class="w-full border rounded-lg px-3 md:px-4 py-2.5 md:py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base"
+                        min="2020-01" max="<?= date('Y-m', strtotime('+1 year')) ?>">
+                    <p class="text-xs text-gray-500 mt-1">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        Format: Bulan-Tahun. Bisa memilih bulan/tahun sebelumnya.
+                    </p>
                 </div>
 
                 <!-- Status Pembayaran -->
@@ -1498,7 +1502,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
 
         function openDetailModal(paymentData) {
             console.log('Payment Data:', paymentData);
-            
+
             // Status badge
             let statusBadge = '';
             switch (paymentData.status) {
@@ -1670,7 +1674,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
         // Fungsi filter siswa dengan AJAX
         function filterSiswa(query) {
             const dropdown = document.getElementById('siswaDropdown');
-            
+
             // Tampilkan loading
             dropdown.innerHTML = '<div class="no-results"><span class="spinner"></span> Mencari...</div>';
             dropdown.style.display = 'block';
@@ -1793,7 +1797,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
             // Tampilkan warning jika tidak ada pendaftaran aktif
             const totalPendaftaran = parseInt(data.totalPendaftaran);
             if (totalPendaftaran === 0) {
-                document.getElementById('selectedSiswaPendaftaran').innerHTML = 
+                document.getElementById('selectedSiswaPendaftaran').innerHTML =
                     '<span style="color:#dc2626;"><i class="fas fa-exclamation-triangle mr-1"></i>Tidak ada pendaftaran aktif!</span>';
             }
 
