@@ -1354,21 +1354,6 @@ for ($i = 0; $i < 12; $i++) {
                         ` : ''}
                     </div>
                 </div>
-                
-                <!-- Informasi Program -->
-                <div class="mt-6 pt-6 border-t border-gray-200">
-                    <h4 class="font-bold text-gray-800 mb-3">Informasi Program</h4>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div class="bg-gray-50 p-3 rounded-lg">
-                            <p class="text-xs text-gray-600 mb-1">Jenis Kelas</p>
-                            <p class="font-medium">${paymentData.jenis_kelas}</p>
-                        </div>
-                        <div class="bg-gray-50 p-3 rounded-lg">
-                            <p class="text-xs text-gray-600 mb-1">Tahun Ajaran</p>
-                            <p class="font-medium">${paymentData.tahun_ajaran || '-'}</p>
-                        </div>
-                    </div>
-                </div>
             `;
 
             document.getElementById('detailContent').innerHTML = html;
