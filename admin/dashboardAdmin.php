@@ -166,11 +166,11 @@ try {
         }
     }
 
-// 4. Guru Aktif - NO GROUP BY VERSION
-$guru_aktif = [];
+    // 4. Guru Aktif - NO GROUP BY VERSION
+    $guru_aktif = [];
 
-// Langkah 1: Ambil data guru aktif saja dulu
-$sql_guru = "SELECT 
+    // Langkah 1: Ambil data guru aktif saja dulu
+    $sql_guru = "SELECT 
             g.id,
             g.user_id,
             g.bidang_keahlian,
@@ -186,37 +186,37 @@ $sql_guru = "SELECT
             ORDER BY u.full_name ASC 
             LIMIT 3";
 
-$result_guru = $conn->query($sql_guru);
+    $result_guru = $conn->query($sql_guru);
 
-if ($result_guru && $result_guru->num_rows > 0) {
-    while ($guru_row = $result_guru->fetch_assoc()) {
-        // Langkah 2: Hitung jumlah siswa untuk masing-masing guru
-        $guru_id = $guru_row['id'];
-        
-        // Query hitung siswa - VERSION 1: Simple count
-        $sql_count = "SELECT COUNT(DISTINCT sp.siswa_id) as jumlah_siswa 
+    if ($result_guru && $result_guru->num_rows > 0) {
+        while ($guru_row = $result_guru->fetch_assoc()) {
+            // Langkah 2: Hitung jumlah siswa untuk masing-masing guru
+            $guru_id = $guru_row['id'];
+
+            // Query hitung siswa - VERSION 1: Simple count
+            $sql_count = "SELECT COUNT(DISTINCT sp.siswa_id) as jumlah_siswa 
                      FROM siswa_pelajaran sp
                      WHERE sp.guru_id = $guru_id 
                      AND sp.status = 'aktif'";
-        
-        $result_count = $conn->query($sql_count);
-        $jumlah_siswa = 0;
-        
-        if ($result_count && $result_count->num_rows > 0) {
-            $count_row = $result_count->fetch_assoc();
-            $jumlah_siswa = $count_row['jumlah_siswa'];
+
+            $result_count = $conn->query($sql_count);
+            $jumlah_siswa = 0;
+
+            if ($result_count && $result_count->num_rows > 0) {
+                $count_row = $result_count->fetch_assoc();
+                $jumlah_siswa = $count_row['jumlah_siswa'];
+            }
+
+            // Tambahkan ke array
+            $guru_row['jumlah_siswa'] = $jumlah_siswa;
+            $guru_aktif[] = $guru_row;
         }
-        
-        // Tambahkan ke array
-        $guru_row['jumlah_siswa'] = $jumlah_siswa;
-        $guru_aktif[] = $guru_row;
     }
-}
 
 
- // 5. Pendaftaran Terbaru - FIXED VERSION
-$pendaftaran_terbaru = [];
-$sql = "SELECT ps.*, s.nama_lengkap, s.kelas,
+    // 5. Pendaftaran Terbaru - FIXED VERSION
+    $pendaftaran_terbaru = [];
+    $sql = "SELECT ps.*, s.nama_lengkap, s.kelas,
         GROUP_CONCAT(DISTINCT sp.nama_pelajaran SEPARATOR ', ') as mata_pelajaran,
         u.full_name as nama_guru
         FROM pendaftaran_siswa ps
@@ -668,9 +668,6 @@ $sql = "SELECT ps.*, s.nama_lengkap, s.kelas,
                                                     </p>
                                                 </div>
                                                 <div class="text-right">
-                                                    <div class="text-sm font-semibold text-gray-900">
-                                                        <?php echo $guru['jumlah_siswa'] ?? 0; ?> siswa
-                                                    </div>
                                                     <div class="text-xs text-gray-500">
                                                         Pengalaman: <?php echo $guru['pengalaman_tahun'] ?? 0; ?> tahun
                                                     </div>
@@ -683,7 +680,8 @@ $sql = "SELECT ps.*, s.nama_lengkap, s.kelas,
                                         <i class="fas fa-chalkboard-teacher text-2xl mb-2"></i>
                                         <p>Tidak ada guru aktif</p>
                                         <p class="text-xs mt-1">Debug:
-                                            <?php echo htmlspecialchars($conn->error ?? 'No error'); ?></p>
+                                            <?php echo htmlspecialchars($conn->error ?? 'No error'); ?>
+                                        </p>
                                     </li>
                                 <?php endif; ?>
                             </ul>
