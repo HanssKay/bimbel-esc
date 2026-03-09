@@ -468,6 +468,23 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
             box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
         }
 
+        /* Dropdown styles */
+        .dropdown-submenu {
+            display: none;
+            max-height: 500px;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .dropdown-submenu[style*="display: block"] {
+            display: block;
+        }
+
+        .dropdown-toggle.open .arrow {
+            transform: rotate(90deg);
+        }
+
+
         @keyframes modalFadeIn {
             from {
                 opacity: 0;
@@ -869,24 +886,24 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
         <div class="container mx-auto p-3 md:p-6">
             <!-- Messages -->
             <?php if ($success_msg): ?>
-                <div
-                    class="mb-4 p-3 md:p-4 bg-green-50 border border-green-200 text-green-700 rounded-lg flex items-center">
-                    <i class="fas fa-check-circle text-green-500 mr-3 text-lg"></i>
-                    <div>
-                        <p class="font-medium">Sukses!</p>
-                        <p class="text-sm"><?= $success_msg ?></p>
+                    <div
+                        class="mb-4 p-3 md:p-4 bg-green-50 border border-green-200 text-green-700 rounded-lg flex items-center">
+                        <i class="fas fa-check-circle text-green-500 mr-3 text-lg"></i>
+                        <div>
+                            <p class="font-medium">Sukses!</p>
+                            <p class="text-sm"><?= $success_msg ?></p>
+                        </div>
                     </div>
-                </div>
             <?php endif; ?>
 
             <?php if ($error_msg): ?>
-                <div class="mb-4 p-3 md:p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg flex items-center">
-                    <i class="fas fa-exclamation-circle text-red-500 mr-3 text-lg"></i>
-                    <div>
-                        <p class="font-medium">Terjadi Kesalahan!</p>
-                        <p class="text-sm"><?= $error_msg ?></p>
+                    <div class="mb-4 p-3 md:p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg flex items-center">
+                        <i class="fas fa-exclamation-circle text-red-500 mr-3 text-lg"></i>
+                        <div>
+                            <p class="font-medium">Terjadi Kesalahan!</p>
+                            <p class="text-sm"><?= $error_msg ?></p>
+                        </div>
                     </div>
-                </div>
             <?php endif; ?>
 
             <!-- Month Selector -->
@@ -981,169 +998,169 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
                             <?php if (empty($pembayaran_list)): ?>
-                                <tr>
-                                    <td colspan="5" class="px-6 py-12 text-center text-gray-500">
-                                        <div class="flex flex-col items-center">
-                                            <i class="fas fa-inbox text-3xl md:text-4xl text-gray-300 mb-3 md:mb-4"></i>
-                                            <p class="text-base md:text-lg font-medium text-gray-400 mb-1 md:mb-2">Belum ada
-                                                pembayaran untuk bulan ini</p>
-                                            <p class="text-xs md:text-sm text-gray-400 max-w-xs">Gunakan tombol "Input
-                                                Pembayaran Baru" untuk mencatat pembayaran</p>
-                                        </div>
-                                    </td>
-                                </tr>
-                            <?php else: ?>
-                                <?php foreach ($pembayaran_list as $p): ?>
-                                    <?php
-                                    // Status badge
-                                    $status_badge = '';
-                                    switch ($p['status']) {
-                                        case 'lunas':
-                                            $status_badge = '<span class="badge badge-success text-xs flex items-center"><span class="status-indicator status-lunas"></span>LUNAS</span>';
-                                            break;
-                                        case 'belum_bayar':
-                                            $status_badge = '<span class="badge badge-danger text-xs flex items-center"><span class="status-indicator status-belum"></span>BELUM</span>';
-                                            break;
-                                        case 'dibebaskan':
-                                            $status_badge = '<span class="badge badge-warning text-xs flex items-center"><span class="status-indicator status-dibebaskan"></span>BEBAS</span>';
-                                            break;
-                                    }
-
-                                    // Metode badge
-                                    $metode_badge = '';
-                                    if ($p['metode_bayar']) {
-                                        switch ($p['metode_bayar']) {
-                                            case 'cash':
-                                                $metode_badge = '<span class="badge badge-cash text-xs">Cash</span>';
-                                                break;
-                                            case 'transfer':
-                                                $metode_badge = '<span class="badge badge-transfer text-xs">Transfer</span>';
-                                                break;
-                                            case 'qris':
-                                                $metode_badge = '<span class="badge badge-qris text-xs">QRIS</span>';
-                                                break;
-                                            case 'debit':
-                                                $metode_badge = '<span class="badge badge-debit text-xs">Debit</span>';
-                                                break;
-                                            case 'credit':
-                                                $metode_badge = '<span class="badge badge-credit text-xs">Kredit</span>';
-                                                break;
-                                            case 'ewallet':
-                                                $metode_badge = '<span class="badge badge-ewallet text-xs">E-Wallet</span>';
-                                                break;
-                                        }
-                                    }
-                                    ?>
-                                    <tr class="hover:bg-gray-50">
-                                        <td class="px-3 md:px-6 py-3 md:py-4">
-                                            <div class="flex items-center">
-                                                <div
-                                                    class="flex-shrink-0 h-8 w-8 md:h-10 md:w-10 bg-gradient-to-r from-blue-100 to-blue-50 rounded-full flex items-center justify-center">
-                                                    <i class="fas fa-user-graduate text-blue-600 text-sm md:text-base"></i>
-                                                </div>
-                                                <div class="ml-2 md:ml-4">
-                                                    <div
-                                                        class="text-sm font-medium text-gray-900 truncate max-w-[120px] md:max-w-none">
-                                                        <?= htmlspecialchars($p['nama_lengkap']) ?>
-                                                    </div>
-                                                    <div class="text-xs text-gray-500"><?= $p['kelas'] ?></div>
-                                                    <div class="text-xs text-gray-500 mt-0.5 hidden sm:block">
-                                                        <?= $p['jenis_kelas'] ?> (<?= $p['tingkat'] ?>)
-                                                    </div>
-                                                    <!-- Mobile tagihan info -->
-                                                    <div class="text-xs text-gray-700 mt-1 sm:hidden">
-                                                        <div>Tagihan: <span class="font-semibold">Rp
-                                                                <?= number_format($p['nominal_tagihan'], 0, ',', '.') ?></span>
-                                                        </div>
-                                                        <div>Dibayar: <span class="font-semibold text-green-600">Rp
-                                                                <?= number_format($p['nominal_dibayar'], 0, ',', '.') ?></span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td class="px-3 md:px-6 py-3 md:py-4 hidden sm:table-cell">
-                                            <div class="space-y-1 md:space-y-2">
-                                                <div class="text-sm"><span class="text-gray-500">Tagihan:</span> <span
-                                                        class="font-semibold ml-1">Rp
-                                                        <?= number_format($p['nominal_tagihan'], 0, ',', '.') ?></span></div>
-                                                <div class="text-sm"><span class="text-gray-500">Dibayar:</span> <span
-                                                        class="font-semibold ml-1 text-green-600">Rp
-                                                        <?= number_format($p['nominal_dibayar'], 0, ',', '.') ?></span></div>
-                                                <div
-                                                    class="text-xs px-2 py-1 rounded-full inline-block <?= $p['sisa_tagihan'] > 0 ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700' ?>">
-                                                    <i
-                                                        class="fas fa-<?= $p['sisa_tagihan'] > 0 ? 'exclamation-circle' : 'check-circle' ?> mr-1"></i>
-                                                    Sisa: Rp <?= number_format($p['sisa_tagihan'], 0, ',', '.') ?>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td class="px-3 md:px-6 py-3 md:py-4">
-                                            <div class="space-y-1 md:space-y-2">
-                                                <div><?= $status_badge ?></div>
-                                                <?php if ($p['metode_bayar']): ?>
-                                                    <div class="text-xs text-gray-500 hidden md:block"><?= $metode_badge ?></div>
-                                                <?php endif; ?>
-                                                <?php if ($p['status'] == 'lunas' && $p['tgl_bayar_formatted']): ?>
-                                                    <div class="text-xs text-gray-500 hidden md:flex items-center"><i
-                                                            class="far fa-calendar mr-1"></i><?= $p['tgl_bayar_formatted'] ?></div>
-                                                <?php endif; ?>
-                                            </div>
-                                        </td>
-                                        <td class="px-3 md:px-6 py-3 md:py-4 hidden md:table-cell">
-                                            <div class="space-y-1">
-                                                <div class="text-sm font-medium text-gray-900 truncate max-w-[150px]">
-                                                    <?= htmlspecialchars($p['nama_ortu'] ?? 'Tidak ada data') ?>
-                                                </div>
-                                                <div class="text-xs text-gray-500"><i
-                                                        class="fas fa-phone mr-1"></i><?= $p['no_hp'] ?? '-' ?></div>
-                                            </div>
-                                        </td>
-                                        <td class="px-3 md:px-6 py-3 md:py-4 whitespace-nowrap">
-                                            <div class="mobile-action-buttons gap-1 flex">
-                                                <!-- Tombol Detail -->
-                                                <button onclick="openDetailModal(<?= htmlspecialchars(json_encode($p)) ?>)"
-                                                    class="action-btn bg-blue-50 text-blue-600 hover:bg-blue-100 touch-target"
-                                                    title="Detail">
-                                                    <i class="fas fa-eye"></i>
-                                                </button>
-
-                                                <!-- Tombol Hapus -->
-                                                <button
-                                                    onclick="confirmDelete(<?= $p['id'] ?>, '<?= htmlspecialchars($p['nama_lengkap']) ?>')"
-                                                    class="action-btn bg-red-50 text-red-600 hover:bg-red-100 touch-target"
-                                                    title="Hapus">
-                                                    <i class="fas fa-trash"></i>
-                                                </button>
+                                    <tr>
+                                        <td colspan="5" class="px-6 py-12 text-center text-gray-500">
+                                            <div class="flex flex-col items-center">
+                                                <i class="fas fa-inbox text-3xl md:text-4xl text-gray-300 mb-3 md:mb-4"></i>
+                                                <p class="text-base md:text-lg font-medium text-gray-400 mb-1 md:mb-2">Belum ada
+                                                    pembayaran untuk bulan ini</p>
+                                                <p class="text-xs md:text-sm text-gray-400 max-w-xs">Gunakan tombol "Input
+                                                    Pembayaran Baru" untuk mencatat pembayaran</p>
                                             </div>
                                         </td>
                                     </tr>
-                                <?php endforeach; ?>
+                            <?php else: ?>
+                                    <?php foreach ($pembayaran_list as $p): ?>
+                                            <?php
+                                            // Status badge
+                                            $status_badge = '';
+                                            switch ($p['status']) {
+                                                case 'lunas':
+                                                    $status_badge = '<span class="badge badge-success text-xs flex items-center"><span class="status-indicator status-lunas"></span>LUNAS</span>';
+                                                    break;
+                                                case 'belum_bayar':
+                                                    $status_badge = '<span class="badge badge-danger text-xs flex items-center"><span class="status-indicator status-belum"></span>BELUM</span>';
+                                                    break;
+                                                case 'dibebaskan':
+                                                    $status_badge = '<span class="badge badge-warning text-xs flex items-center"><span class="status-indicator status-dibebaskan"></span>BEBAS</span>';
+                                                    break;
+                                            }
+
+                                            // Metode badge
+                                            $metode_badge = '';
+                                            if ($p['metode_bayar']) {
+                                                switch ($p['metode_bayar']) {
+                                                    case 'cash':
+                                                        $metode_badge = '<span class="badge badge-cash text-xs">Cash</span>';
+                                                        break;
+                                                    case 'transfer':
+                                                        $metode_badge = '<span class="badge badge-transfer text-xs">Transfer</span>';
+                                                        break;
+                                                    case 'qris':
+                                                        $metode_badge = '<span class="badge badge-qris text-xs">QRIS</span>';
+                                                        break;
+                                                    case 'debit':
+                                                        $metode_badge = '<span class="badge badge-debit text-xs">Debit</span>';
+                                                        break;
+                                                    case 'credit':
+                                                        $metode_badge = '<span class="badge badge-credit text-xs">Kredit</span>';
+                                                        break;
+                                                    case 'ewallet':
+                                                        $metode_badge = '<span class="badge badge-ewallet text-xs">E-Wallet</span>';
+                                                        break;
+                                                }
+                                            }
+                                            ?>
+                                            <tr class="hover:bg-gray-50">
+                                                <td class="px-3 md:px-6 py-3 md:py-4">
+                                                    <div class="flex items-center">
+                                                        <div
+                                                            class="flex-shrink-0 h-8 w-8 md:h-10 md:w-10 bg-gradient-to-r from-blue-100 to-blue-50 rounded-full flex items-center justify-center">
+                                                            <i class="fas fa-user-graduate text-blue-600 text-sm md:text-base"></i>
+                                                        </div>
+                                                        <div class="ml-2 md:ml-4">
+                                                            <div
+                                                                class="text-sm font-medium text-gray-900 truncate max-w-[120px] md:max-w-none">
+                                                                <?= htmlspecialchars($p['nama_lengkap']) ?>
+                                                            </div>
+                                                            <div class="text-xs text-gray-500"><?= $p['kelas'] ?></div>
+                                                            <div class="text-xs text-gray-500 mt-0.5 hidden sm:block">
+                                                                <?= $p['jenis_kelas'] ?> (<?= $p['tingkat'] ?>)
+                                                            </div>
+                                                            <!-- Mobile tagihan info -->
+                                                            <div class="text-xs text-gray-700 mt-1 sm:hidden">
+                                                                <div>Tagihan: <span class="font-semibold">Rp
+                                                                        <?= number_format($p['nominal_tagihan'], 0, ',', '.') ?></span>
+                                                                </div>
+                                                                <div>Dibayar: <span class="font-semibold text-green-600">Rp
+                                                                        <?= number_format($p['nominal_dibayar'], 0, ',', '.') ?></span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td class="px-3 md:px-6 py-3 md:py-4 hidden sm:table-cell">
+                                                    <div class="space-y-1 md:space-y-2">
+                                                        <div class="text-sm"><span class="text-gray-500">Tagihan:</span> <span
+                                                                class="font-semibold ml-1">Rp
+                                                                <?= number_format($p['nominal_tagihan'], 0, ',', '.') ?></span></div>
+                                                        <div class="text-sm"><span class="text-gray-500">Dibayar:</span> <span
+                                                                class="font-semibold ml-1 text-green-600">Rp
+                                                                <?= number_format($p['nominal_dibayar'], 0, ',', '.') ?></span></div>
+                                                        <div
+                                                            class="text-xs px-2 py-1 rounded-full inline-block <?= $p['sisa_tagihan'] > 0 ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700' ?>">
+                                                            <i
+                                                                class="fas fa-<?= $p['sisa_tagihan'] > 0 ? 'exclamation-circle' : 'check-circle' ?> mr-1"></i>
+                                                            Sisa: Rp <?= number_format($p['sisa_tagihan'], 0, ',', '.') ?>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td class="px-3 md:px-6 py-3 md:py-4">
+                                                    <div class="space-y-1 md:space-y-2">
+                                                        <div><?= $status_badge ?></div>
+                                                        <?php if ($p['metode_bayar']): ?>
+                                                                <div class="text-xs text-gray-500 hidden md:block"><?= $metode_badge ?></div>
+                                                        <?php endif; ?>
+                                                        <?php if ($p['status'] == 'lunas' && $p['tgl_bayar_formatted']): ?>
+                                                                <div class="text-xs text-gray-500 hidden md:flex items-center"><i
+                                                                        class="far fa-calendar mr-1"></i><?= $p['tgl_bayar_formatted'] ?></div>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                </td>
+                                                <td class="px-3 md:px-6 py-3 md:py-4 hidden md:table-cell">
+                                                    <div class="space-y-1">
+                                                        <div class="text-sm font-medium text-gray-900 truncate max-w-[150px]">
+                                                            <?= htmlspecialchars($p['nama_ortu'] ?? 'Tidak ada data') ?>
+                                                        </div>
+                                                        <div class="text-xs text-gray-500"><i
+                                                                class="fas fa-phone mr-1"></i><?= $p['no_hp'] ?? '-' ?></div>
+                                                    </div>
+                                                </td>
+                                                <td class="px-3 md:px-6 py-3 md:py-4 whitespace-nowrap">
+                                                    <div class="mobile-action-buttons gap-1 flex">
+                                                        <!-- Tombol Detail -->
+                                                        <button onclick="openDetailModal(<?= htmlspecialchars(json_encode($p)) ?>)"
+                                                            class="action-btn bg-blue-50 text-blue-600 hover:bg-blue-100 touch-target"
+                                                            title="Detail">
+                                                            <i class="fas fa-eye"></i>
+                                                        </button>
+
+                                                        <!-- Tombol Hapus -->
+                                                        <button
+                                                            onclick="confirmDelete(<?= $p['id'] ?>, '<?= htmlspecialchars($p['nama_lengkap']) ?>')"
+                                                            class="action-btn bg-red-50 text-red-600 hover:bg-red-100 touch-target"
+                                                            title="Hapus">
+                                                            <i class="fas fa-trash"></i>
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                    <?php endforeach; ?>
                             <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
 
                 <?php if (!empty($pembayaran_list)): ?>
-                    <div
-                        class="px-4 md:px-6 py-3 md:py-4 border-t border-gray-200 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs md:text-sm text-gray-500">
-                        <div class="mb-2 sm:mb-0">Menampilkan <span
-                                class="font-semibold"><?= count($pembayaran_list) ?></span> pembayaran</div>
-                        <div class="flex items-center space-x-3 md:space-x-4">
-                            <div class="flex items-center space-x-1 md:space-x-2">
-                                <div class="w-2 h-2 md:w-3 md:h-3 bg-green-500 rounded-full"></div>
-                                <span>Lunas: <?= $lunas_count ?></span>
-                            </div>
-                            <div class="flex items-center space-x-1 md:space-x-2">
-                                <div class="w-2 h-2 md:w-3 md:h-3 bg-red-500 rounded-full"></div>
-                                <span>Belum: <?= $belum_count ?></span>
-                            </div>
-                            <div class="hidden md:flex items-center space-x-2">
-                                <div class="w-3 h-3 bg-yellow-500 rounded-full"></div>
-                                <span>Bebas: <?= $bebas_count ?></span>
+                        <div
+                            class="px-4 md:px-6 py-3 md:py-4 border-t border-gray-200 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs md:text-sm text-gray-500">
+                            <div class="mb-2 sm:mb-0">Menampilkan <span
+                                    class="font-semibold"><?= count($pembayaran_list) ?></span> pembayaran</div>
+                            <div class="flex items-center space-x-3 md:space-x-4">
+                                <div class="flex items-center space-x-1 md:space-x-2">
+                                    <div class="w-2 h-2 md:w-3 md:h-3 bg-green-500 rounded-full"></div>
+                                    <span>Lunas: <?= $lunas_count ?></span>
+                                </div>
+                                <div class="flex items-center space-x-1 md:space-x-2">
+                                    <div class="w-2 h-2 md:w-3 md:h-3 bg-red-500 rounded-full"></div>
+                                    <span>Belum: <?= $belum_count ?></span>
+                                </div>
+                                <div class="hidden md:flex items-center space-x-2">
+                                    <div class="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                                    <span>Bebas: <?= $bebas_count ?></span>
+                                </div>
                             </div>
                         </div>
-                    </div>
                 <?php endif; ?>
             </div>
         </div>
@@ -1220,7 +1237,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
                     <select name="status" id="statusSelect" required onchange="handleStatusChange(this.value)"
                         class="w-full border rounded-lg px-3 md:px-4 py-2.5 md:py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base">
                         <?php foreach ($STATUS_PEMBAYARAN as $value => $label): ?>
-                            <option value="<?= $value ?>"><?= $label ?></option>
+                                <option value="<?= $value ?>"><?= $label ?></option>
                         <?php endforeach; ?>
                     </select>
                     <div id="statusHint" class="form-hint hint-info mt-1">
@@ -1272,7 +1289,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
                         class="w-full border rounded-lg px-3 md:px-4 py-2.5 md:py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base">
                         <option value="">- Pilih Metode Bayar -</option>
                         <?php foreach ($METODE_BAYAR as $value => $label): ?>
-                            <option value="<?= $value ?>"><?= $label ?></option>
+                                <option value="<?= $value ?>"><?= $label ?></option>
                         <?php endforeach; ?>
                     </select>
                     <div id="metodeHint" class="form-hint hint-info mt-1">
@@ -1380,10 +1397,10 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
                             <span id="detailTanggalMulai" class="detail-value text-xs md:text-sm"></span>
                         </div>
                         <?php if (!empty($p['tanggal_selesai'])): ?>
-                            <div class="detail-item">
-                                <span class="detail-label text-xs md:text-sm">Tanggal Selesai</span>
-                                <span id="detailTanggalSelesai" class="detail-value text-xs md:text-sm"></span>
-                            </div>
+                                <div class="detail-item">
+                                    <span class="detail-label text-xs md:text-sm">Tanggal Selesai</span>
+                                    <span id="detailTanggalSelesai" class="detail-value text-xs md:text-sm"></span>
+                                </div>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -2005,6 +2022,52 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
                 document.body.style.overflow = 'auto';
             });
         });
+
+        // Dropdown functionality
+        document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
+            toggle.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const dropdownGroup = this.closest('.mb-1');
+                const submenu = dropdownGroup.querySelector('.dropdown-submenu');
+                const arrow = this.querySelector('.arrow');
+
+                // Toggle current dropdown
+                if (submenu.style.display === 'block') {
+                    submenu.style.display = 'none';
+                    arrow.style.transform = 'rotate(0deg)';
+                    this.classList.remove('open');
+                } else {
+                    // Close other dropdowns
+                    document.querySelectorAll('.dropdown-submenu').forEach(sm => {
+                        sm.style.display = 'none';
+                    });
+                    document.querySelectorAll('.dropdown-toggle').forEach(t => {
+                        t.classList.remove('open');
+                        t.querySelector('.arrow').style.transform = 'rotate(0deg)';
+                    });
+
+                    // Open this dropdown
+                    submenu.style.display = 'block';
+                    arrow.style.transform = 'rotate(-90deg)';
+                    this.classList.add('open');
+                }
+            });
+        });
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', function (e) {
+            if (!e.target.closest('.mb-1')) {
+                document.querySelectorAll('.dropdown-submenu').forEach(submenu => {
+                    submenu.style.display = 'none';
+                });
+                document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
+                    toggle.classList.remove('open');
+                    toggle.querySelector('.arrow').style.transform = 'rotate(0deg)';
+                });
+            }
+        });           
     </script>
 </body>
 
