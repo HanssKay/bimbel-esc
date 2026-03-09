@@ -65,8 +65,8 @@ if ($selected_siswa_id == 0 && !empty($siswa_list)) {
     $selected_siswa_id = $siswa_list[0]['id'];
 }
 
-// Filter bulan
-$bulan_filter = isset($_GET['bulan']) ? $_GET['bulan'] : date('Y-m');
+// Filter bulan - PERBAIKAN: gunakan $selected_month
+$selected_month = isset($_GET['bulan']) ? $_GET['bulan'] : date('Y-m');
 
 // Inisialisasi variabel
 $statistik_total = [
@@ -117,7 +117,7 @@ if ($selected_siswa_id > 0 && $orangtua_id > 0) {
         $siswa_detail = $result_detail->fetch_assoc() ?? [];
         $stmt_detail->close();
         
-        // AMBIL DETAIL ABSENSI UNTUK BULAN YANG DIPILIH
+        // AMBIL DETAIL ABSENSI UNTUK BULAN YANG DIPILIH - PERBAIKAN: gunakan $selected_month
         $sql_detail_absensi = "SELECT 
                                 a.*,
                                 DATE_FORMAT(a.tanggal_absensi, '%W') as hari_nama,
@@ -134,7 +134,7 @@ if ($selected_siswa_id > 0 && $orangtua_id > 0) {
                             ORDER BY a.tanggal_absensi DESC";
         
         $stmt_detail_absensi = $conn->prepare($sql_detail_absensi);
-        $stmt_detail_absensi->bind_param("is", $selected_siswa_id, $bulan_filter);
+        $stmt_detail_absensi->bind_param("is", $selected_siswa_id, $selected_month);
         $stmt_detail_absensi->execute();
         $result_detail_absensi = $stmt_detail_absensi->get_result();
         
@@ -448,42 +448,42 @@ for ($i = 0; $i < 12; $i++) {
     <!-- Mobile Menu Overlay -->
     <div id="menuOverlay" class="menu-overlay"></div>
 
-   <!-- Mobile Menu Sidebar -->
-<div id="mobileMenu" class="bg-blue-800 text-white md:hidden">
-    <div class="h-full flex flex-col">
-        <div class="p-4 bg-blue-900">
-            <div class="flex items-center">
-                <button id="menuClose" class="text-white mr-3">
-                    <i class="fas fa-times text-xl"></i>
-                </button>
-                <h1 class="text-xl font-bold">Bimbel Esc</h1>
-            </div>
-        </div>
-        <div class="p-4 bg-blue-800">
-            <div class="flex items-center">
-                <div class="w-12 h-12 bg-white text-blue-800 rounded-full flex items-center justify-center">
-                    <i class="fas fa-user text-lg"></i>
-                </div>
-                <div class="ml-3">
-                    <p class="font-medium"><?php echo htmlspecialchars($nama_ortu ?: $full_name); ?></p>
-                    <p class="text-sm text-blue-300">Orang Tua</p>
-                    <?php if (!empty($email)): ?>
-                    <p class="text-xs text-blue-200 truncate"><?php echo htmlspecialchars($email); ?></p>
-                    <?php endif; ?>
+    <!-- Mobile Menu Sidebar -->
+    <div id="mobileMenu" class="bg-blue-800 text-white md:hidden">
+        <div class="h-full flex flex-col">
+            <div class="p-4 bg-blue-900">
+                <div class="flex items-center">
+                    <button id="menuClose" class="text-white mr-3">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">Bimbel Esc</h1>
                 </div>
             </div>
-            <div class="mt-3 text-sm">
-                <p class="flex items-center">
-                    <i class="fas fa-child mr-2"></i> 
-                    <span><?php echo count($siswa_list); ?> Anak</span>
-                </p>
+            <div class="p-4 bg-blue-800">
+                <div class="flex items-center">
+                    <div class="w-12 h-12 bg-white text-blue-800 rounded-full flex items-center justify-center">
+                        <i class="fas fa-user text-lg"></i>
+                    </div>
+                    <div class="ml-3">
+                        <p class="font-medium"><?php echo htmlspecialchars($nama_ortu ?: $full_name); ?></p>
+                        <p class="text-sm text-blue-300">Orang Tua</p>
+                        <?php if (!empty($email)): ?>
+                        <p class="text-xs text-blue-200 truncate"><?php echo htmlspecialchars($email); ?></p>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <div class="mt-3 text-sm">
+                    <p class="flex items-center">
+                        <i class="fas fa-child mr-2"></i> 
+                        <span><?php echo count($siswa_list); ?> Anak</span>
+                    </p>
+                </div>
             </div>
+            <nav class="flex-1 overflow-y-auto">
+                <?php echo renderMenu($currentPage, 'orangtua'); ?>
+            </nav>
         </div>
-        <nav class="flex-1 overflow-y-auto">
-            <?php echo renderMenu($currentPage, 'orangtua'); ?>
-        </nav>
     </div>
-</div>
 
     <!-- Main Content -->
     <div class="md:ml-64">
@@ -516,12 +516,12 @@ for ($i = 0; $i < 12; $i++) {
 
         <!-- Content -->
         <div class="container mx-auto p-4 md:p-6">
-            <!-- Filter Section -->
+            <!-- Filter Section - PERBAIKAN: gunakan form dengan method GET -->
             <div class="bg-white shadow rounded-lg p-6 mb-6">
                 <h3 class="text-lg font-medium text-gray-900 mb-4">
                     <i class="fas fa-filter mr-2"></i> Filter Data
                 </h3>
-                <form method="GET" class="space-y-4">
+                <form method="GET" class="space-y-4" id="filterForm">
                     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">
@@ -530,7 +530,7 @@ for ($i = 0; $i < 12; $i++) {
                             <select name="siswa_id" 
                                     class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     onchange="this.form.submit()">
-                                <option value="">Semua Siswa</option>
+                                <option value="">-- Pilih Siswa --</option>
                                 <?php foreach ($siswa_list as $siswa): ?>
                                 <option value="<?php echo $siswa['id']; ?>" 
                                     <?php echo ($selected_siswa_id == $siswa['id']) ? 'selected' : ''; ?>>
@@ -543,20 +543,18 @@ for ($i = 0; $i < 12; $i++) {
                             <label class="block text-sm font-medium text-gray-700 mb-1">
                                 <i class="fas fa-calendar mr-1"></i> Bulan
                             </label>
-                            <select name="bulan" 
-                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    onchange="this.form.submit()">
-                                <?php foreach ($bulan_list as $bulan): ?>
-                                <option value="<?php echo $bulan; ?>" 
-                                    <?php echo ($bulan_filter == $bulan) ? 'selected' : ''; ?>>
-                                    <?php echo date('F Y', strtotime($bulan . '-01')); ?>
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
+                            <input type="month" 
+                                   name="bulan" 
+                                   id="bulanInput"
+                                   value="<?php echo $selected_month; ?>" 
+                                   min="2020-01"
+                                   max="<?php echo date('Y-m', strtotime('+5 years')); ?>" 
+                                   onchange="this.form.submit()"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
                         <div class="md:col-span-2 flex items-end space-x-2">
                             <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <i class="fas fa-search mr-2"></i> Tampilkan Data
+                                <i class="fas fa-search mr-2"></i> Tampilkan
                             </button>
                             <a href="rekapAbsensi.php" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50">
                                 Reset
@@ -597,7 +595,7 @@ for ($i = 0; $i < 12; $i++) {
                 
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     <?php foreach ($siswa_list as $siswa): ?>
-                    <a href="?siswa_id=<?php echo $siswa['id']; ?>&bulan=<?php echo $bulan_filter; ?>" 
+                    <a href="?siswa_id=<?php echo $siswa['id']; ?>&bulan=<?php echo $selected_month; ?>" 
                        class="anak-card p-6 bg-white hover:bg-blue-50 transition-colors">
                         <div class="flex items-center mb-4">
                             <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center">
@@ -653,7 +651,7 @@ for ($i = 0; $i < 12; $i++) {
                         <div class="mt-4 md:mt-0">
                             <span class="inline-flex items-center px-4 py-2 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
                                 <i class="fas fa-calendar mr-2"></i>
-                                <?php echo date('F Y', strtotime($bulan_filter . '-01')); ?>
+                                <?php echo date('F Y', strtotime($selected_month . '-01')); ?>
                             </span>
                         </div>
                     </div>
@@ -699,7 +697,6 @@ for ($i = 0; $i < 12; $i++) {
                         <div>
                             <p class="text-gray-600 text-sm">Hadir</p>
                             <h3 class="text-2xl font-bold text-green-600"><?php echo $statistik_total['total_hadir']; ?></h3>
-                            
                         </div>
                     </div>
                 </div>
@@ -712,7 +709,6 @@ for ($i = 0; $i < 12; $i++) {
                         <div>
                             <p class="text-gray-600 text-sm">Izin</p>
                             <h3 class="text-2xl font-bold text-gray-800"><?php echo $statistik_total['total_izin']; ?></h3>
-                            
                         </div>
                     </div>
                 </div>
@@ -725,7 +721,6 @@ for ($i = 0; $i < 12; $i++) {
                         <div>
                             <p class="text-gray-600 text-sm">Sakit</p>
                             <h3 class="text-2xl font-bold text-gray-800"><?php echo $statistik_total['total_sakit']; ?></h3>
-                            
                         </div>
                     </div>
                 </div>
@@ -738,7 +733,6 @@ for ($i = 0; $i < 12; $i++) {
                         <div>
                             <p class="text-gray-600 text-sm">Alpha</p>
                             <h3 class="text-2xl font-bold text-gray-800"><?php echo $statistik_total['total_alpha']; ?></h3>
-                            
                         </div>
                     </div>
                 </div>
@@ -762,7 +756,7 @@ for ($i = 0; $i < 12; $i++) {
                         </div>
                         <div class="text-sm text-gray-500">
                             <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full">
-                                <i class="fas fa-calendar mr-1"></i> <?php echo date('F Y', strtotime($bulan_filter . '-01')); ?>
+                                <i class="fas fa-calendar mr-1"></i> <?php echo date('F Y', strtotime($selected_month . '-01')); ?>
                             </span>
                         </div>
                     </div>
@@ -778,7 +772,7 @@ for ($i = 0; $i < 12; $i++) {
                     <p class="text-gray-500 max-w-md mx-auto mb-4">
                         Tidak ditemukan catatan absensi untuk 
                         <span class="font-semibold"><?php echo htmlspecialchars($siswa_detail['nama_lengkap'] ?? ''); ?></span> 
-                        pada bulan <span class="font-semibold"><?php echo date('F Y', strtotime($bulan_filter . '-01')); ?></span>.
+                        pada bulan <span class="font-semibold"><?php echo date('F Y', strtotime($selected_month . '-01')); ?></span>.
                     </p>
                     <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 max-w-md mx-auto">
                         <p class="text-yellow-700 text-sm">
@@ -970,6 +964,20 @@ for ($i = 0; $i < 12; $i++) {
                 });
             }
         });
+
+        // Fungsi untuk meng-handle perubahan bulan
+        function changeMonth(month) {
+            if (month) {
+                const siswaSelect = document.querySelector('select[name="siswa_id"]');
+                const siswaId = siswaSelect ? siswaSelect.value : '<?php echo $selected_siswa_id; ?>';
+                
+                if (siswaId) {
+                    window.location.href = 'rekapAbsensi.php?siswa_id=' + siswaId + '&bulan=' + month;
+                } else {
+                    window.location.href = 'rekapAbsensi.php?bulan=' + month;
+                }
+            }
+        }
 
         // Update server time
         function updateServerTime() {
