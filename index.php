@@ -67,7 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $_SESSION['full_name'] = $user['full_name'];
                 $_SESSION['user_role'] = $user['role'];
                 $_SESSION['email'] = $user['email'];
-                
+
                 // SET SESUAI ROLE
                 if ($user['role'] == 'orangtua') {
                     $_SESSION['orangtua_id'] = $user['role_id']; // Ini adalah ID dari tabel orangtua
@@ -76,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $_SESSION['guru_id'] = $user['role_id']; // Ini adalah ID dari tabel guru
                     $_SESSION['bidang_keahlian'] = $user['detail_info'] ?? '';
                 }
-                
+
                 // Juga simpan role_id untuk kompatibilitas
                 $_SESSION['role_id'] = $user['role_id'];
 
@@ -126,41 +126,41 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             justify-content: center;
             padding: 20px;
         }
-        
+
         .login-container {
             width: 100%;
             max-width: 400px;
         }
-        
+
         /* Responsive adjustments */
         @media (max-width: 640px) {
             .login-container {
                 max-width: 100%;
                 padding: 15px;
             }
-            
+
             .login-box {
                 padding: 1.5rem !important;
             }
-            
+
             .login-box h1 {
                 font-size: 1.75rem !important;
             }
-            
+
             .login-box input {
                 padding: 0.75rem !important;
             }
-            
+
             .login-box button {
                 padding: 0.75rem !important;
             }
         }
-        
+
         @media (max-width: 400px) {
             .login-box {
                 padding: 1rem !important;
             }
-            
+
             .login-box h1 {
                 font-size: 1.5rem !important;
             }
@@ -172,10 +172,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     <div class="login-container">
         <div class="login-box bg-white rounded-xl shadow-2xl p-6 md:p-8">
             <!-- Logo -->
-            <div class="text-center mb-6 md:mb-8">
-                <div class="inline-flex items-center justify-center w-12 h-12 md:w-16 md:h-16 bg-blue-600 rounded-full mb-3 md:mb-4">
-                    <i class="fas fa-graduation-cap text-white text-xl md:text-2xl"></i>
+            <div class="flex flex-col items-center mb-6 md:mb-8">
+                <div class="content-center mb-2">
+                    <img src="img/bimb.jpeg" alt="bimbel" class="md:h-20 h-10">
                 </div>
+                <!-- <div
+                    class="inline-flex items-center justify-center w-12 h-12 md:w-16 md:h-16 bg-blue-600 rounded-full mb-3 md:mb-4">
+                    <i class="fas fa-graduation-cap text-white text-xl md:text-2xl"></i>
+                </div> -->
                 <h1 class="text-2xl md:text-3xl font-bold text-gray-800">Bimbel Esc</h1>
                 <p class="text-gray-600 mt-1 md:mt-2 text-sm md:text-base">Sistem Penilaian Perkembangan Siswa</p>
             </div>
@@ -229,7 +233,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             <!-- Informasi Login -->
             <div class="mt-6 pt-4 border-t border-gray-200">
                 <div class="text-center text-gray-600 text-xs md:text-sm">
-                    <p class="mb-2"><i class="fas fa-info-circle mr-1"></i>Gunakan username dan password yang diberikan</p>
+                    <p class="mb-2"><i class="fas fa-info-circle mr-1"></i>Gunakan username dan password yang
+                        diberikan
+                    </p>
                     <p><i class="fas fa-shield-alt mr-1"></i>Pastikan data login Anda aman</p>
                 </div>
             </div>
@@ -243,37 +249,38 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
             <!-- Kontak Bantuan -->
             <div class="mt-4 text-center">
-                <p class="text-gray-500 text-xs">Butuh bantuan? <a href="mailto:support@bimbelesc.com" class="text-blue-600 hover:text-blue-800">Hubungi Admin</a></p>
+                <p class="text-gray-500 text-xs">Butuh bantuan? <a href="https://wa.me/085219961878"
+                        class="text-blue-600 hover:text-blue-800">Hubungi Admin</a></p>
             </div>
         </div>
     </div>
 
     <script>
         // Auto focus on username field
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             document.querySelector('input[name="username"]').focus();
         });
 
         // Show password toggle (optional feature)
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             const passwordInput = document.querySelector('input[name="password"]');
             const form = document.querySelector('form');
-            
+
             // Add show/hide password icon
             const passwordContainer = passwordInput.parentElement;
             passwordContainer.style.position = 'relative';
-            
+
             const toggleIcon = document.createElement('span');
             toggleIcon.innerHTML = '<i class="fas fa-eye-slash">';
             toggleIcon.className = 'absolute right-3 top-7 md:top-[30px] text-gray-400 cursor-pointer';
             toggleIcon.style.transform = 'translateY(50%)';
-            
-            toggleIcon.addEventListener('click', function() {
+
+            toggleIcon.addEventListener('click', function () {
                 const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
                 passwordInput.setAttribute('type', type);
                 this.innerHTML = type === 'password' ? '<i class="fas fa-eye-slash"></i>' : '<i class="fas fa-eye"></i>';
             });
-            
+
             passwordContainer.appendChild(toggleIcon);
         });
     </script>
