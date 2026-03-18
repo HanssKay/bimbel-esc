@@ -410,6 +410,7 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
 ?>
 <!DOCTYPE html>
 <html lang="id">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -426,34 +427,207 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
             font-size: 0.875rem;
             font-weight: 600;
         }
-        .badge-sangat-baik { background-color: #10B981; color: white; }
-        .badge-baik { background-color: #3B82F6; color: white; }
-        .badge-cukup { background-color: #F59E0B; color: white; }
-        .badge-kurang { background-color: #EF4444; color: white; }
-        .card { transition: transform 0.2s, box-shadow 0.2s; }
-        .card:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); }
-        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); overflow-y: auto; }
-        .modal-content { background-color: #fff; margin: 2% auto; padding: 0; border-radius: 8px; width: 90%; max-width: 700px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); animation: modalFadeIn 0.3s; }
-        @keyframes modalFadeIn { from { opacity:0; transform: translateY(-20px); } to { opacity:1; transform: translateY(0); } }
-        .modal-header { padding: 16px 24px; color: white; border-radius: 8px 8px 0 0; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); }
-        .modal-body { padding: 24px; max-height: 70vh; overflow-y: auto; }
-        .modal-footer { padding: 16px 24px; border-top: 1px solid #e5e7eb; background-color: #f9fafb; border-radius: 0 0 8px 8px; }
-        .close { color: #fff; float: right; font-size: 28px; font-weight: bold; cursor: pointer; line-height: 1; }
-        .close:hover { opacity: 0.8; }
-        #mobileMenu { position: fixed; top: 0; left: 0; width: 280px; height: 100%; z-index: 1100; transform: translateX(-100%); transition: transform 0.3s ease-in-out; box-shadow: 5px 0 25px rgba(0,0,0,0.2); background-color: #1e40af; }
-        #mobileMenu.menu-open { transform: translateX(0); }
-        .menu-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 1099; }
-        .menu-overlay.active { display: block; }
-        .desktop-sidebar { display: none; }
-        @media (min-width: 768px) { .desktop-sidebar { display: block; } .mobile-header { display: none; } #mobileMenu { display: none; } .menu-overlay { display: none !important; } }
-        @media (max-width: 767px) { .modal-content { width: 95%; margin: 10% auto; } .grid { grid-template-columns: 1fr !important; } .stat-cards { grid-template-columns: repeat(2, 1fr) !important; } .info-cards { grid-template-columns: 1fr !important; } }
-        .menu-item.active { background-color: rgba(255,255,255,0.1); border-left: 4px solid #60A5FA; }
-        .fa-spinner { animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .stat-card { transition: transform 0.3s, box-shadow 0.3s; }
-        .stat-card:hover { transform: translateY(-5px); box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+
+        .badge-sangat-baik {
+            background-color: #10B981;
+            color: white;
+        }
+
+        .badge-baik {
+            background-color: #3B82F6;
+            color: white;
+        }
+
+        .badge-cukup {
+            background-color: #F59E0B;
+            color: white;
+        }
+
+        .badge-kurang {
+            background-color: #EF4444;
+            color: white;
+        }
+
+        .card {
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            overflow-y: auto;
+        }
+
+        .modal-content {
+            background-color: #fff;
+            margin: 2% auto;
+            padding: 0;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 700px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            animation: modalFadeIn 0.3s;
+        }
+
+        @keyframes modalFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .modal-header {
+            padding: 16px 24px;
+            color: white;
+            border-radius: 8px 8px 0 0;
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        }
+
+        .modal-body {
+            padding: 24px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid #e5e7eb;
+            background-color: #f9fafb;
+            border-radius: 0 0 8px 8px;
+        }
+
+        .close {
+            color: #fff;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            line-height: 1;
+        }
+
+        .close:hover {
+            opacity: 0.8;
+        }
+
+        #mobileMenu {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 280px;
+            height: 100%;
+            z-index: 1100;
+            transform: translateX(-100%);
+            transition: transform 0.3s ease-in-out;
+            box-shadow: 5px 0 25px rgba(0, 0, 0, 0.2);
+            background-color: #1e40af;
+        }
+
+        #mobileMenu.menu-open {
+            transform: translateX(0);
+        }
+
+        .menu-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1099;
+        }
+
+        .menu-overlay.active {
+            display: block;
+        }
+
+        .desktop-sidebar {
+            display: none;
+        }
+
+        @media (min-width: 768px) {
+            .desktop-sidebar {
+                display: block;
+            }
+
+            .mobile-header {
+                display: none;
+            }
+
+            #mobileMenu {
+                display: none;
+            }
+
+            .menu-overlay {
+                display: none !important;
+            }
+        }
+
+        @media (max-width: 767px) {
+            .modal-content {
+                width: 95%;
+                margin: 10% auto;
+            }
+
+            .grid {
+                grid-template-columns: 1fr !important;
+            }
+
+            .stat-cards {
+                grid-template-columns: repeat(2, 1fr) !important;
+            }
+
+            .info-cards {
+                grid-template-columns: 1fr !important;
+            }
+        }
+
+        .menu-item.active {
+            background-color: rgba(255, 255, 255, 0.1);
+            border-left: 4px solid #60A5FA;
+        }
+
+        .fa-spinner {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .stat-card {
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
     </style>
 </head>
+
 <body class="bg-gray-100">
     <!-- Desktop Sidebar -->
     <div class="desktop-sidebar w-64 bg-blue-800 text-white fixed h-full z-40">
@@ -564,7 +738,8 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                         <i class="fas fa-exclamation-triangle mr-3"></i>
                         <div>
                             <p class="font-bold">Perhatian!</p>
-                            <p class="text-sm">Belum ada data anak yang terdaftar. Hubungi admin untuk mendaftarkan anak Anda.</p>
+                            <p class="text-sm">Belum ada data anak yang terdaftar. Hubungi admin untuk mendaftarkan anak
+                                Anda.</p>
                         </div>
                     </div>
                 </div>
@@ -635,65 +810,65 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                     </div>
                     <div class="p-3 md:p-6">
                         <?php if ($total_anak == 0): ?>
-                                <div class="text-center py-6 md:py-8">
-                                    <i class="fas fa-child text-4xl md:text-5xl text-gray-400 mb-4"></i>
-                                    <h4 class="text-base md:text-lg font-medium text-gray-700 mb-2">Belum ada data anak</h4>
-                                    <p class="text-gray-500 text-sm md:text-base">Hubungi admin untuk mendaftarkan anak Anda.
-                                    </p>
-                                </div>
+                            <div class="text-center py-6 md:py-8">
+                                <i class="fas fa-child text-4xl md:text-5xl text-gray-400 mb-4"></i>
+                                <h4 class="text-base md:text-lg font-medium text-gray-700 mb-2">Belum ada data anak</h4>
+                                <p class="text-gray-500 text-sm md:text-base">Hubungi admin untuk mendaftarkan anak Anda.
+                                </p>
+                            </div>
                         <?php else: ?>
-                                <div class="space-y-3">
-                                    <?php foreach ($anak_data as $anak):
-                                        $pendaftaran = $pendaftaran_data[$anak['id']] ?? null;
-                                        $pelajaran_list = $pelajaran_data[$anak['id']] ?? [];
-                                        ?>
-                                            <div class="flex items-center p-3 bg-gray-50 rounded-lg hover:bg-blue-50 transition">
-                                                <div
-                                                    class="w-10 h-10 md:w-12 md:h-12 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                                                    <span class="text-blue-800 font-bold text-sm md:text-base">
-                                                        <?php echo strtoupper(substr($anak['nama_lengkap'], 0, 1)); ?>
-                                                    </span>
-                                                </div>
-                                                <div class="ml-3 flex-1 min-w-0">
-                                                    <h4 class="font-medium text-gray-900 text-sm md:text-base truncate">
-                                                        <?php echo htmlspecialchars($anak['nama_lengkap']); ?>
-                                                    </h4>
-                                                    <div class="text-xs text-gray-600 flex flex-wrap gap-1 md:gap-2">
-                                                        <span class="inline-block">
-                                                            <i class="fas fa-school mr-1"></i>
-                                                            <?php echo htmlspecialchars($anak['sekolah_asal'] ?: '-'); ?>
-                                                        </span>
-                                                        <span class="inline-block">
-                                                            <i class="fas fa-graduation-cap mr-1"></i>
-                                                            <?php echo htmlspecialchars($anak['kelas']); ?>
-                                                        </span>
-                                                    </div>
-                                                    <?php if ($pendaftaran): ?>
-                                                            <div class="text-xs text-blue-600 mt-1 truncate">
-                                                                <i class="fas fa-chalkboard-teacher mr-1"></i>
-                                                                <?php echo htmlspecialchars($pendaftaran['jenis_kelas']); ?>
-                                                                (<?php echo htmlspecialchars($pendaftaran['tingkat']); ?>)
-                                                            </div>
-                                                    <?php endif; ?>
-                                                    <?php if (!empty($pelajaran_list)): ?>
-                                                            <div class="text-xs text-green-600 mt-1 truncate">
-                                                                <i class="fas fa-book mr-1"></i>
-                                                                <?php
-                                                                $pelajaran_names = array_map(function ($p) {
-                                                                    return htmlspecialchars($p['nama_pelajaran']);
-                                                                }, $pelajaran_list);
-                                                                echo implode(', ', $pelajaran_names);
-                                                                ?>
-                                                            </div>
-                                                    <?php endif; ?>
-                                                </div>
-                                                <button onclick="showDetailAnak(<?php echo $anak['id']; ?>)"
-                                                    class="text-blue-600 hover:text-blue-800 p-1 md:p-2 flex-shrink-0">
-                                                    <i class="fas fa-eye text-sm md:text-base"></i>
-                                                </button>
+                            <div class="space-y-3">
+                                <?php foreach ($anak_data as $anak):
+                                    $pendaftaran = $pendaftaran_data[$anak['id']] ?? null;
+                                    $pelajaran_list = $pelajaran_data[$anak['id']] ?? [];
+                                    ?>
+                                    <div class="flex items-center p-3 bg-gray-50 rounded-lg hover:bg-blue-50 transition">
+                                        <div
+                                            class="w-10 h-10 md:w-12 md:h-12 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                            <span class="text-blue-800 font-bold text-sm md:text-base">
+                                                <?php echo strtoupper(substr($anak['nama_lengkap'], 0, 1)); ?>
+                                            </span>
+                                        </div>
+                                        <div class="ml-3 flex-1 min-w-0">
+                                            <h4 class="font-medium text-gray-900 text-sm md:text-base truncate">
+                                                <?php echo htmlspecialchars($anak['nama_lengkap']); ?>
+                                            </h4>
+                                            <div class="text-xs text-gray-600 flex flex-wrap gap-1 md:gap-2">
+                                                <span class="inline-block">
+                                                    <i class="fas fa-school mr-1"></i>
+                                                    <?php echo htmlspecialchars($anak['sekolah_asal'] ?: '-'); ?>
+                                                </span>
+                                                <span class="inline-block">
+                                                    <i class="fas fa-graduation-cap mr-1"></i>
+                                                    <?php echo htmlspecialchars($anak['kelas']); ?>
+                                                </span>
                                             </div>
-                                    <?php endforeach; ?>
-                                </div>
+                                            <?php if ($pendaftaran): ?>
+                                                <div class="text-xs text-blue-600 mt-1 truncate">
+                                                    <i class="fas fa-chalkboard-teacher mr-1"></i>
+                                                    <?php echo htmlspecialchars($pendaftaran['jenis_kelas']); ?>
+                                                    (<?php echo htmlspecialchars($pendaftaran['tingkat']); ?>)
+                                                </div>
+                                            <?php endif; ?>
+                                            <?php if (!empty($pelajaran_list)): ?>
+                                                <div class="text-xs text-green-600 mt-1 truncate">
+                                                    <i class="fas fa-book mr-1"></i>
+                                                    <?php
+                                                    $pelajaran_names = array_map(function ($p) {
+                                                        return htmlspecialchars($p['nama_pelajaran']);
+                                                    }, $pelajaran_list);
+                                                    echo implode(', ', $pelajaran_names);
+                                                    ?>
+                                                </div>
+                                            <?php endif; ?>
+                                        </div>
+                                        <button onclick="showDetailAnak(<?php echo $anak['id']; ?>)"
+                                            class="text-blue-600 hover:text-blue-800 p-1 md:p-2 flex-shrink-0">
+                                            <i class="fas fa-eye text-sm md:text-base"></i>
+                                        </button>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -707,65 +882,62 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                     </div>
                     <div class="p-3 md:p-6">
                         <?php if (empty($penilaian_terbaru)): ?>
-                                <div class="text-center py-6 md:py-8">
-                                    <i class="fas fa-clipboard-list text-4xl md:text-5xl text-gray-400 mb-4"></i>
-                                    <h4 class="text-base md:text-lg font-medium text-gray-700 mb-2">Belum ada penilaian</h4>
-                                    <p class="text-gray-500 text-sm md:text-base">Belum ada penilaian untuk anak Anda.</p>
-                                </div>
+                            <div class="text-center py-6 md:py-8">
+                                <i class="fas fa-clipboard-list text-4xl md:text-5xl text-gray-400 mb-4"></i>
+                                <h4 class="text-base md:text-lg font-medium text-gray-700 mb-2">Belum ada penilaian</h4>
+                                <p class="text-gray-500 text-sm md:text-base">Belum ada penilaian untuk anak Anda.</p>
+                            </div>
                         <?php else: ?>
-                                <div class="space-y-3">
-                                    <?php foreach ($penilaian_terbaru as $penilaian):
-                                        $badge_class = '';
-                                        if ($penilaian['kategori'] == 'Sangat Baik')
-                                            $badge_class = 'badge-sangat-baik';
-                                        elseif ($penilaian['kategori'] == 'Baik')
-                                            $badge_class = 'badge-baik';
-                                        elseif ($penilaian['kategori'] == 'Cukup')
-                                            $badge_class = 'badge-cukup';
-                                        else
-                                            $badge_class = 'badge-kurang';
-                                        ?>
-                                            <div class="border border-gray-200 rounded-lg p-3 hover:border-blue-300 transition">
-                                                <div class="flex justify-between items-start mb-2">
-                                                    <h4 class="font-medium text-gray-900 text-sm md:text-base">
-                                                        <?php echo htmlspecialchars($penilaian['nama_siswa']); ?>
-                                                    </h4>
-                                                    <span class="badge <?php echo $badge_class; ?> text-xs">
-                                                        <?php echo htmlspecialchars($penilaian['kategori']); ?>
-                                                    </span>
-                                                </div>
-                                                <div class="text-xs text-gray-600 mb-2">
-                                                    <span>
-                                                        <i class="fas fa-book mr-1"></i>
-                                                        <?php echo htmlspecialchars($penilaian['nama_pelajaran']); ?>
-                                                    </span>
-                                                    <span class="mx-2">•</span>
-                                                    <span>
-                                                        <i class="fas fa-calendar-alt mr-1"></i>
-                                                        <?php echo htmlspecialchars($penilaian['tanggal_format']); ?>
-                                                    </span>
-                                                </div>
-                                                <div class="text-xs text-gray-600 mb-2">
-                                                    <span>
-                                                        <i class="fas fa-user-tie mr-1"></i>
-                                                        <?php echo htmlspecialchars($penilaian['nama_guru']); ?>
-                                                    </span>
-                                                </div>
-                                                <div class="flex justify-between items-center">
-                                                    <div class="text-lg md:text-2xl font-bold text-gray-800">
-                                                        <?php echo $penilaian['total_score']; ?>/50
-                                                        <span class="text-xs md:text-sm font-normal text-gray-500">
-                                                            (<?php echo $penilaian['persentase']; ?>%)
-                                                        </span>
-                                                    </div>
-                                                    <button onclick="showDetailPenilaian(<?php echo $penilaian['id']; ?>)"
-                                                        class="text-blue-600 hover:text-blue-800 text-xs md:text-sm font-medium">
-                                                        Detail <i class="fas fa-arrow-right ml-1 hidden md:inline"></i>
-                                                    </button>
-                                                </div>
+                            <div class="space-y-3">
+                                <?php foreach ($penilaian_terbaru as $penilaian):
+                                    $badge_class = '';
+                                    if ($penilaian['kategori'] == 'Sangat Baik')
+                                        $badge_class = 'badge-sangat-baik';
+                                    elseif ($penilaian['kategori'] == 'Baik')
+                                        $badge_class = 'badge-baik';
+                                    elseif ($penilaian['kategori'] == 'Cukup')
+                                        $badge_class = 'badge-cukup';
+                                    else
+                                        $badge_class = 'badge-kurang';
+                                    ?>
+                                    <div class="border border-gray-200 rounded-lg p-3 hover:border-blue-300 transition">
+                                        <div class="flex justify-between items-start mb-2">
+                                            <h4 class="font-medium text-gray-900 text-sm md:text-base">
+                                                <?php echo htmlspecialchars($penilaian['nama_siswa']); ?>
+                                            </h4>
+                                            <span class="badge <?php echo $badge_class; ?> text-xs">
+                                                <?php echo htmlspecialchars($penilaian['kategori']); ?>
+                                            </span>
+                                        </div>
+                                        <div class="text-xs text-gray-600 mb-2">
+                                            <span>
+                                                <i class="fas fa-book mr-1"></i>
+                                                <?php echo htmlspecialchars($penilaian['nama_pelajaran']); ?>
+                                            </span>
+                                            <span class="mx-2">•</span>
+                                            <span>
+                                                <i class="fas fa-calendar-alt mr-1"></i>
+                                                <?php echo htmlspecialchars($penilaian['tanggal_format']); ?>
+                                            </span>
+                                        </div>
+                                        <div class="text-xs text-gray-600 mb-2">
+                                            <span>
+                                                <i class="fas fa-user-tie mr-1"></i>
+                                                <?php echo htmlspecialchars($penilaian['nama_guru']); ?>
+                                            </span>
+                                        </div>
+                                        <div class="flex justify-between items-center">
+                                            <div class="text-lg md:text-2xl font-bold text-gray-800">
+                                                <?php echo $penilaian['total_score']; ?>/50
                                             </div>
-                                    <?php endforeach; ?>
-                                </div>
+                                            <button onclick="showDetailPenilaian(<?php echo $penilaian['id']; ?>)"
+                                                class="text-blue-600 hover:text-blue-800 text-xs md:text-sm font-medium">
+                                                Detail <i class="fas fa-arrow-right ml-1 hidden md:inline"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -781,9 +953,15 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                         <h4 class="font-semibold text-gray-800 text-sm md:text-base">Tips Belajar</h4>
                     </div>
                     <ul class="space-y-1 md:space-y-2 text-xs md:text-sm text-gray-700">
-                        <li class="flex items-start"><i class="fas fa-check text-green-500 mt-0.5 mr-1 md:mr-2"></i><span>Buat jadwal belajar rutin</span></li>
-                        <li class="flex items-start"><i class="fas fa-check text-green-500 mt-0.5 mr-1 md:mr-2"></i><span>Lingkungan belajar yang nyaman</span></li>
-                        <li class="flex items-start"><i class="fas fa-check text-green-500 mt-0.5 mr-1 md:mr-2"></i><span>Istirahat cukup di sela belajar</span></li>
+                        <li class="flex items-start"><i
+                                class="fas fa-check text-green-500 mt-0.5 mr-1 md:mr-2"></i><span>Buat jadwal belajar
+                                rutin</span></li>
+                        <li class="flex items-start"><i
+                                class="fas fa-check text-green-500 mt-0.5 mr-1 md:mr-2"></i><span>Lingkungan belajar
+                                yang nyaman</span></li>
+                        <li class="flex items-start"><i
+                                class="fas fa-check text-green-500 mt-0.5 mr-1 md:mr-2"></i><span>Istirahat cukup di
+                                sela belajar</span></li>
                     </ul>
                 </div>
                 <div class="card bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg shadow p-3 md:p-6">
@@ -840,7 +1018,8 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
             </div>
             <div class="modal-body" id="detailAnakContent"></div>
             <div class="modal-footer">
-                <button onclick="closeModal('detailAnakModal')" class="px-3 md:px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm md:text-base">
+                <button onclick="closeModal('detailAnakModal')"
+                    class="px-3 md:px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm md:text-base">
                     Tutup
                 </button>
             </div>
@@ -856,7 +1035,8 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
             </div>
             <div class="modal-body" id="detailPenilaianContent"></div>
             <div class="modal-footer">
-                <button onclick="closeModal('detailPenilaianModal')" class="px-3 md:px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm md:text-base">
+                <button onclick="closeModal('detailPenilaianModal')"
+                    class="px-3 md:px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm md:text-base">
                     Tutup
                 </button>
             </div>
@@ -1210,13 +1390,13 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                             <h3 class="text-lg md:text-xl font-semibold text-gray-800 mb-3 md:mb-4">Detail Indikator</h3>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
                                 ${indicators.map(ind => {
-                                    const value = ind.value || 0;
-                                    const percentage = (value / 10) * 100;
-                                    let barColor = 'bg-green-500';
-                                    if (percentage < 40) barColor = 'bg-red-500';
-                                    else if (percentage < 70) barColor = 'bg-yellow-500';
+                    const value = ind.value || 0;
+                    const percentage = (value / 10) * 100;
+                    let barColor = 'bg-green-500';
+                    if (percentage < 40) barColor = 'bg-red-500';
+                    else if (percentage < 70) barColor = 'bg-yellow-500';
 
-                                    return `
+                    return `
                                         <div class="bg-white border border-gray-200 rounded-lg p-3 md:p-4 hover:shadow-md transition">
                                             <div class="flex justify-between items-center mb-1 md:mb-2">
                                                 <span class="font-medium text-gray-700 text-sm md:text-base">${ind.name}</span>
@@ -1227,7 +1407,7 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
                                             </div>
                                         </div>
                                     `;
-                                }).join('')}
+                }).join('')}
                             </div>
                         </div>
                         
@@ -1286,4 +1466,5 @@ function getDetailPenilaian($conn, $penilaian_id, $orangtua_id)
         updateServerTime();
     </script>
 </body>
+
 </html>
