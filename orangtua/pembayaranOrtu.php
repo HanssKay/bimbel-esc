@@ -118,8 +118,8 @@ if ($ortu_db_id > 0) {
 
 // Get bulan dan tahun saat ini untuk filter default
 $bulan_sekarang = date('Y-m');
-$bulan_filter = $_GET['bulan'] ?? $bulan_sekarang;
-$siswa_filter = $_GET['siswa'] ?? '';
+$bulan_filter = isset($_GET['bulan']) ? $_GET['bulan'] : $bulan_sekarang;
+$siswa_filter = isset($_GET['siswa_id']) ? intval($_GET['siswa_id']) : 0;
 
 // Query untuk data pembayaran
 $pembayaran_list = [];
@@ -416,6 +416,41 @@ for ($i = 0; $i < 12; $i++) {
             border-left-color: #ef4444;
         }
 
+        /* Filter Styles */
+        .filter-container {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        }
+
+        .filter-label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #374151;
+            margin-bottom: 0.5rem;
+        }
+
+        .filter-select {
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+        }
+
+        .filter-select:focus {
+            outline: none;
+            ring: 2px solid #3b82f6;
+            border-color: #3b82f6;
+        }
+
+        .filter-select:hover {
+            border-color: #9ca3af;
+        }
+
         /* Responsive */
         @media (min-width: 768px) {
             .desktop-sidebar {
@@ -466,7 +501,7 @@ for ($i = 0; $i < 12; $i++) {
             background-color: #f59e0b;
         }
 
-        /* Modal styles - PERBAIKAN */
+        /* Modal styles */
         .modal {
             display: none;
             position: fixed;
@@ -513,7 +548,6 @@ for ($i = 0; $i < 12; $i++) {
             }
         }
 
-        /* Modal header */
         .modal-header {
             background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%);
             color: white;
@@ -524,7 +558,6 @@ for ($i = 0; $i < 12; $i++) {
             z-index: 10;
         }
 
-        /* Modal body */
         .modal-body {
             padding: 24px;
             max-height: calc(90vh - 140px);
@@ -538,7 +571,6 @@ for ($i = 0; $i < 12; $i++) {
             }
         }
 
-        /* Modal footer */
         .modal-footer {
             background-color: #f9fafb;
             padding: 16px 24px;
@@ -548,7 +580,6 @@ for ($i = 0; $i < 12; $i++) {
             bottom: 0;
         }
 
-        /* Detail item styles */
         .detail-item {
             display: grid;
             grid-template-columns: 140px 1fr;
@@ -603,19 +634,6 @@ for ($i = 0; $i < 12; $i++) {
 
         .modal-body::-webkit-scrollbar-thumb:hover {
             background: #a1a1a1;
-        }
-
-        /* Progress bar in modal */
-        .progress-container {
-            margin-top: 4px;
-        }
-
-        .progress-label {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.875rem;
-            color: #6b7280;
-            margin-bottom: 4px;
         }
 
         /* Filter styles */
@@ -777,18 +795,6 @@ for ($i = 0; $i < 12; $i++) {
 
             <!-- Stats Cards -->
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6 mb-8">
-                <!--<div class="stat-card amount-card total bg-white rounded-xl shadow p-5">-->
-                <!--    <div class="flex items-center">-->
-                <!--        <div class="p-3 bg-blue-100 text-blue-600 rounded-lg mr-4">-->
-                <!--            <i class="fas fa-file-invoice-dollar text-xl"></i>-->
-                <!--        </div>-->
-                <!--        <div>-->
-                <!--            <p class="text-sm text-gray-600">Total Tagihan</p>-->
-                <!--            <h3 class="text-2xl font-bold text-gray-800">Rp <?= number_format($total_tagihan, 0, ',', '.') ?></h3>-->
-                <!--        </div>-->
-                <!--    </div>-->
-                <!--</div>-->
-
                 <div class="stat-card amount-card paid bg-white rounded-xl shadow p-5">
                     <div class="flex items-center">
                         <div class="p-3 bg-green-100 text-green-600 rounded-lg mr-4">
@@ -802,18 +808,6 @@ for ($i = 0; $i < 12; $i++) {
                         </div>
                     </div>
                 </div>
-
-                <!--<div class="stat-card amount-card due bg-white rounded-xl shadow p-5">-->
-                <!--    <div class="flex items-center">-->
-                <!--        <div class="p-3 bg-red-100 text-red-600 rounded-lg mr-4">-->
-                <!--            <i class="fas fa-exclamation-triangle text-xl"></i>-->
-                <!--        </div>-->
-                <!--        <div>-->
-                <!--            <p class="text-sm text-gray-600">Tunggakan</p>-->
-                <!--            <h3 class="text-2xl font-bold text-gray-800">Rp <?= number_format($total_tunggakan, 0, ',', '.') ?></h3>-->
-                <!--        </div>-->
-                <!--    </div>-->
-                <!--</div>-->
 
                 <div class="stat-card bg-white rounded-xl shadow p-5 border-l-4 border-purple-500">
                     <div class="flex items-center">
@@ -830,7 +824,7 @@ for ($i = 0; $i < 12; $i++) {
                 </div>
             </div>
 
-            <!-- Filter Section -->
+            <!-- Filter Section - DENGAN INPUT MONTH -->
             <div class="bg-white rounded-xl shadow p-5 mb-6">
                 <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
                     <div class="mb-4 md:mb-0">
@@ -838,83 +832,46 @@ for ($i = 0; $i < 12; $i++) {
                         <p class="text-sm text-gray-600">Total <?= number_format($total_data) ?> data ditemukan</p>
                     </div>
 
-                    <div class="flex flex-col md:flex-row gap-3 w-full md:w-auto">
-                        <!-- Filter Form -->
-                        <form method="GET" class="flex flex-col md:flex-row gap-3">
-                            <div class="flex gap-2">
-                                <!-- Filter Bulan -->
-                                <div>
-                                    <select name="bulan" onchange="this.form.submit()"
-                                        class="border rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                        <?php foreach ($bulan_options as $bulan): ?>
-                                            <option value="<?= $bulan['value'] ?>" <?= $bulan_filter == $bulan['value'] ? 'selected' : '' ?>>
-                                                <?= $bulan['label'] ?>
-                                            </option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </div>
+                    <!-- Filter Form dengan Input Month -->
+                    <form method="GET" class="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+                        <!-- Filter Siswa - Dropdown -->
+                        <div class="w-full md:w-64">
+                            <label class="filter-label">
+                                <i class="fas fa-child mr-1 text-blue-600"></i> Pilih Anak
+                            </label>
+                            <select name="siswa_id" onchange="this.form.submit()" class="filter-select">
+                                <option value="">Semua Anak</option>
+                                <?php foreach ($siswa_list as $siswa): ?>
+                                    <option value="<?= $siswa['id'] ?>" <?= $siswa_filter == $siswa['id'] ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($siswa['nama_lengkap']) ?>
+                                        <?php if (!empty($siswa['kelas']) && $siswa['kelas'] != '-'): ?>
+                                            (Kelas: <?= $siswa['kelas'] ?>)
+                                        <?php endif; ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
 
-                                <!-- Filter Siswa -->
-                                <?php if (count($siswa_list) > 1): ?>
-                                    <div>
-                                        <select name="siswa" onchange="this.form.submit()"
-                                            class="border rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                            <option value="">Semua Anak</option>
-                                            <?php foreach ($siswa_list as $siswa): ?>
-                                                <option value="<?= $siswa['id'] ?>" <?= $siswa_filter == $siswa['id'] ? 'selected' : '' ?>>
-                                                    <?= htmlspecialchars($siswa['nama_lengkap']) ?>
-                                                    <?php if (!empty($siswa['jenis_kelas']) && $siswa['jenis_kelas'] != '-'): ?>
-                                                        (<?= $siswa['jenis_kelas'] ?>)
-                                                    <?php endif; ?>
-                                                </option>
-                                            <?php endforeach; ?>
-                                        </select>
-                                    </div>
-                                <?php endif; ?>
-                            </div>
+                        <!-- Filter Bulan - INPUT MONTH (seperti kalender) -->
+                        <div class="w-full md:w-64">
+                            <label class="filter-label">
+                                <i class="fas fa-calendar-alt mr-1 text-blue-600"></i> Pilih Bulan
+                            </label>
+                            <input type="month" name="bulan" id="bulanInput" value="<?= $bulan_filter ?>" min="2020-01"
+                                max="<?= date('Y-m', strtotime('+1 year')) ?>" onchange="this.form.submit()"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
 
-                            <!-- Reset Filter -->
-                            <?php if (!empty($bulan_filter) && $bulan_filter != $bulan_sekarang || !empty($siswa_filter)): ?>
+                        <!-- Reset Filter -->
+                        <?php if (!empty($siswa_filter) || $bulan_filter != $bulan_sekarang): ?>
+                            <div class="flex items-end">
                                 <a href="?"
                                     class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center justify-center">
                                     <i class="fas fa-times mr-2"></i>Reset
                                 </a>
-                            <?php endif; ?>
-                        </form>
-                    </div>
-                </div>
-
-                <!-- Info Anak -->
-                <div class="mt-6">
-                    <h3 class="font-medium text-gray-700 mb-3">Anak yang terdaftar:</h3>
-                    <div class="flex flex-wrap gap-3">
-                        <?php if (empty($siswa_list)): ?>
-                            <div class="px-4 py-3 bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-lg">
-                                <i class="fas fa-exclamation-triangle mr-2"></i>
-                                Belum ada data anak terdaftar
                             </div>
-                        <?php else: ?>
-                            <?php foreach ($siswa_list as $siswa): ?>
-                                <a href="?siswa=<?= $siswa['id'] ?><?= !empty($bulan_filter) && $bulan_filter != $bulan_sekarang ? '&bulan=' . $bulan_filter : '' ?>"
-                                    class="px-4 py-3 border rounded-lg flex items-center transition-all duration-200 <?= $siswa_filter == $siswa['id'] ? 'bg-blue-50 border-blue-200 text-blue-800 filter-active' : 'bg-gray-50 border-gray-200 text-gray-800 hover:bg-gray-100' ?>">
-                                    <i class="fas fa-child mr-2"></i>
-                                    <div>
-                                        <span class="font-medium"><?= htmlspecialchars($siswa['nama_lengkap']) ?></span>
-                                        <?php if (!empty($siswa['pendaftaran_id'])): ?>
-                                            <span class="text-sm ml-2">
-                                                (Kelas: <?= htmlspecialchars($siswa['kelas'] ?? '-') ?>,
-                                                <?= $siswa['jenis_kelas'] ?> - <?= $siswa['tingkat'] ?>)
-                                            </span>
-                                        <?php else: ?>
-                                            <span class="text-sm ml-2 text-red-500">
-                                                <i class="fas fa-exclamation-circle mr-1"></i>Belum ada pendaftaran aktif
-                                            </span>
-                                        <?php endif; ?>
-                                    </div>
-                                </a>
-                            <?php endforeach; ?>
                         <?php endif; ?>
-                    </div>
+                    </form>
                 </div>
             </div>
 
@@ -1098,13 +1055,6 @@ for ($i = 0; $i < 12; $i++) {
                                                     </span>
                                                 </div>
                                             <?php endif; ?>
-
-                                            <!-- <?php if (!empty($pembayaran['keterangan'])): ?>
-                                    <div class="mt-2 text-xs text-gray-500">
-                                        <i class="fas fa-info-circle mr-1"></i>
-                                        <?= htmlspecialchars($pembayaran['keterangan']) ?>
-                                    </div>
-                                    <?php endif; ?> -->
                                         </td>
 
                                         <td class="px-6 py-4 whitespace-nowrap">
@@ -1129,7 +1079,15 @@ for ($i = 0; $i < 12; $i++) {
                             Menampilkan <?= count($pembayaran_list) ?> dari <?= $total_data ?> pembayaran
                             <?php if (!empty($siswa_filter)): ?>
                                 untuk
-                                <?= htmlspecialchars($siswa_list[array_search($siswa_filter, array_column($siswa_list, 'id'))]['nama_lengkap'] ?? 'anak terpilih') ?>
+                                <?php
+                                $filtered_siswa = array_filter($siswa_list, function ($s) use ($siswa_filter) {
+                                    return $s['id'] == $siswa_filter;
+                                });
+                                $filtered_siswa = reset($filtered_siswa);
+                                if ($filtered_siswa) {
+                                    echo htmlspecialchars($filtered_siswa['nama_lengkap']);
+                                }
+                                ?>
                             <?php endif; ?>
                         </div>
                         <div class="flex items-center space-x-4">
@@ -1179,6 +1137,7 @@ for ($i = 0; $i < 12; $i++) {
                 </div>
             </div>
         </div>
+
         <!-- FOOTER -->
         <footer class="bg-white border-t border-gray-200 mt-auto">
             <div class="container mx-auto py-4 px-4">

@@ -207,7 +207,7 @@ if ($selected_anak_id == 0 && !empty($anak_data)) {
 // PARAMETER FILTER
 $filter_guru = isset($_GET['guru']) ? $_GET['guru'] : '';
 $filter_kategori = isset($_GET['kategori']) ? $_GET['kategori'] : '';
-$filter_bulan = isset($_GET['bulan']) ? $_GET['bulan'] : '';
+$filter_bulan = isset($_GET['bulan']) ? $_GET['bulan'] : date('Y-m'); // DEFAULT KE BULAN SEKARANG
 $filter_minggu = isset($_GET['minggu']) ? $_GET['minggu'] : '';
 $search_keyword = isset($_GET['search']) ? trim($_GET['search']) : '';
 
@@ -225,9 +225,11 @@ $selected_anak_name = '';
 $guru_list = [];
 $kategori_list = ['Sangat Baik', 'Baik', 'Cukup', 'Kurang'];
 
+// Data untuk range bulan
+$min_max_bulan = ['min' => '2020-01', 'max' => date('Y-m')];
+
 if ($selected_anak_id > 0 && $orangtua_id > 0) {
     // AMBIL NAMA ANAK TERPILIH
-    // PERBAIKAN: Menggunakan tabel siswa_orangtua untuk verifikasi akses
     $sql_anak = "SELECT s.* 
                  FROM siswa s 
                  INNER JOIN siswa_orangtua so ON s.id = so.siswa_id
@@ -241,6 +243,29 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
             $selected_anak_name = $row_anak['nama_lengkap'];
         }
         $stmt_anak->close();
+    }
+
+    // AMBIL RANGE BULAN UNTUK INPUT MONTH
+    $sql_range = "SELECT 
+                    MIN(DATE_FORMAT(tanggal_penilaian, '%Y-%m')) as min_bulan,
+                    MAX(DATE_FORMAT(tanggal_penilaian, '%Y-%m')) as max_bulan
+                  FROM penilaian_siswa 
+                  WHERE siswa_id = ?";
+
+    $stmt_range = $conn->prepare($sql_range);
+    if ($stmt_range) {
+        $stmt_range->bind_param("i", $selected_anak_id);
+        $stmt_range->execute();
+        $result_range = $stmt_range->get_result();
+        if ($row_range = $result_range->fetch_assoc()) {
+            if ($row_range['min_bulan']) {
+                $min_max_bulan['min'] = $row_range['min_bulan'];
+            }
+            if ($row_range['max_bulan']) {
+                $min_max_bulan['max'] = $row_range['max_bulan'];
+            }
+        }
+        $stmt_range->close();
     }
 
     // BANGUN QUERY DASAR
@@ -295,7 +320,7 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
         $count_param_types .= "s";
     }
 
-    // TAMBAH FILTER BULAN
+    // TAMBAH FILTER BULAN - MENGGUNAKAN INPUT MONTH
     if (!empty($filter_bulan)) {
         $base_query .= " AND DATE_FORMAT(ps.tanggal_penilaian, '%Y-%m') = ?";
         $count_query .= " AND DATE_FORMAT(ps.tanggal_penilaian, '%Y-%m') = ?";
@@ -303,33 +328,6 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
         $count_params[] = $filter_bulan;
         $param_types .= "s";
         $count_param_types .= "s";
-    }
-
-    // TAMBAH FILTER MINGGU
-    if (!empty($filter_minggu)) {
-        // Hitung rentang tanggal untuk minggu yang dipilih
-        $tahun = substr($filter_bulan, 0, 4);
-        $bulan = substr($filter_bulan, 5, 2);
-        $tanggal_awal_bulan = "$tahun-$bulan-01";
-
-        $minggu_ke = intval($filter_minggu);
-        $tanggal_mulai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . (($minggu_ke - 1) * 7) . ' days'));
-        $tanggal_selesai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . ($minggu_ke * 7 - 1) . ' days'));
-
-        // Batasi dengan akhir bulan
-        $tanggal_akhir_bulan = date('Y-m-t', strtotime($tanggal_awal_bulan));
-        if (strtotime($tanggal_selesai) > strtotime($tanggal_akhir_bulan)) {
-            $tanggal_selesai = $tanggal_akhir_bulan;
-        }
-
-        $base_query .= " AND ps.tanggal_penilaian BETWEEN ? AND ?";
-        $count_query .= " AND ps.tanggal_penilaian BETWEEN ? AND ?";
-        $params[] = $tanggal_mulai;
-        $params[] = $tanggal_selesai;
-        $count_params[] = $tanggal_mulai;
-        $count_params[] = $tanggal_selesai;
-        $param_types .= "ss";
-        $count_param_types .= "ss";
     }
 
     // TAMBAH SEARCH
@@ -415,100 +413,6 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
     }
 }
 
-// GENERATE OPTIONS BULAN
-$bulan_options = [];
-if ($selected_anak_id > 0) {
-    $sql_bulan = "SELECT DISTINCT DATE_FORMAT(tanggal_penilaian, '%Y-%m') as bulan_tahun,
-                          DATE_FORMAT(tanggal_penilaian, '%M %Y') as bulan_format
-                   FROM penilaian_siswa 
-                   WHERE siswa_id = ?
-                   ORDER BY bulan_tahun DESC";
-
-    $stmt_bulan = $conn->prepare($sql_bulan);
-    if ($stmt_bulan) {
-        $stmt_bulan->bind_param("i", $selected_anak_id);
-        $stmt_bulan->execute();
-        $result_bulan = $stmt_bulan->get_result();
-        while ($row_bulan = $result_bulan->fetch_assoc()) {
-            $bulan_options[$row_bulan['bulan_tahun']] = $row_bulan['bulan_format'];
-        }
-        $stmt_bulan->close();
-    }
-}
-
-// AMBIL DATA MINGGU UNTUK FILTER (hanya jika bulan dipilih)
-$minggu_options = [];
-if (!empty($filter_bulan) && $selected_anak_id > 0) {
-    // Hitung minggu dalam bulan (1-4/5)
-    $tahun = substr($filter_bulan, 0, 4);
-    $bulan = substr($filter_bulan, 5, 2);
-
-    // Tentukan tanggal awal bulan
-    $tanggal_awal_bulan = "$tahun-$bulan-01";
-    $tanggal_akhir_bulan = date('Y-m-t', strtotime($tanggal_awal_bulan));
-
-    // Hitung jumlah hari dalam bulan
-    $jumlah_hari = date('t', strtotime($tanggal_awal_bulan));
-
-    // Bagi menjadi 4 minggu (dengan kemungkinan minggu ke-5)
-    $minggu = [];
-
-    for ($i = 1; $i <= 4; $i++) {
-        $tanggal_mulai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . (($i - 1) * 7) . ' days'));
-        $tanggal_selesai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + ' . ($i * 7 - 1) . ' days'));
-
-        // Pastikan tidak melebihi akhir bulan
-        if (strtotime($tanggal_selesai) > strtotime($tanggal_akhir_bulan)) {
-            $tanggal_selesai = $tanggal_akhir_bulan;
-        }
-
-        // Cek apakah ada penilaian di minggu ini
-        $sql_cek = "SELECT COUNT(*) as total 
-                   FROM penilaian_siswa 
-                   WHERE siswa_id = ? 
-                     AND tanggal_penilaian BETWEEN ? AND ?";
-
-        $stmt_cek = $conn->prepare($sql_cek);
-        if ($stmt_cek) {
-            $stmt_cek->bind_param("iss", $selected_anak_id, $tanggal_mulai, $tanggal_selesai);
-            $stmt_cek->execute();
-            $result_cek = $stmt_cek->get_result();
-            $row_cek = $result_cek->fetch_assoc();
-
-            if ($row_cek['total'] > 0) {
-                $minggu_options[$i] = "Minggu $i: " . date('d M', strtotime($tanggal_mulai)) . " - " . date('d M', strtotime($tanggal_selesai));
-            }
-            $stmt_cek->close();
-        }
-    }
-
-    // Cek untuk minggu ke-5 jika ada
-    if ($jumlah_hari > 28) {
-        $tanggal_mulai = date('Y-m-d', strtotime($tanggal_awal_bulan . ' + 28 days'));
-        $tanggal_selesai = $tanggal_akhir_bulan;
-
-        if (strtotime($tanggal_mulai) <= strtotime($tanggal_akhir_bulan)) {
-            $sql_cek = "SELECT COUNT(*) as total 
-                       FROM penilaian_siswa 
-                       WHERE siswa_id = ? 
-                         AND tanggal_penilaian BETWEEN ? AND ?";
-
-            $stmt_cek = $conn->prepare($sql_cek);
-            if ($stmt_cek) {
-                $stmt_cek->bind_param("iss", $selected_anak_id, $tanggal_mulai, $tanggal_selesai);
-                $stmt_cek->execute();
-                $result_cek = $stmt_cek->get_result();
-                $row_cek = $result_cek->fetch_assoc();
-
-                if ($row_cek['total'] > 0) {
-                    $minggu_options[5] = "Minggu 5: " . date('d M', strtotime($tanggal_mulai)) . " - " . date('d M', strtotime($tanggal_selesai));
-                }
-                $stmt_cek->close();
-            }
-        }
-    }
-}
-
 // HITUNG PAGINATION
 $total_pages = ceil($total_records / $limit);
 $start_record = ($page - 1) * $limit + 1;
@@ -545,7 +449,6 @@ if (!empty($riwayat_data)) {
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        /* CSS styles tetap sama seperti sebelumnya */
         .card {
             transition: transform 0.2s, box-shadow 0.2s;
         }
@@ -712,7 +615,6 @@ if (!empty($riwayat_data)) {
                 display: none;
             }
 
-            /* Tampilkan tabel di desktop */
             .desktop-table {
                 display: block !important;
             }
@@ -762,13 +664,10 @@ if (!empty($riwayat_data)) {
 
         /* Mobile View Styles */
         @media (max-width: 767px) {
-
-            /* Sembunyikan tabel di mobile */
             .desktop-table {
                 display: none !important;
             }
 
-            /* Tampilkan card layout di mobile */
             .mobile-card {
                 display: block !important;
             }
@@ -949,7 +848,6 @@ if (!empty($riwayat_data)) {
                                 <input type="hidden" name="kategori"
                                     value="<?php echo htmlspecialchars($filter_kategori); ?>">
                                 <input type="hidden" name="bulan" value="<?php echo htmlspecialchars($filter_bulan); ?>">
-                                <input type="hidden" name="minggu" value="<?php echo htmlspecialchars($filter_minggu); ?>">
                                 <input type="hidden" name="search" value="<?php echo htmlspecialchars($search_keyword); ?>">
 
                                 <select name="anak_id" onchange="this.form.submit()"
@@ -1008,17 +906,13 @@ if (!empty($riwayat_data)) {
                                         <i class="fas fa-clipboard-list mr-1"></i>
                                         Total: <?php echo $stats['total']; ?> Penilaian
                                     </span>
-                                    <!-- <span class="bg-white/20 px-2 py-1 md:px-3 md:py-1 rounded-full text-xs md:text-sm">
-                                        <i class="fas fa-star mr-1"></i>
-                                        Rata-rata: <?php echo $stats['rata_skor']; ?>/50
-                                    </span> -->
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Filter Section -->
+                <!-- Filter Section dengan Input Month -->
                 <div class="card bg-white rounded-xl shadow p-4 md:p-6 mb-6">
                     <h3 class="text-base md:text-lg font-semibold text-gray-800 mb-3 md:mb-4">
                         <i class="fas fa-filter mr-2"></i> Filter & Pencarian
@@ -1031,7 +925,9 @@ if (!empty($riwayat_data)) {
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
                             <!-- Filter Guru -->
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Filter Guru</label>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">
+                                    <i class="fas fa-chalkboard-teacher mr-1"></i> Filter Guru
+                                </label>
                                 <select name="guru"
                                     class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
                                     <option value="">Semua Guru</option>
@@ -1045,7 +941,9 @@ if (!empty($riwayat_data)) {
 
                             <!-- Filter Kategori -->
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Filter Kategori</label>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">
+                                    <i class="fas fa-tag mr-1"></i> Filter Kategori
+                                </label>
                                 <select name="kategori"
                                     class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
                                     <option value="">Semua Kategori</option>
@@ -1057,35 +955,33 @@ if (!empty($riwayat_data)) {
                                 </select>
                             </div>
 
-                            <!-- Filter Bulan -->
+                            <!-- Filter Bulan - Menggunakan input month dengan default bulan sekarang -->
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Filter Bulan</label>
-                                <select name="bulan"
+                                <label class="block text-sm font-medium text-gray-700 mb-1">
+                                    <i class="fas fa-calendar-alt mr-1"></i> Pilih Bulan
+                                </label>
+                                <input type="month" name="bulan" id="bulanInput" value="<?php echo $filter_bulan; ?>"
+                                    min="<?php echo $min_max_bulan['min']; ?>" max="<?php echo $min_max_bulan['max']; ?>"
+                                    onchange="this.form.submit()"
                                     class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
-                                    <option value="">Semua Bulan</option>
-                                    <?php foreach ($bulan_options as $value => $label): ?>
-                                        <option value="<?php echo $value; ?>" <?php echo $filter_bulan == $value ? 'selected' : ''; ?>>
-                                            <?php echo $label; ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
                             </div>
 
                         </div>
 
                         <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
                             <div class="text-sm text-gray-600">
+                                <i class="fas fa-info-circle mr-1"></i>
                                 Menampilkan <?php echo $start_record; ?>-<?php echo $end_record; ?> dari
                                 <?php echo $total_records; ?> penilaian
                             </div>
                             <div class="flex space-x-2">
                                 <button type="submit"
-                                    class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm md:text-base">
-                                    <i class="fas fa-filter mr-1 md:mr-2"></i> Terapkan Filter
+                                    class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm md:text-base transition-colors">
+                                    <i class="fas fa-filter mr-2"></i> Terapkan Filter
                                 </button>
                                 <a href="riwayatNilai.php?anak_id=<?php echo $selected_anak_id; ?>"
-                                    class="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm md:text-base">
-                                    <i class="fas fa-redo mr-1 md:mr-2"></i> Reset
+                                    class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm md:text-base transition-colors">
+                                    <i class="fas fa-redo mr-2"></i> Reset
                                 </a>
                             </div>
                         </div>
@@ -1162,7 +1058,7 @@ if (!empty($riwayat_data)) {
                             <i class="fas fa-clipboard-list text-4xl text-gray-400 mb-3"></i>
                             <h4 class="text-lg font-medium text-gray-700 mb-2">Tidak ada data penilaian</h4>
                             <p class="text-gray-500 text-sm md:text-base">
-                                <?php echo !empty($filter_guru) || !empty($filter_kategori) || !empty($filter_bulan) || !empty($filter_minggu) || !empty($search_keyword)
+                                <?php echo !empty($filter_guru) || !empty($filter_kategori) || !empty($filter_bulan) || !empty($search_keyword)
                                     ? 'Coba ubah filter atau kata kunci pencarian'
                                     : 'Belum ada penilaian untuk anak ini'; ?>
                             </p>
@@ -1219,7 +1115,6 @@ if (!empty($riwayat_data)) {
                                                 <td class="px-4 md:px-6 py-3 md:py-4 whitespace-nowrap">
                                                     <div class="text-sm font-medium text-gray-900"><?php echo $tanggal_lengkap; ?>
                                                     </div>
-                                                    <!-- <div class="text-xs text-gray-500"><?php echo $data['jam_format']; ?></div> -->
                                                 </td>
                                                 <td class="px-4 md:px-6 py-3 md:py-4">
                                                     <div class="text-sm font-medium text-gray-900"><?php echo $data['nama_guru']; ?>
@@ -1231,7 +1126,6 @@ if (!empty($riwayat_data)) {
                                                     <div class="text-lg font-bold text-gray-900">
                                                         <?php echo $data['total_score']; ?>/50
                                                     </div>
-                                                    <!-- <div class="text-xs text-gray-500"><?php echo $persentase; ?>%</div> -->
                                                 </td>
                                                 <td class="px-4 md:px-6 py-3 md:py-4 whitespace-nowrap">
                                                     <span class="badge <?php echo $badge_class; ?>">
@@ -1283,7 +1177,6 @@ if (!empty($riwayat_data)) {
                                                 <div class="mobile-card-value font-medium">
                                                     <?php echo $tanggal_lengkap; ?>
                                                 </div>
-                                                <!-- <div class="text-xs text-gray-500"><?php echo $data['jam_format']; ?></div> -->
                                             </div>
                                             <div>
                                                 <span class="badge <?php echo $badge_class; ?> text-xs">
@@ -1306,7 +1199,6 @@ if (!empty($riwayat_data)) {
                                             <div class="mobile-card-value">
                                                 <div class="text-lg font-bold text-gray-900"><?php echo $data['total_score']; ?>/50
                                                 </div>
-                                                <!-- <div class="text-sm text-gray-600"><?php echo $persentase; ?>%</div> -->
                                             </div>
                                         </div>
 
@@ -1345,8 +1237,7 @@ if (!empty($riwayat_data)) {
                                             $params = $_GET;
                                             $params['page'] = $page - 1;
                                             echo http_build_query($params);
-                                            ?>"
-                                                class="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50">
+                                            ?>" class="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50">
                                                 <i class="fas fa-chevron-left"></i>
                                             </a>
                                         <?php endif; ?>
@@ -1386,8 +1277,7 @@ if (!empty($riwayat_data)) {
                                             $params = $_GET;
                                             $params['page'] = $total_pages;
                                             echo http_build_query($params);
-                                            ?>"
-                                                class="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50">
+                                            ?>" class="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50">
                                                 <?php echo $total_pages; ?>
                                             </a>
                                         <?php endif; ?>
@@ -1397,8 +1287,7 @@ if (!empty($riwayat_data)) {
                                             $params = $_GET;
                                             $params['page'] = $page + 1;
                                             echo http_build_query($params);
-                                            ?>"
-                                                class="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50">
+                                            ?>" class="px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-50">
                                                 <i class="fas fa-chevron-right"></i>
                                             </a>
                                         <?php endif; ?>
@@ -1408,62 +1297,6 @@ if (!empty($riwayat_data)) {
                         <?php endif; ?>
                     <?php endif; ?>
                 </div>
-
-                <!-- Tips & Saran -->
-                <div class="card bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl shadow p-4 md:p-6">
-                    <h3 class="text-base md:text-lg font-semibold text-gray-800 mb-3 md:mb-4">
-                        <i class="fas fa-lightbulb text-yellow-600 mr-2"></i> Tips untuk Orang Tua
-                    </h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-                        <div>
-                            <h4 class="font-medium text-gray-700 mb-1 md:mb-2 text-sm md:text-base">Berdasarkan Data:</h4>
-                            <ul class="space-y-1 md:space-y-2">
-                                <?php if (isset($insights['trend']) && $insights['trend']['score_change'] > 0): ?>
-                                    <li class="flex items-start">
-                                        <i
-                                            class="fas fa-check text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                        <span class="text-xs md:text-sm">Berikan apresiasi untuk perkembangan positif</span>
-                                    </li>
-                                <?php endif; ?>
-
-                                <?php if (isset($insights['weaknesses'])): ?>
-                                    <li class="flex items-start">
-                                        <i
-                                            class="fas fa-exclamation-triangle text-yellow-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                        <span class="text-xs md:text-sm">Diskusikan area perbaikan dengan guru bimbel</span>
-                                    </li>
-                                <?php endif; ?>
-
-                                <li class="flex items-start">
-                                    <i
-                                        class="fas fa-clock text-blue-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                    <span class="text-xs md:text-sm">Pantau perkembangan bulanan secara konsisten</span>
-                                </li>
-                            </ul>
-                        </div>
-                        <div>
-                            <h4 class="font-medium text-gray-700 mb-1 md:mb-2 text-sm md:text-base">Strategi Belajar:</h4>
-                            <ul class="space-y-1 md:space-y-2">
-                                <li class="flex items-start">
-                                    <i
-                                        class="fas fa-book text-purple-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                    <span class="text-xs md:text-sm">Buat jadwal belajar rutin di rumah</span>
-                                </li>
-                                <li class="flex items-start">
-                                    <i
-                                        class="fas fa-gamepad text-green-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                    <span class="text-xs md:text-sm">Gunakan metode belajar yang menyenangkan</span>
-                                </li>
-                                <li class="flex items-start">
-                                    <i
-                                        class="fas fa-comments text-red-500 mt-0.5 md:mt-1 mr-1 md:mr-2 text-xs md:text-sm"></i>
-                                    <span class="text-xs md:text-sm">Komunikasi intens dengan guru bimbel</span>
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-
             <?php endif; ?>
         </div>
 
@@ -1557,13 +1390,11 @@ if (!empty($riwayat_data)) {
                 const submenu = dropdownGroup.querySelector('.dropdown-submenu');
                 const arrow = this.querySelector('.arrow');
 
-                // Toggle current dropdown
                 if (submenu.style.display === 'block') {
                     submenu.style.display = 'none';
                     arrow.style.transform = 'rotate(0deg)';
                     this.classList.remove('open');
                 } else {
-                    // Close other dropdowns
                     document.querySelectorAll('.dropdown-submenu').forEach(sm => {
                         sm.style.display = 'none';
                     });
@@ -1572,7 +1403,6 @@ if (!empty($riwayat_data)) {
                         t.querySelector('.arrow').style.transform = 'rotate(0deg)';
                     });
 
-                    // Open this dropdown
                     submenu.style.display = 'block';
                     arrow.style.transform = 'rotate(-90deg)';
                     this.classList.add('open');
@@ -1593,16 +1423,10 @@ if (!empty($riwayat_data)) {
             }
         });
 
-        // Filter Minggu - Enable/Disable berdasarkan bulan
-        $(document).ready(function () {
-            $('select[name="bulan"]').change(function () {
-                if ($(this).val()) {
-                    $('select[name="minggu"]').prop('disabled', false);
-                } else {
-                    $('select[name="minggu"]').prop('disabled', true);
-                    $('select[name="minggu"]').val('');
-                }
-            });
+        // Auto-submit saat bulan berubah (opsional)
+        document.getElementById('bulanInput')?.addEventListener('change', function () {
+            // Uncomment baris di bawah jika ingin auto-submit
+            // document.getElementById('filterForm').submit();
         });
 
         // Functionality for penilaian detail
@@ -1610,7 +1434,6 @@ if (!empty($riwayat_data)) {
             const modal = document.getElementById('detailPenilaianModal');
             const content = document.getElementById('detailPenilaianContent');
 
-            // Ensure mobile menu is closed
             mobileMenu.classList.remove('menu-open');
             menuOverlay.classList.remove('active');
             document.body.style.overflow = 'hidden';
