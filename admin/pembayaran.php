@@ -511,7 +511,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_payment_detail') {
         <!-- Page Header -->
         <div class="bg-white shadow px-4 py-3 md:p-4">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
-                <div><h1 class="text-xl md:text-2xl font-bold text-gray-800"><i class="fas fa-credit-card mr-2"></i>Informasi Pembayaran</h1><p class="text-gray-600 text-sm md:text-base">Input, edit, dan kelola pembayaran siswa dengan tanggal spesifik</p></div>
+                <div><h1 class="text-xl md:text-2xl font-bold text-gray-800"><i class="fas fa-credit-card mr-2"></i>Manajemen Pembayaran</h1><p class="text-gray-600 text-sm md:text-base">Input, edit, dan kelola pembayaran siswa dengan tanggal spesifik</p></div>
                 <div class="mt-2 md:mt-0 text-right"><span class="inline-flex items-center px-3 py-1.5 rounded-md text-xs md:text-sm font-medium bg-blue-100 text-blue-800"><i class="fas fa-calendar-alt mr-2"></i><?= date('d/m/Y') ?></span></div>
             </div>
         </div>
