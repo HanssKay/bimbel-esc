@@ -1,7 +1,9 @@
 <?php
 session_start();
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+ini_set('error_log', __DIR__ . '/../logs/error.log');
 
 require_once '../includes/config.php';
 require_once '../config/menu.php';
@@ -190,6 +192,7 @@ usort($rekap_data, function ($a, $b) {
     <title>Rekap Absensi - Bimbel Esc</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <style>
         .table-responsive {
             overflow-x: auto;
@@ -197,7 +200,7 @@ usort($rekap_data, function ($a, $b) {
 
         @media (max-width: 768px) {
             .table-responsive table {
-                min-width: 800px;
+                min-width: 900px;
             }
         }
 
@@ -309,6 +312,164 @@ usort($rekap_data, function ($a, $b) {
         .stat-card:hover {
             transform: translateY(-2px);
         }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 9999;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            animation: fadeIn 0.3s;
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 800px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            animation: slideIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideIn {
+            from { transform: translateY(-50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .modal-header {
+            padding: 1rem 1.5rem;
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+            color: white;
+            border-radius: 12px 12px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .modal-header .close-modal {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: background-color 0.2s;
+        }
+
+        .modal-header .close-modal:hover {
+            background-color: rgba(255,255,255,0.2);
+        }
+
+        .modal-body {
+            padding: 1.5rem;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        .modal-footer {
+            padding: 1rem 1.5rem;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .detail-card {
+            background: #f8fafc;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            border-left: 4px solid;
+            transition: transform 0.2s;
+        }
+
+        .detail-card:hover {
+            transform: translateX(5px);
+        }
+
+        .detail-card.hadir { border-left-color: #10b981; }
+        .detail-card.izin { border-left-color: #f59e0b; }
+        .detail-card.sakit { border-left-color: #3b82f6; }
+        .detail-card.alpha { border-left-color: #ef4444; }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .status-hadir { background: #d1fae5; color: #065f46; }
+        .status-izin { background: #fed7aa; color: #92400e; }
+        .status-sakit { background: #dbeafe; color: #1e40af; }
+        .status-alpha { background: #fee2e2; color: #991b1b; }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .btn-detail {
+            background: none;
+            border: none;
+            color: #3b82f6;
+            cursor: pointer;
+            font-size: 0.875rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.375rem;
+            transition: all 0.2s;
+        }
+
+        .btn-detail:hover {
+            background: #eff6ff;
+            color: #1d4ed8;
+        }
+
+        .btn-detail i {
+            margin-right: 0.25rem;
+        }
+
+        @media (max-width: 640px) {
+            .btn-detail span {
+                display: none;
+            }
+            .btn-detail i {
+                margin-right: 0;
+            }
+        }
     </style>
 </head>
 
@@ -399,7 +560,7 @@ usort($rekap_data, function ($a, $b) {
                     <h1 class="text-2xl font-bold text-gray-800">
                         <i class="fas fa-chart-bar mr-2"></i> Rekap Absensi
                     </h1>
-                    <p class="text-gray-600">Rekapitulasi absensi siswa per bulan</p>
+                    <p class="text-gray-600">Rekapitulasi absensi siswa per bulan - Klik Detail untuk melihat tanggal</p>
                 </div>
                 <div class="mt-2 md:mt-0">
                     <a href="absensiSiswa.php"
@@ -414,7 +575,7 @@ usort($rekap_data, function ($a, $b) {
         <div class="container mx-auto p-4 md:p-6">
             <!-- Filter Periode dan Search -->
             <div class="bg-white shadow rounded-lg p-6 mb-6">
-                <form method="GET" class="flex flex-col md:flex-row gap-4 items-end">
+                <form method="GET" id="filterForm" class="flex flex-col md:flex-row gap-4 items-end">
                     <div class="flex-1">
                         <label class="block text-sm font-medium text-gray-700 mb-1">
                             <i class="fas fa-calendar mr-1"></i> Pilih Periode
@@ -428,7 +589,7 @@ usort($rekap_data, function ($a, $b) {
                         </label>
                         <div class="search-container">
                             <input type="text" name="search" value="<?php echo htmlspecialchars($search_query); ?>"
-                                placeholder="Ketik nama siswa..." class="search-input">
+                                placeholder="Ketik nama siswa..." class="search-input" id="searchInput">
                             <?php if (!empty($search_query)): ?>
                                 <a href="rekapAbsensi.php?periode=<?php echo $periode; ?>" class="clear-search">
                                     <i class="fas fa-times"></i>
@@ -569,6 +730,7 @@ usort($rekap_data, function ($a, $b) {
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sakit</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Alpha</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th>
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
@@ -609,6 +771,19 @@ usort($rekap_data, function ($a, $b) {
                                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                             <?php echo $siswa['total_sesi']; ?>
                                         </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                            <button type="button" 
+                                                    class="btn-detail"
+                                                    data-siswa-id="<?php echo $siswa['id']; ?>"
+                                                    data-siswa-nama="<?php echo htmlspecialchars($siswa['nama_lengkap']); ?>"
+                                                    data-guru-id="<?php echo $guru_id; ?>"
+                                                    data-guru-nama="<?php echo htmlspecialchars($full_name); ?>"
+                                                    data-periode="<?php echo $periode; ?>"
+                                                    onclick="showAbsensiDetail(this)">
+                                                <i class="fas fa-calendar-alt"></i>
+                                                <span>Detail</span>
+                                            </button>
+                                        </td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -624,6 +799,27 @@ usort($rekap_data, function ($a, $b) {
                 © <?php echo date('Y'); ?> Bimbel Esc - Rekap Absensi
             </div>
         </footer>
+    </div>
+
+    <!-- Modal Detail Absensi -->
+    <div id="absensiModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">Detail Absensi Siswa</h3>
+                <button type="button" class="close-modal" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <div class="text-center py-8">
+                    <div class="loading-spinner"></div>
+                    <p class="mt-3 text-gray-600">Memuat data...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" onclick="closeModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">
+                    Tutup
+                </button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -664,28 +860,240 @@ usort($rekap_data, function ($a, $b) {
                 e.stopPropagation();
 
                 const dropdownGroup = this.closest('.mb-1');
+                if (!dropdownGroup) return;
+                
                 const submenu = dropdownGroup.querySelector('.dropdown-submenu');
+                if (!submenu) return;
+                
                 const arrow = this.querySelector('.arrow');
+                const isOpen = submenu.style.display === 'block';
 
-                if (submenu.style.display === 'block') {
-                    submenu.style.display = 'none';
-                    arrow.style.transform = 'rotate(0deg)';
-                    this.classList.remove('open');
-                } else {
-                    document.querySelectorAll('.dropdown-submenu').forEach(sm => {
-                        sm.style.display = 'none';
-                    });
-                    document.querySelectorAll('.dropdown-toggle').forEach(t => {
-                        t.classList.remove('open');
-                        t.querySelector('.arrow').style.transform = 'rotate(0deg)';
-                    });
+                // Tutup semua dropdown lain
+                document.querySelectorAll('.dropdown-submenu').forEach(sm => {
+                    sm.style.display = 'none';
+                });
+                document.querySelectorAll('.dropdown-toggle').forEach(t => {
+                    t.classList.remove('open');
+                    const tArrow = t.querySelector('.arrow');
+                    if (tArrow) tArrow.style.transform = 'rotate(0deg)';
+                });
 
+                // Buka/tutup dropdown yang diklik
+                if (!isOpen) {
                     submenu.style.display = 'block';
-                    arrow.style.transform = 'rotate(-90deg)';
                     this.classList.add('open');
+                    if (arrow) arrow.style.transform = 'rotate(-90deg)';
                 }
             });
         });
+
+        // ==================== MODAL FUNCTIONS ====================
+        function showAbsensiDetail(button) {
+            const siswaId = button.dataset.siswaId;
+            const siswaNama = button.dataset.siswaNama;
+            const guruId = button.dataset.guruId;
+            const guruNama = button.dataset.guruNama;
+            const periode = button.dataset.periode;
+
+            const modal = document.getElementById('absensiModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+
+            modalTitle.innerHTML = `<i class="fas fa-calendar-alt mr-2"></i> Detail Absensi: ${escapeHtml(siswaNama)}`;
+            modalBody.innerHTML = `
+                <div class="text-center py-8">
+                    <div class="loading-spinner"></div>
+                    <p class="mt-3 text-gray-600">Memuat data absensi...</p>
+                </div>
+            `;
+
+            modal.style.display = 'block';
+            document.body.style.overflow = 'hidden';
+
+            // Fetch data via AJAX
+            $.ajax({
+                url: '../guru/ajax_get_absensi_detail_guru.php',
+                type: 'GET',
+                data: {
+                    siswa_id: siswaId,
+                    guru_id: guruId,
+                    periode: periode
+                },
+                dataType: 'json',
+                success: function(response) {
+                    if (response.success) {
+                        renderAbsensiDetail(response, siswaNama, guruNama, periode);
+                    } else {
+                        modalBody.innerHTML = `
+                            <div class="text-center py-8">
+                                <i class="fas fa-exclamation-triangle text-5xl text-red-400 mb-4"></i>
+                                <p class="text-gray-700">Gagal memuat data: ${response.message}</p>
+                            </div>
+                        `;
+                    }
+                },
+                error: function(xhr, status, error) {
+                    modalBody.innerHTML = `
+                        <div class="text-center py-8">
+                            <i class="fas fa-exclamation-triangle text-5xl text-red-400 mb-4"></i>
+                            <p class="text-gray-700">Terjadi kesalahan: ${error}</p>
+                        </div>
+                    `;
+                }
+            });
+        }
+
+        function renderAbsensiDetail(data, siswaNama, guruNama, periode) {
+            const modalBody = document.getElementById('modalBody');
+            
+            if (data.total === 0) {
+                modalBody.innerHTML = `
+                    <div class="text-center py-8">
+                        <i class="fas fa-calendar-times text-5xl text-gray-400 mb-4"></i>
+                        <p class="text-gray-700">Tidak ada data absensi untuk periode ini.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+            const [tahun, bulan] = periode.split('-');
+            const bulanName = monthNames[parseInt(bulan) - 1];
+            const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
+            let html = `
+                <div class="mb-4 p-3 bg-gray-100 rounded-lg">
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+                        <div class="bg-green-100 rounded-lg p-2">
+                            <div class="text-sm text-gray-600">Hadir</div>
+                            <div class="text-xl font-bold text-green-600">${data.summary.hadir}</div>
+                        </div>
+                        <div class="bg-yellow-100 rounded-lg p-2">
+                            <div class="text-sm text-gray-600">Izin</div>
+                            <div class="text-xl font-bold text-yellow-600">${data.summary.izin}</div>
+                        </div>
+                        <div class="bg-blue-100 rounded-lg p-2">
+                            <div class="text-sm text-gray-600">Sakit</div>
+                            <div class="text-xl font-bold text-blue-600">${data.summary.sakit}</div>
+                        </div>
+                        <div class="bg-red-100 rounded-lg p-2">
+                            <div class="text-sm text-gray-600">Alpha</div>
+                            <div class="text-xl font-bold text-red-600">${data.summary.alpha}</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-3 text-sm text-gray-500">
+                    <i class="fas fa-chalkboard-teacher mr-1"></i> Guru: ${escapeHtml(guruNama)}
+                    <span class="mx-2">|</span>
+                    <i class="fas fa-calendar mr-1"></i> Periode: ${bulanName} ${tahun}
+                    <span class="mx-2">|</span>
+                    <i class="fas fa-chart-line mr-1"></i> Total Sesi: ${data.total}
+                </div>
+                
+                <div class="border-t border-gray-200 mt-2 pt-3">
+                    <h4 class="font-medium text-gray-800 mb-3">
+                        <i class="fas fa-list-ul mr-1"></i> Daftar Absensi
+                    </h4>
+                    <div class="space-y-2">
+            `;
+
+            data.data.forEach(function(item) {
+                const statusClass = `detail-card ${item.status}`;
+                const statusBadgeClass = `status-badge status-${item.status}`;
+                let statusIcon = '';
+                let statusText = '';
+                
+                switch(item.status) {
+                    case 'hadir':
+                        statusIcon = 'fa-check-circle';
+                        statusText = 'Hadir';
+                        break;
+                    case 'izin':
+                        statusIcon = 'fa-envelope';
+                        statusText = 'Izin';
+                        break;
+                    case 'sakit':
+                        statusIcon = 'fa-thermometer-half';
+                        statusText = 'Sakit';
+                        break;
+                    case 'alpha':
+                        statusIcon = 'fa-times-circle';
+                        statusText = 'Alpha';
+                        break;
+                }
+                
+                const tanggal = new Date(item.tanggal_absensi);
+                const dayName = dayNames[tanggal.getDay()];
+                const tanggalFormatted = `${dayName}, ${tanggal.getDate()} ${monthNames[tanggal.getMonth()]} ${tanggal.getFullYear()}`;
+                
+                html += `
+                    <div class="${statusClass} p-3">
+                        <div class="flex justify-between items-start flex-wrap gap-2">
+                            <div class="flex items-center">
+                                <i class="fas ${statusIcon} mr-2 text-lg"></i>
+                                <div>
+                                    <div class="font-medium">${tanggalFormatted}</div>
+                                    <div class="text-xs text-gray-500 mt-1">
+                                        <i class="far fa-clock mr-1"></i> Input: ${item.waktu_input || '-'}
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <span class="${statusBadgeClass}">${statusText}</span>
+                            </div>
+                        </div>
+                `;
+                
+                if (item.keterangan && item.keterangan.trim() !== '') {
+                    html += `
+                        <div class="mt-2 text-sm text-gray-600 pl-6">
+                            <i class="fas fa-comment mr-1"></i> Keterangan: ${escapeHtml(item.keterangan)}
+                        </div>
+                    `;
+                }
+                
+                if (item.bukti_izin && item.bukti_izin.trim() !== '') {
+                    html += `
+                        <div class="mt-1 text-sm text-gray-500 pl-6">
+                            <i class="fas fa-paperclip mr-1"></i> Ada bukti izin
+                        </div>
+                    `;
+                }
+                
+                html += `</div>`;
+            });
+            
+            html += `
+                    </div>
+                </div>
+            `;
+            
+            modalBody.innerHTML = html;
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('absensiModal');
+            if (modal) {
+                modal.style.display = 'none';
+                document.body.style.overflow = 'auto';
+            }
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('absensiModal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
     </script>
 </body>
 
