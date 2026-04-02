@@ -1407,7 +1407,7 @@ if (empty($_SESSION['csrf_token'])) {
 
                             </div>
                             <div id="filterSiswaDropdown"
-                                class="absolute z-999 w-20 bg-white mt-1 border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto hidden">
+                                class="absolute z-999 w-90 bg-white mt-1 border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto hidden">
                             </div>
                         </div>
 
