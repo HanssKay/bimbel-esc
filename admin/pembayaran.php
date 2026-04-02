@@ -45,33 +45,38 @@ $STATUS_PEMBAYARAN = [
 ];
 
 // Tangani actions
-$current_month = date('Y-m');
-$selected_month = $_GET['bulan'] ?? $current_month;
+$current_month = isset($_GET['bulan']) ? $_GET['bulan'] : date('Y-m');
+$current_year = isset($_GET['tahun']) ? $_GET['tahun'] : date('Y');
+$current_bulan_filter = isset($_GET['bulan_filter']) ? $_GET['bulan_filter'] : date('m');
+
+// Untuk filter tampilan (bisa filter per bulan atau per tahun)
+$filter_tipe = isset($_GET['filter_tipe']) ? $_GET['filter_tipe'] : 'bulan'; // bulan atau tahun
+$selected_filter = $filter_tipe == 'bulan' ? $current_month : $current_year;
+
 $success_msg = '';
 $error_msg = '';
 
 // ============================================
-// ACTION: Input pembayaran baru
+// ACTION: Input pembayaran baru (DENGAN TANGGAL)
 // ============================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_payment'])) {
 
     $siswa_id = intval($_POST['siswa_id']);
-    $bulan = $_POST['bulan'];
+    $tanggal_bayar_input = $_POST['tanggal_bayar'] ?? date('Y-m-d');
     $nominal_tagihan = floatval(str_replace(['.', ','], ['', '.'], $_POST['nominal_tagihan'] ?? $NOMINAL_DEFAULT));
     $nominal_dibayar = floatval(str_replace(['.', ','], ['', '.'], $_POST['nominal_dibayar'] ?? 0));
     $metode_bayar = $_POST['metode_bayar'] ?? NULL;
     $keterangan = $_POST['keterangan'] ?? NULL;
     $status = $_POST['status'] ?? 'belum_bayar';
 
-    // HANYA VALIDASI WAJIB
+    // Ekstrak bulan dari tanggal bayar untuk bulan_tagihan
+    $bulan_tagihan = date('Y-m', strtotime($tanggal_bayar_input));
+
     $errors = [];
-    if (!$siswa_id)
-        $errors[] = "Harap pilih siswa!";
-    if (empty($bulan))
-        $errors[] = "Harap pilih bulan tagihan!";
+    if (!$siswa_id) $errors[] = "Harap pilih siswa!";
+    if (empty($tanggal_bayar_input)) $errors[] = "Harap pilih tanggal pembayaran!";
 
     if (empty($errors)) {
-        // Gunakan query biasa untuk menghindari sync error
         $check_pendaftaran = $conn->query("SELECT id FROM pendaftaran_siswa WHERE siswa_id = $siswa_id AND status = 'aktif' LIMIT 1");
 
         if ($check_pendaftaran->num_rows == 0) {
@@ -80,36 +85,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_payment'])) {
             $pendaftaran_row = $check_pendaftaran->fetch_assoc();
             $pendaftaran_id = $pendaftaran_row['id'];
 
-            // Cek duplikat
             $check = $conn->query("SELECT p.id FROM pembayaran p 
                                  JOIN pendaftaran_siswa ps ON p.pendaftaran_id = ps.id 
-                                 WHERE ps.siswa_id = $siswa_id AND p.bulan_tagihan = '$bulan'");
+                                 WHERE ps.siswa_id = $siswa_id AND p.bulan_tagihan = '$bulan_tagihan'");
 
             if ($check->num_rows > 0) {
-                $errors[] = "Sudah ada pembayaran untuk siswa ini di bulan tersebut";
+                $errors[] = "Sudah ada pembayaran untuk siswa ini di bulan " . date('F Y', strtotime($bulan_tagihan));
             } else {
-                // Tentukan tanggal bayar
-                $tanggal_bayar = ($status == 'lunas' || ($status == 'belum_bayar' && $nominal_dibayar > 0))
-                    ? date('Y-m-d')
-                    : NULL;
-
-                // Escape data untuk keamanan
+                $tanggal_bayar_db = $tanggal_bayar_input;
                 $metode_bayar_escaped = $metode_bayar ? "'" . $conn->real_escape_string($metode_bayar) . "'" : "NULL";
                 $keterangan_escaped = $keterangan ? "'" . $conn->real_escape_string($keterangan) . "'" : "NULL";
                 $status_escaped = $conn->real_escape_string($status);
 
-                // INSERT langsung
                 $sql = "INSERT INTO pembayaran 
                     (pendaftaran_id, bulan_tagihan, nominal_tagihan, status, 
                      nominal_dibayar, metode_bayar, tanggal_bayar, keterangan, dibuat_oleh) 
-                    VALUES ($pendaftaran_id, '$bulan', $nominal_tagihan, '$status_escaped',
-                            $nominal_dibayar, $metode_bayar_escaped, " .
-                    ($tanggal_bayar ? "'$tanggal_bayar'" : "NULL") . ", 
+                    VALUES ($pendaftaran_id, '$bulan_tagihan', $nominal_tagihan, '$status_escaped',
+                            $nominal_dibayar, $metode_bayar_escaped, '$tanggal_bayar_db', 
                             $keterangan_escaped, {$_SESSION['user_id']})";
 
                 if ($conn->query($sql)) {
-                    $success_msg = "Pembayaran berhasil dicatat!";
-                    header('Location: ' . $_SERVER['PHP_SELF'] . '?bulan=' . $selected_month . '&success=1');
+                    $success_msg = "Pembayaran berhasil dicatat! (Tanggal: " . date('d/m/Y', strtotime($tanggal_bayar_db)) . ")";
+                    header('Location: ' . $_SERVER['PHP_SELF'] . '?filter_tipe=' . $filter_tipe . '&' . ($filter_tipe == 'bulan' ? 'bulan' : 'tahun') . '=' . $selected_filter . '&success=1');
                     exit();
                 } else {
                     $errors[] = "Gagal mencatat pembayaran: " . $conn->error;
@@ -124,7 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_payment'])) {
 }
 
 // ============================================
-// ACTION: Update pembayaran
+// ACTION: Update pembayaran (EDIT)
 // ============================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
     error_log("=== UPDATE PAYMENT PROCESSING ===");
@@ -134,8 +131,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
     $nominal_dibayar = $_POST['nominal_dibayar'] ?? 0;
     $metode_bayar = $_POST['metode_bayar'] ?? NULL;
     $keterangan = $_POST['keterangan'] ?? NULL;
+    $tanggal_bayar = $_POST['tanggal_bayar'] ?? date('Y-m-d');
+    $nominal_tagihan = floatval(str_replace(['.', ','], ['', '.'], $_POST['nominal_tagihan'] ?? $NOMINAL_DEFAULT));
 
-    error_log("Update - Status: $status, ID: $pembayaran_id");
+    error_log("Update - Status: $status, ID: $pembayaran_id, Tanggal: $tanggal_bayar");
 
     // Konversi angka
     $nominal_dibayar = floatval(str_replace(['.', ','], ['', '.'], $nominal_dibayar));
@@ -146,13 +145,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
         $metode_bayar = NULL;
     }
 
-    // Jika status lunas
-    if ($status == 'lunas') {
+    // Jika status lunas dan tanggal bayar kosong, gunakan hari ini
+    if ($status == 'lunas' && empty($tanggal_bayar)) {
         $tanggal_bayar = date('Y-m-d');
-        if (empty($metode_bayar)) {
-            $metode_bayar = 'cash';
-        }
-    } else {
+    }
+
+    // Jika status belum bayar, tanggal bayar bisa NULL
+    if ($status == 'belum_bayar') {
         $tanggal_bayar = NULL;
     }
 
@@ -161,9 +160,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
         $metode_bayar = NULL;
     }
 
-    // UPDATE
+    // UPDATE semua field termasuk nominal_tagihan
     $update = $conn->prepare("UPDATE pembayaran SET 
         status = ?,
+        nominal_tagihan = ?,
         nominal_dibayar = ?,
         metode_bayar = ?,
         tanggal_bayar = ?,
@@ -174,8 +174,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
 
     if ($update) {
         $update->bind_param(
-            "sdsssii",
+            "sddsssii",
             $status,
+            $nominal_tagihan,
             $nominal_dibayar,
             $metode_bayar,
             $tanggal_bayar,
@@ -186,7 +187,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
 
         if ($update->execute()) {
             $success_msg = "Pembayaran berhasil diperbarui! Status: " . $STATUS_PEMBAYARAN[$status];
-            header('Location: ' . $_SERVER['PHP_SELF'] . '?bulan=' . $selected_month . '&success=2');
+            header('Location: ' . $_SERVER['PHP_SELF'] . '?filter_tipe=' . $filter_tipe . '&' . ($filter_tipe == 'bulan' ? 'bulan' : 'tahun') . '=' . $selected_filter . '&success=2');
             exit();
         } else {
             $error_msg = "Gagal update: " . $update->error;
@@ -206,7 +207,7 @@ if (isset($_GET['delete_id'])) {
 
     if ($delete->execute()) {
         $success_msg = "Pembayaran berhasil dihapus!";
-        header('Location: ' . $_SERVER['PHP_SELF'] . '?bulan=' . $selected_month . '&success=3');
+        header('Location: ' . $_SERVER['PHP_SELF'] . '?filter_tipe=' . $filter_tipe . '&' . ($filter_tipe == 'bulan' ? 'bulan' : 'tahun') . '=' . $selected_filter . '&success=3');
         exit();
     }
 }
@@ -214,19 +215,13 @@ if (isset($_GET['delete_id'])) {
 // Check success messages
 if (isset($_GET['success'])) {
     switch ($_GET['success']) {
-        case '1':
-            $success_msg = "Pembayaran berhasil dicatat!";
-            break;
-        case '2':
-            $success_msg = "Pembayaran berhasil diperbarui!";
-            break;
-        case '3':
-            $success_msg = "Pembayaran berhasil dihapus!";
-            break;
+        case '1': $success_msg = "Pembayaran berhasil dicatat!"; break;
+        case '2': $success_msg = "Pembayaran berhasil diperbarui!"; break;
+        case '3': $success_msg = "Pembayaran berhasil dihapus!"; break;
     }
 }
 
-// QUERY data pembayaran dengan info lengkap untuk detail
+// QUERY data pembayaran dengan info lengkap
 $sql = "SELECT 
     p.*,
     s.nama_lengkap,
@@ -250,15 +245,12 @@ $sql = "SELECT
     o.perusahaan,
     o.hubungan_dengan_siswa,
     
-    -- Hitung sisa
     (p.nominal_tagihan - COALESCE(p.nominal_dibayar, 0)) as sisa_tagihan,
     
-    -- Format tanggal
     DATE_FORMAT(p.tanggal_bayar, '%d/%m/%Y') as tgl_bayar_formatted,
     DATE_FORMAT(p.dibuat_pada, '%d/%m/%Y %H:%i') as dibuat_formatted,
     DATE_FORMAT(p.diperbarui_pada, '%d/%m/%Y %H:%i') as diperbarui_formatted,
     
-    -- Nama admin
     (SELECT full_name FROM users WHERE id = p.dibuat_oleh) as dibuat_oleh_nama,
     (SELECT full_name FROM users WHERE id = p.diperbarui_oleh) as diperbarui_oleh_nama
     
@@ -266,14 +258,23 @@ FROM pembayaran p
 JOIN pendaftaran_siswa ps ON p.pendaftaran_id = ps.id
 JOIN siswa s ON ps.siswa_id = s.id
 LEFT JOIN siswa_orangtua so ON s.id = so.siswa_id
-LEFT JOIN orangtua o ON so.orangtua_id = o.id
-WHERE p.bulan_tagihan = ?
-ORDER BY 
-    FIELD(p.status, 'belum_bayar', 'dibebaskan', 'lunas'),
-    s.nama_lengkap";
+LEFT JOIN orangtua o ON so.orangtua_id = o.id";
 
-$stmt = $conn->prepare($sql);
-$stmt->bind_param("s", $selected_month);
+// Filter berdasarkan pilihan
+if ($filter_tipe == 'bulan') {
+    $sql .= " WHERE DATE_FORMAT(p.tanggal_bayar, '%Y-%m') = ? OR (p.tanggal_bayar IS NULL AND p.bulan_tagihan = ?)";
+    $sql .= " ORDER BY p.tanggal_bayar DESC, FIELD(p.status, 'belum_bayar', 'dibebaskan', 'lunas'), s.nama_lengkap";
+    
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("ss", $selected_filter, $selected_filter);
+} else {
+    $sql .= " WHERE YEAR(p.tanggal_bayar) = ? OR (p.tanggal_bayar IS NULL AND YEAR(STR_TO_DATE(CONCAT(p.bulan_tagihan, '-01'), '%Y-%m-%d')) = ?)";
+    $sql .= " ORDER BY p.tanggal_bayar DESC, FIELD(p.status, 'belum_bayar', 'dibebaskan', 'lunas'), s.nama_lengkap";
+    
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param("ss", $selected_filter, $selected_filter);
+}
+
 $stmt->execute();
 $result = $stmt->get_result();
 $pembayaran_list = $result->fetch_all(MYSQLI_ASSOC);
@@ -290,15 +291,12 @@ foreach ($pembayaran_list as $p) {
     $total_tagihan += $p['nominal_tagihan'];
     $total_dibayar += $p['nominal_dibayar'];
 
-    if ($p['status'] == 'lunas')
-        $lunas_count++;
-    if ($p['status'] == 'belum_bayar')
-        $belum_count++;
-    if ($p['status'] == 'dibebaskan')
-        $bebas_count++;
+    if ($p['status'] == 'lunas') $lunas_count++;
+    if ($p['status'] == 'belum_bayar') $belum_count++;
+    if ($p['status'] == 'dibebaskan') $bebas_count++;
 }
 
-// Ambil list siswa untuk autocomplete - QUERY YANG DIPERBAIKI
+// Ambil list siswa untuk autocomplete
 $siswa_list = [];
 $siswa_result = $conn->query("SELECT 
     s.id,
@@ -362,6 +360,47 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
     echo json_encode($filtered_siswa);
     exit();
 }
+
+// AJAX Handler untuk get detail pembayaran (untuk edit)
+if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_payment_detail') {
+    header('Content-Type: application/json');
+    
+    $payment_id = isset($_GET['payment_id']) ? intval($_GET['payment_id']) : 0;
+    
+    if ($payment_id > 0) {
+        $sql_detail = "SELECT 
+            p.*,
+            s.nama_lengkap,
+            s.kelas,
+            s.sekolah_asal,
+            ps.jenis_kelas,
+            ps.tingkat,
+            o.nama_ortu,
+            o.no_hp
+        FROM pembayaran p
+        JOIN pendaftaran_siswa ps ON p.pendaftaran_id = ps.id
+        JOIN siswa s ON ps.siswa_id = s.id
+        LEFT JOIN siswa_orangtua so ON s.id = so.siswa_id
+        LEFT JOIN orangtua o ON so.orangtua_id = o.id
+        WHERE p.id = ?";
+        
+        $stmt_detail = $conn->prepare($sql_detail);
+        $stmt_detail->bind_param("i", $payment_id);
+        $stmt_detail->execute();
+        $result_detail = $stmt_detail->get_result();
+        
+        if ($result_detail->num_rows > 0) {
+            $data = $result_detail->fetch_assoc();
+            echo json_encode(['success' => true, 'data' => $data]);
+        } else {
+            echo json_encode(['success' => false, 'error' => 'Data tidak ditemukan']);
+        }
+        $stmt_detail->close();
+    } else {
+        echo json_encode(['success' => false, 'error' => 'ID tidak valid']);
+    }
+    exit();
+}
 ?>
 
 <!DOCTYPE html>
@@ -370,486 +409,95 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Manajemen Pembayaran - Admin Bimbel Esc</title>
+    <title>Manajemen Pembayaran - Bimbel Esc</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <style>
-        .stat-card {
-            transition: transform 0.3s, box-shadow 0.3s;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-        }
-
-        .badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
-        }
-
-        .badge-success {
-            background-color: #d1fae5;
-            color: #065f46;
-        }
-
-        .badge-danger {
-            background-color: #fee2e2;
-            color: #991b1b;
-        }
-
-        .badge-warning {
-            background-color: #fef3c7;
-            color: #92400e;
-        }
-
-        .badge-info {
-            background-color: #dbeafe;
-            color: #1e40af;
-        }
-
-        .badge-cash {
-            background-color: #10B981;
-            color: white;
-        }
-
-        .badge-transfer {
-            background-color: #3B82F6;
-            color: white;
-        }
-
-        .badge-qris {
-            background-color: #8B5CF6;
-            color: white;
-        }
-
-        .badge-debit {
-            background-color: #F59E0B;
-            color: white;
-        }
-
-        .badge-credit {
-            background-color: #EC4899;
-            color: white;
-        }
-
-        .badge-ewallet {
-            background-color: #6366F1;
-            color: white;
-        }
-
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.4);
-            overflow-y: auto;
-            padding: 20px 0;
-        }
-
-        .modal-content {
-            background-color: white;
-            margin: 30px auto;
-            padding: 0;
-            border-radius: 10px;
-            width: 90%;
-            max-width: 600px;
-            max-height: 90vh;
-            overflow-y: auto;
-            animation: modalFadeIn 0.3s;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-        }
-
-        /* Dropdown styles */
-        .dropdown-submenu {
-            display: none;
-            max-height: 500px;
-            overflow: hidden;
-            transition: max-height 0.3s ease;
-        }
-
-        .dropdown-submenu[style*="display: block"] {
-            display: block;
-        }
-
-        .dropdown-toggle.open .arrow {
-            transform: rotate(90deg);
-        }
-
-
-        @keyframes modalFadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(-20px) scale(0.95);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-            }
-        }
-
-        /* CSS untuk autocomplete */
-        .autocomplete-container {
-            position: relative;
-            width: 100%;
-        }
-
-        .autocomplete-input {
-            width: 100%;
-            padding: 0.75rem 2.5rem 0.75rem 0.75rem;
-            border: 1px solid #d1d5db;
-            border-radius: 0.5rem;
-            font-size: 0.875rem;
-            transition: all 0.2s;
-        }
-
-        .autocomplete-input:focus {
-            outline: none;
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
-        }
-
-        .autocomplete-clear {
-            position: absolute;
-            right: 0.75rem;
-            top: 50%;
-            transform: translateY(-50%);
-            background: none;
-            border: none;
-            color: #9ca3af;
-            cursor: pointer;
-            display: none;
-        }
-
-        .autocomplete-clear:hover {
-            color: #6b7280;
-        }
-
-        .autocomplete-dropdown {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            max-height: 300px;
-            overflow-y: auto;
-            background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 0.5rem;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-            z-index: 1000;
-            display: none;
-        }
-
-        .autocomplete-item {
-            padding: 0.75rem 1rem;
-            cursor: pointer;
-            border-bottom: 1px solid #f3f4f6;
-            transition: background-color 0.2s;
-        }
-
-        .autocomplete-item:last-child {
-            border-bottom: none;
-        }
-
-        .autocomplete-item:hover {
-            background-color: #f9fafb;
-        }
-
-        .autocomplete-item.active {
-            background-color: #eff6ff;
-        }
-
-        .autocomplete-item .siswa-nama {
-            font-weight: 600;
-            color: #1f2937;
-        }
-
-        .autocomplete-item .siswa-info {
-            font-size: 0.75rem;
-            color: #6b7280;
-            margin-top: 0.25rem;
-        }
-
-        .no-results {
-            padding: 1rem;
-            text-align: center;
-            color: #6b7280;
-            font-style: italic;
-        }
-
-        /* Info siswa yang dipilih */
-        .selected-siswa-info {
-            border-left: 4px solid #3B82F6;
-            background-color: #EFF6FF;
-            margin-top: 0.5rem;
-            border-radius: 0.5rem;
-        }
-
-        /* Loading spinner */
-        .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #3b82f6;
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            animation: spin 1s linear infinite;
-            display: inline-block;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-
-        /* Status indicator */
-        .status-indicator {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 6px;
-        }
-
-        .status-lunas {
-            background-color: #10B981;
-        }
-
-        .status-belum {
-            background-color: #EF4444;
-        }
-
-        .status-dibebaskan {
-            background-color: #F59E0B;
-        }
-
-        /* Form hints */
-        .form-hint {
-            font-size: 0.75rem;
-            padding: 4px 8px;
-            border-radius: 4px;
-            margin-top: 4px;
-            display: inline-block;
-        }
-
-        .hint-info {
-            background-color: #DBEAFE;
-            color: #1E40AF;
-        }
-
-        .hint-success {
-            background-color: #D1FAE5;
-            color: #065F46;
-        }
-
-        .hint-warning {
-            background-color: #FEF3C7;
-            color: #92400E;
-        }
-
-        /* Detail item */
-        .detail-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 0;
-            border-bottom: 1px solid #f3f4f6;
-        }
-
-        .detail-label {
-            color: #6b7280;
-            font-size: 14px;
-        }
-
-        .detail-value {
-            color: #111827;
-            font-weight: 500;
-            text-align: right;
-            max-width: 60%;
-        }
-
-        /* Action buttons */
-        .action-btn {
-            padding: 8px;
-            border-radius: 8px;
-            transition: all 0.2s;
-        }
-
-        .action-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-        }
-
-        .mobile-action-buttons {
-            display: flex;
-            flex-wrap: nowrap;
-            gap: 4px;
-        }
-
-        /* Mobile menu */
-        #mobileMenu {
-            position: fixed;
-            left: -100%;
-            top: 0;
-            width: 85%;
-            height: 100%;
-            z-index: 1001;
-            transition: left 0.3s ease;
-            box-shadow: 5px 0 25px rgba(0, 0, 0, 0.2);
-        }
-
-        #mobileMenu.menu-open {
-            left: 0;
-        }
-
-        .menu-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
-            display: none;
-        }
-
-        .menu-overlay.active {
-            display: block;
-        }
-
-        /* Responsive */
-        @media (max-width: 767px) {
-            .desktop-sidebar {
-                display: none;
-            }
-
-            .modal-content {
-                width: 95%;
-                margin: 10px auto;
-                max-height: 85vh;
-            }
-
-            .autocomplete-dropdown {
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                width: 90%;
-                max-height: 80vh;
-                z-index: 1002;
-            }
-
-            .mobile-action-buttons .action-btn {
-                padding: 6px;
-                min-width: 36px;
-            }
-
-            .detail-value {
-                max-width: 50%;
-            }
-        }
-
-        @media (min-width: 768px) {
-            .mobile-header {
-                display: none;
-            }
-        }
+        /* CSS Styles (sama seperti sebelumnya) */
+        .stat-card { transition: transform 0.3s, box-shadow 0.3s; }
+        .stat-card:hover { transform: translateY(-5px); box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .badge-success { background-color: #d1fae5; color: #065f46; }
+        .badge-danger { background-color: #fee2e2; color: #991b1b; }
+        .badge-warning { background-color: #fef3c7; color: #92400e; }
+        .badge-info { background-color: #dbeafe; color: #1e40af; }
+        .badge-cash { background-color: #10B981; color: white; }
+        .badge-transfer { background-color: #3B82F6; color: white; }
+        .badge-qris { background-color: #8B5CF6; color: white; }
+        .badge-debit { background-color: #F59E0B; color: white; }
+        .badge-credit { background-color: #EC4899; color: white; }
+        .badge-ewallet { background-color: #6366F1; color: white; }
+        
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.4); overflow-y: auto; padding: 20px 0; }
+        .modal-content { background-color: white; margin: 30px auto; padding: 0; border-radius: 10px; width: 90%; max-width: 600px; max-height: 90vh; overflow-y: auto; animation: modalFadeIn 0.3s; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+        @keyframes modalFadeIn { from { opacity: 0; transform: translateY(-20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        
+        .autocomplete-container { position: relative; width: 100%; }
+        .autocomplete-input { width: 100%; padding: 0.75rem 2.5rem 0.75rem 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-size: 0.875rem; transition: all 0.2s; }
+        .autocomplete-input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.1); }
+        .autocomplete-clear { position: absolute; right: 0.75rem; top: 50%; transform: translateY(-50%); background: none; border: none; color: #9ca3af; cursor: pointer; display: none; }
+        .autocomplete-clear:hover { color: #6b7280; }
+        .autocomplete-dropdown { position: absolute; top: 100%; left: 0; right: 0; max-height: 300px; overflow-y: auto; background: white; border: 1px solid #e5e7eb; border-radius: 0.5rem; box-shadow: 0 10px 25px rgba(0,0,0,0.1); z-index: 1000; display: none; }
+        .autocomplete-item { padding: 0.75rem 1rem; cursor: pointer; border-bottom: 1px solid #f3f4f6; transition: background-color 0.2s; }
+        .autocomplete-item:last-child { border-bottom: none; }
+        .autocomplete-item:hover { background-color: #f9fafb; }
+        .autocomplete-item.active { background-color: #eff6ff; }
+        .autocomplete-item .siswa-nama { font-weight: 600; color: #1f2937; }
+        .autocomplete-item .siswa-info { font-size: 0.75rem; color: #6b7280; margin-top: 0.25rem; }
+        .no-results { padding: 1rem; text-align: center; color: #6b7280; font-style: italic; }
+        .selected-siswa-info { border-left: 4px solid #3B82F6; background-color: #EFF6FF; margin-top: 0.5rem; border-radius: 0.5rem; }
+        .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3b82f6; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .status-indicator { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+        .status-lunas { background-color: #10B981; }
+        .status-belum { background-color: #EF4444; }
+        .status-dibebaskan { background-color: #F59E0B; }
+        .form-hint { font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; margin-top: 4px; display: inline-block; }
+        .hint-info { background-color: #DBEAFE; color: #1E40AF; }
+        .hint-success { background-color: #D1FAE5; color: #065F46; }
+        .hint-warning { background-color: #FEF3C7; color: #92400E; }
+        .detail-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f3f4f6; }
+        .detail-label { color: #6b7280; font-size: 14px; }
+        .detail-value { color: #111827; font-weight: 500; text-align: right; max-width: 60%; }
+        .action-btn { padding: 8px; border-radius: 8px; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; }
+        .action-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        
+        #mobileMenu { position: fixed; left: -100%; top: 0; width: 85%; height: 100%; z-index: 1001; transition: left 0.3s ease; box-shadow: 5px 0 25px rgba(0,0,0,0.2); }
+        #mobileMenu.menu-open { left: 0; }
+        .menu-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 1000; display: none; }
+        .menu-overlay.active { display: block; }
+        .dropdown-submenu { display: none; max-height: 500px; overflow: hidden; transition: max-height 0.3s ease; }
+        .dropdown-submenu[style*="display: block"] { display: block; }
+        .dropdown-toggle.open .arrow { transform: rotate(90deg); }
+        
+        @media (max-width: 767px) { .desktop-sidebar { display: none; } .modal-content { width: 95%; margin: 10px auto; max-height: 85vh; } .detail-value { max-width: 50%; } .action-btn { padding: 6px; } }
+        @media (min-width: 768px) { .mobile-header { display: none; } }
     </style>
 </head>
 
 <body class="bg-gray-100">
     <!-- Desktop Sidebar -->
     <div class="desktop-sidebar w-64 bg-blue-800 text-white fixed h-full z-40 overflow-y-auto">
-        <div class="p-4">
-            <h1 class="text-xl font-bold">Bimbel Esc</h1>
-            <p class="text-sm text-blue-200">Admin Dashboard</p>
-        </div>
-        <div class="p-4 bg-blue-900">
-            <div class="flex items-center">
-                <div class="w-10 h-10 bg-white text-blue-800 rounded-full flex items-center justify-center">
-                    <i class="fas fa-user-shield"></i>
-                </div>
-                <div class="ml-3">
-                    <p class="font-medium"><?= htmlspecialchars($full_name) ?></p>
-                    <p class="text-sm text-blue-300">Administrator</p>
-                </div>
-            </div>
-        </div>
+        <div class="p-4"><h1 class="text-xl font-bold">Bimbel Esc</h1><p class="text-sm text-blue-200">Admin Dashboard</p></div>
+        <div class="p-4 bg-blue-900"><div class="flex items-center"><div class="w-10 h-10 bg-white text-blue-800 rounded-full flex items-center justify-center"><i class="fas fa-user-shield"></i></div><div class="ml-3"><p class="font-medium"><?= htmlspecialchars($full_name) ?></p><p class="text-sm text-blue-300">Administrator</p></div></div></div>
         <nav class="mt-4"><?= renderMenu($currentPage, 'admin') ?></nav>
     </div>
 
     <!-- Mobile Header -->
     <div class="mobile-header bg-blue-800 text-white w-full fixed top-0 z-30 md:hidden shadow-lg">
         <div class="flex justify-between items-center p-3">
-            <div class="flex items-center">
-                <button id="menuToggle"
-                    class="text-white touch-target w-12 h-12 flex items-center justify-center rounded-full hover:bg-blue-700 active:bg-blue-900 transition-colors">
-                    <i class="fas fa-bars text-xl"></i>
-                </button>
-                <div class="ml-2">
-                    <h1 class="text-lg font-bold">Bimbel Esc</h1>
-                    <p class="text-xs text-blue-300">Manajemen Pembayaran</p>
-                </div>
-            </div>
-            <div class="flex items-center">
-                <div class="text-right mr-2 hidden sm:block">
-                    <p class="text-sm font-medium"><?= htmlspecialchars($full_name) ?></p>
-                    <p class="text-xs text-blue-300">Admin</p>
-                </div>
-                <div class="w-10 h-10 bg-white text-blue-800 rounded-full flex items-center justify-center">
-                    <i class="fas fa-user-shield"></i>
-                </div>
-            </div>
+            <div class="flex items-center"><button id="menuToggle" class="text-white w-12 h-12 flex items-center justify-center rounded-full hover:bg-blue-700"><i class="fas fa-bars text-xl"></i></button><div class="ml-2"><h1 class="text-lg font-bold">Bimbel Esc</h1><p class="text-xs text-blue-300">Manajemen Pembayaran</p></div></div>
+            <div class="flex items-center"><div class="text-right mr-2 hidden sm:block"><p class="text-sm font-medium"><?= htmlspecialchars($full_name) ?></p><p class="text-xs text-blue-300">Admin</p></div><div class="w-10 h-10 bg-white text-blue-800 rounded-full flex items-center justify-center"><i class="fas fa-user-shield"></i></div></div>
         </div>
     </div>
 
     <!-- Mobile Menu Sidebar -->
     <div id="mobileMenu" class="bg-blue-800 text-white md:hidden">
         <div class="h-full flex flex-col">
-            <!-- Mobile Menu Header -->
-            <div class="p-4 bg-blue-900 flex items-center justify-between">
-                <div class="flex items-center">
-                    <div class="w-10 h-10 bg-white text-blue-800 rounded-full flex items-center justify-center mr-3">
-                        <i class="fas fa-user-shield"></i>
-                    </div>
-                    <div>
-                        <h1 class="text-lg font-bold">Bimbel Esc</h1>
-                        <p class="text-xs text-blue-300">Admin Dashboard</p>
-                    </div>
-                </div>
-                <button id="menuClose"
-                    class="text-white touch-target w-10 h-10 flex items-center justify-center rounded-full hover:bg-blue-700 active:bg-blue-900">
-                    <i class="fas fa-times text-xl"></i>
-                </button>
-            </div>
-
-            <!-- User Profile -->
-            <div class="p-4 bg-blue-800 border-b border-blue-700">
-                <div class="flex items-center">
-                    <div class="flex-1">
-                        <p class="font-medium text-lg"><?= htmlspecialchars($full_name) ?></p>
-                        <p class="text-sm text-blue-300">Administrator</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Menu Items -->
-            <nav class="flex-1 overflow-y-auto py-4">
-                <?= renderMenu($currentPage, 'admin') ?>
-            </nav>
+            <div class="p-4 bg-blue-900 flex items-center justify-between"><div class="flex items-center"><div class="w-10 h-10 bg-white text-blue-800 rounded-full flex items-center justify-center mr-3"><i class="fas fa-user-shield"></i></div><div><h1 class="text-lg font-bold">Bimbel Esc</h1><p class="text-xs text-blue-300">Admin Dashboard</p></div></div><button id="menuClose" class="text-white w-10 h-10 flex items-center justify-center rounded-full hover:bg-blue-700"><i class="fas fa-times text-xl"></i></button></div>
+            <div class="p-4 bg-blue-800 border-b border-blue-700"><div class="flex items-center"><div class="flex-1"><p class="font-medium text-lg"><?= htmlspecialchars($full_name) ?></p><p class="text-sm text-blue-300">Administrator</p></div></div></div>
+            <nav class="flex-1 overflow-y-auto py-4"><?= renderMenu($currentPage, 'admin') ?></nav>
         </div>
     </div>
 
@@ -858,462 +506,171 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
 
     <!-- Main Content -->
     <div class="md:ml-64">
-        <!-- Spacer for mobile header -->
         <div class="mobile-header md:hidden" style="height: 64px;"></div>
 
         <!-- Page Header -->
         <div class="bg-white shadow px-4 py-3 md:p-4">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
-                <div>
-                    <h1 class="text-xl md:text-2xl font-bold text-gray-800">
-                        <i class="fas fa-credit-card mr-2"></i>Informasi Pembayaran
-                    </h1>
-                    <p class="text-gray-600 text-sm md:text-base">Input dan kelola pembayaran siswa per bulan</p>
-                </div>
-                <div class="mt-2 md:mt-0 text-right">
-                    <span
-                        class="inline-flex items-center px-3 py-1.5 md:px-3 md:py-2 rounded-md text-xs md:text-sm font-medium bg-blue-100 text-blue-800">
-                        <i class="fas fa-calendar-alt mr-2"></i><?= date('d/m/Y') ?>
-                    </span>
-                </div>
+                <div><h1 class="text-xl md:text-2xl font-bold text-gray-800"><i class="fas fa-credit-card mr-2"></i>Informasi Pembayaran</h1><p class="text-gray-600 text-sm md:text-base">Input, edit, dan kelola pembayaran siswa dengan tanggal spesifik</p></div>
+                <div class="mt-2 md:mt-0 text-right"><span class="inline-flex items-center px-3 py-1.5 rounded-md text-xs md:text-sm font-medium bg-blue-100 text-blue-800"><i class="fas fa-calendar-alt mr-2"></i><?= date('d/m/Y') ?></span></div>
             </div>
         </div>
 
         <!-- Content -->
         <div class="container mx-auto p-3 md:p-6">
-            <!-- Messages -->
             <?php if ($success_msg): ?>
-                <div
-                    class="mb-4 p-3 md:p-4 bg-green-50 border border-green-200 text-green-700 rounded-lg flex items-center">
-                    <i class="fas fa-check-circle text-green-500 mr-3 text-lg"></i>
-                    <div>
-                        <p class="font-medium">Sukses!</p>
-                        <p class="text-sm"><?= $success_msg ?></p>
-                    </div>
-                </div>
+                <div class="mb-4 p-3 md:p-4 bg-green-50 border border-green-200 text-green-700 rounded-lg flex items-center"><i class="fas fa-check-circle text-green-500 mr-3 text-lg"></i><div><p class="font-medium">Sukses!</p><p class="text-sm"><?= $success_msg ?></p></div></div>
             <?php endif; ?>
-
             <?php if ($error_msg): ?>
-                <div class="mb-4 p-3 md:p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg flex items-center">
-                    <i class="fas fa-exclamation-circle text-red-500 mr-3 text-lg"></i>
-                    <div>
-                        <p class="font-medium">Terjadi Kesalahan!</p>
-                        <p class="text-sm"><?= $error_msg ?></p>
-                    </div>
-                </div>
+                <div class="mb-4 p-3 md:p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg flex items-center"><i class="fas fa-exclamation-circle text-red-500 mr-3 text-lg"></i><div><p class="font-medium">Terjadi Kesalahan!</p><p class="text-sm"><?= $error_msg ?></p></div></div>
             <?php endif; ?>
 
-            <!-- Month Selector -->
+            <!-- Filter Selector -->
             <div class="bg-white rounded-xl shadow p-4 md:p-5 mb-4 md:mb-6">
-                <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
-                    <div class="flex flex-col md:flex-row md:items-center space-y-3 md:space-y-0 mb-3 md:mb-0">
-                        <div class="flex items-center space-x-2">
-                            <i class="fas fa-calendar-alt text-blue-600"></i>
-                            <label class="font-medium text-gray-700 text-sm md:text-base">Bulan:</label>
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-sm font-medium text-gray-700">Filter:</span>
+                        <div class="flex bg-gray-100 rounded-lg p-1">
+                            <button type="button" onclick="setFilter('bulan')" class="px-3 py-1.5 text-sm rounded-md transition <?= $filter_tipe == 'bulan' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-200' ?>"><i class="fas fa-calendar-alt mr-1"></i> Per Bulan</button>
+                            <button type="button" onclick="setFilter('tahun')" class="px-3 py-1.5 text-sm rounded-md transition <?= $filter_tipe == 'tahun' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-200' ?>"><i class="fas fa-calendar-year mr-1"></i> Per Tahun</button>
                         </div>
-                        <div class="md:ml-4">
-                            <input type="month" id="monthInput" value="<?= $selected_month ?>" min="2020-01"
-                                max="<?= date('Y-m', strtotime('+5 years')) ?>" onchange="changeMonth(this.value)"
-                                class="flex-1 md:w-64 border rounded-lg px-3 py-2.5 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
-                        </div>
+                        <?php if ($filter_tipe == 'bulan'): ?>
+                            <input type="month" id="monthFilter" value="<?= $selected_filter ?>" onchange="changeFilter('bulan', this.value)" class="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
+                        <?php else: ?>
+                            <select id="yearFilter" onchange="changeFilter('tahun', this.value)" class="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
+                                <?php for ($y = date('Y') - 2; $y <= date('Y') + 1; $y++): ?>
+                                    <option value="<?= $y ?>" <?= $selected_filter == $y ? 'selected' : '' ?>><?= $y ?></option>
+                                <?php endfor; ?>
+                            </select>
+                        <?php endif; ?>
                     </div>
-
-                    <div class="w-full md:w-auto">
-                        <button onclick="openTambahModal()"
-                            class="w-full md:w-auto px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center shadow-md text-sm md:text-base">
-                            <i class="fas fa-plus mr-2"></i> Input Pembayaran Baru
-                        </button>
-                    </div>
+                    <button onclick="openTambahModal()" class="w-full md:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center shadow-md"><i class="fas fa-plus mr-2"></i> Input Pembayaran Baru</button>
                 </div>
-
-                <div class="mt-3 text-xs md:text-sm text-gray-600 bg-gray-50 px-3 md:px-4 py-2 rounded-lg">
-                    <i class="fas fa-info-circle mr-2 text-blue-500"></i>
-                    Menampilkan <?= $total_pembayaran ?> pembayaran untuk <span
-                        class="font-semibold"><?= date('F Y', strtotime($selected_month . '-01')) ?></span>
-                </div>
+                <div class="mt-3 text-xs md:text-sm text-gray-600 bg-gray-50 px-3 md:px-4 py-2 rounded-lg"><i class="fas fa-info-circle mr-2 text-blue-500"></i> Menampilkan <?= $total_pembayaran ?> pembayaran <?php if ($filter_tipe == 'bulan'): ?>untuk bulan <span class="font-semibold"><?= date('F Y', strtotime($selected_filter . '-01')) ?></span><?php else: ?>untuk tahun <span class="font-semibold"><?= $selected_filter ?></span><?php endif; ?></div>
             </div>
 
             <!-- Stats -->
             <div class="grid grid-cols-2 gap-3 md:gap-6 mb-6 md:mb-8">
-                <div class="stat-card bg-white rounded-xl shadow p-3 md:p-5 border-l-4 border-green-500">
-                    <div class="flex items-center">
-                        <div class="p-2 md:p-3 bg-green-100 text-green-600 rounded-lg mr-2 md:mr-4">
-                            <i class="fas fa-money-check-alt text-lg md:text-xl"></i>
-                        </div>
-                        <div>
-                            <p class="text-xs md:text-sm text-gray-600">Terkumpul</p>
-                            <h3 class="text-lg md:text-2xl font-bold text-gray-800">Rp
-                                <?= number_format($total_dibayar, 0, ',', '.') ?>
-                            </h3>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="stat-card bg-white rounded-xl shadow p-3 md:p-5 border-l-4 border-purple-500">
-                    <div class="flex items-center">
-                        <div class="p-2 md:p-3 bg-purple-100 text-purple-600 rounded-lg mr-2 md:mr-4">
-                            <i class="fas fa-list text-lg md:text-xl"></i>
-                        </div>
-                        <div>
-                            <p class="text-xs md:text-sm text-gray-600">Total Pembayaran</p>
-                            <h3 class="text-lg md:text-2xl font-bold text-gray-800"><?= $total_pembayaran ?></h3>
-                        </div>
-                    </div>
-                </div>
+                <div class="stat-card bg-white rounded-xl shadow p-3 md:p-5 border-l-4 border-green-500"><div class="flex items-center"><div class="p-2 md:p-3 bg-green-100 text-green-600 rounded-lg mr-2 md:mr-4"><i class="fas fa-money-check-alt text-lg md:text-xl"></i></div><div><p class="text-xs md:text-sm text-gray-600">Terkumpul</p><h3 class="text-lg md:text-2xl font-bold text-gray-800">Rp <?= number_format($total_dibayar, 0, ',', '.') ?></h3></div></div></div>
+                <div class="stat-card bg-white rounded-xl shadow p-3 md:p-5 border-l-4 border-purple-500"><div class="flex items-center"><div class="p-2 md:p-3 bg-purple-100 text-purple-600 rounded-lg mr-2 md:mr-4"><i class="fas fa-list text-lg md:text-xl"></i></div><div><p class="text-xs md:text-sm text-gray-600">Total Pembayaran</p><h3 class="text-lg md:text-2xl font-bold text-gray-800"><?= $total_pembayaran ?></h3></div></div></div>
             </div>
 
             <!-- Main Table -->
             <div class="bg-white rounded-xl shadow overflow-hidden mb-6 md:mb-8">
-                <div
-                    class="px-4 md:px-6 py-3 md:py-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center">
-                    <h2 class="text-base md:text-lg font-semibold text-gray-800 mb-2 sm:mb-0">
-                        <i class="fas fa-list mr-2"></i> Daftar Pembayaran
-                    </h2>
-                    <div class="text-xs md:text-sm text-gray-500">Terakhir update: <?= date('d/m/Y H:i') ?></div>
-                </div>
-
-                <div class="mobile-table-container overflow-x-auto">
+                <div class="px-4 md:px-6 py-3 md:py-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center"><h2 class="text-base md:text-lg font-semibold text-gray-800 mb-2 sm:mb-0"><i class="fas fa-list mr-2"></i> Daftar Pembayaran</h2><div class="text-xs md:text-sm text-gray-500">Terakhir update: <?= date('d/m/Y H:i') ?></div></div>
+                <div class="overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200">
                         <thead class="bg-gray-50">
-                            <tr>
-                                <th
-                                    class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Siswa</th>
-                                <th
-                                    class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">
-                                    Tagihan</th>
-                                <th
-                                    class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Status & Metode</th>
-                                <th
-                                    class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">
-                                    Orang Tua</th>
-                                <th
-                                    class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Aksi</th>
-                            </tr>
+                            <tr><th class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal</th><th class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Siswa</th><th class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">Tagihan</th><th class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status & Metode</th><th class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th></tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
                             <?php if (empty($pembayaran_list)): ?>
-                                <tr>
-                                    <td colspan="5" class="px-6 py-12 text-center text-gray-500">
-                                        <div class="flex flex-col items-center">
-                                            <i class="fas fa-inbox text-3xl md:text-4xl text-gray-300 mb-3 md:mb-4"></i>
-                                            <p class="text-base md:text-lg font-medium text-gray-400 mb-1 md:mb-2">Belum ada
-                                                pembayaran untuk bulan ini</p>
-                                            <p class="text-xs md:text-sm text-gray-400 max-w-xs">Gunakan tombol "Input
-                                                Pembayaran Baru" untuk mencatat pembayaran</p>
-                                        </div>
-                                    </td>
-                                </tr>
+                                <tr><td colspan="5" class="px-6 py-12 text-center text-gray-500"><div class="flex flex-col items-center"><i class="fas fa-inbox text-3xl md:text-4xl text-gray-300 mb-3 md:mb-4"></i><p class="text-base md:text-lg font-medium text-gray-400">Belum ada pembayaran</p></div></td></tr>
                             <?php else: ?>
                                 <?php foreach ($pembayaran_list as $p): ?>
                                     <?php
-                                    // Status badge
                                     $status_badge = '';
                                     switch ($p['status']) {
-                                        case 'lunas':
-                                            $status_badge = '<span class="badge badge-success text-xs flex items-center"><span class="status-indicator status-lunas"></span>LUNAS</span>';
-                                            break;
-                                        case 'belum_bayar':
-                                            $status_badge = '<span class="badge badge-danger text-xs flex items-center"><span class="status-indicator status-belum"></span>BELUM</span>';
-                                            break;
-                                        case 'dibebaskan':
-                                            $status_badge = '<span class="badge badge-warning text-xs flex items-center"><span class="status-indicator status-dibebaskan"></span>BEBAS</span>';
-                                            break;
+                                        case 'lunas': $status_badge = '<span class="badge badge-success text-xs flex items-center"><span class="status-indicator status-lunas"></span>LUNAS</span>'; break;
+                                        case 'belum_bayar': $status_badge = '<span class="badge badge-danger text-xs flex items-center"><span class="status-indicator status-belum"></span>BELUM</span>'; break;
+                                        case 'dibebaskan': $status_badge = '<span class="badge badge-warning text-xs flex items-center"><span class="status-indicator status-dibebaskan"></span>BEBAS</span>'; break;
                                     }
-
-                                    // Metode badge
                                     $metode_badge = '';
                                     if ($p['metode_bayar']) {
                                         switch ($p['metode_bayar']) {
-                                            case 'cash':
-                                                $metode_badge = '<span class="badge badge-cash text-xs">Cash</span>';
-                                                break;
-                                            case 'transfer':
-                                                $metode_badge = '<span class="badge badge-transfer text-xs">Transfer</span>';
-                                                break;
-                                            case 'qris':
-                                                $metode_badge = '<span class="badge badge-qris text-xs">QRIS</span>';
-                                                break;
-                                            case 'debit':
-                                                $metode_badge = '<span class="badge badge-debit text-xs">Debit</span>';
-                                                break;
-                                            case 'credit':
-                                                $metode_badge = '<span class="badge badge-credit text-xs">Kredit</span>';
-                                                break;
-                                            case 'ewallet':
-                                                $metode_badge = '<span class="badge badge-ewallet text-xs">E-Wallet</span>';
-                                                break;
+                                            case 'cash': $metode_badge = '<span class="badge badge-cash text-xs">Cash</span>'; break;
+                                            case 'transfer': $metode_badge = '<span class="badge badge-transfer text-xs">Transfer</span>'; break;
+                                            case 'qris': $metode_badge = '<span class="badge badge-qris text-xs">QRIS</span>'; break;
+                                            case 'debit': $metode_badge = '<span class="badge badge-debit text-xs">Debit</span>'; break;
+                                            case 'credit': $metode_badge = '<span class="badge badge-credit text-xs">Kredit</span>'; break;
+                                            case 'ewallet': $metode_badge = '<span class="badge badge-ewallet text-xs">E-Wallet</span>'; break;
                                         }
                                     }
                                     ?>
                                     <tr class="hover:bg-gray-50">
-                                        <td class="px-3 md:px-6 py-3 md:py-4">
-                                            <div class="flex items-center">
-                                                <div
-                                                    class="flex-shrink-0 h-8 w-8 md:h-10 md:w-10 bg-gradient-to-r from-blue-100 to-blue-50 rounded-full flex items-center justify-center">
-                                                    <i class="fas fa-user-graduate text-blue-600 text-sm md:text-base"></i>
-                                                </div>
-                                                <div class="ml-2 md:ml-4">
-                                                    <div
-                                                        class="text-sm font-medium text-gray-900 truncate max-w-[120px] md:max-w-none">
-                                                        <?= htmlspecialchars($p['nama_lengkap']) ?>
-                                                    </div>
-                                                    <div class="text-xs text-gray-500"><?= $p['kelas'] ?></div>
-                                                    <div class="text-xs text-gray-500 mt-0.5 hidden sm:block">
-                                                        <?= $p['jenis_kelas'] ?> (<?= $p['tingkat'] ?>)
-                                                    </div>
-                                                    <!-- Mobile tagihan info -->
-                                                    <div class="text-xs text-gray-700 mt-1 sm:hidden">
-                                                        <div>Tagihan: <span class="font-semibold">Rp
-                                                                <?= number_format($p['nominal_tagihan'], 0, ',', '.') ?></span>
-                                                        </div>
-                                                        <div>Dibayar: <span class="font-semibold text-green-600">Rp
-                                                                <?= number_format($p['nominal_dibayar'], 0, ',', '.') ?></span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td class="px-3 md:px-6 py-3 md:py-4 hidden sm:table-cell">
-                                            <div class="space-y-1 md:space-y-2">
-                                                <div class="text-sm"><span class="text-gray-500">Tagihan:</span> <span
-                                                        class="font-semibold ml-1">Rp
-                                                        <?= number_format($p['nominal_tagihan'], 0, ',', '.') ?></span></div>
-                                                <div class="text-sm"><span class="text-gray-500">Dibayar:</span> <span
-                                                        class="font-semibold ml-1 text-green-600">Rp
-                                                        <?= number_format($p['nominal_dibayar'], 0, ',', '.') ?></span></div>
-                                                <div
-                                                    class="text-xs px-2 py-1 rounded-full inline-block <?= $p['sisa_tagihan'] > 0 ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700' ?>">
-                                                    <i
-                                                        class="fas fa-<?= $p['sisa_tagihan'] > 0 ? 'exclamation-circle' : 'check-circle' ?> mr-1"></i>
-                                                    Sisa: Rp <?= number_format($p['sisa_tagihan'], 0, ',', '.') ?>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td class="px-3 md:px-6 py-3 md:py-4">
-                                            <div class="space-y-1 md:space-y-2">
-                                                <div><?= $status_badge ?></div>
-                                                <?php if ($p['metode_bayar']): ?>
-                                                    <div class="text-xs text-gray-500 hidden md:block"><?= $metode_badge ?></div>
-                                                <?php endif; ?>
-                                                <?php if ($p['status'] == 'lunas' && $p['tgl_bayar_formatted']): ?>
-                                                    <div class="text-xs text-gray-500 hidden md:flex items-center"><i
-                                                            class="far fa-calendar mr-1"></i><?= $p['tgl_bayar_formatted'] ?></div>
-                                                <?php endif; ?>
-                                            </div>
-                                        </td>
-                                        <td class="px-3 md:px-6 py-3 md:py-4 hidden md:table-cell">
-                                            <div class="space-y-1">
-                                                <div class="text-sm font-medium text-gray-900 truncate max-w-[150px]">
-                                                    <?= htmlspecialchars($p['nama_ortu'] ?? 'Tidak ada data') ?>
-                                                </div>
-                                                <div class="text-xs text-gray-500"><i
-                                                        class="fas fa-phone mr-1"></i><?= $p['no_hp'] ?? '-' ?></div>
-                                            </div>
-                                        </td>
-                                        <td class="px-3 md:px-6 py-3 md:py-4 whitespace-nowrap">
-                                            <div class="mobile-action-buttons gap-1 flex">
-                                                <!-- Tombol Detail -->
-                                                <button onclick="openDetailModal(<?= htmlspecialchars(json_encode($p)) ?>)"
-                                                    class="action-btn bg-blue-50 text-blue-600 hover:bg-blue-100 touch-target"
-                                                    title="Detail">
-                                                    <i class="fas fa-eye"></i>
-                                                </button>
-
-                                                <!-- Tombol Hapus -->
-                                                <button
-                                                    onclick="confirmDelete(<?= $p['id'] ?>, '<?= htmlspecialchars($p['nama_lengkap']) ?>')"
-                                                    class="action-btn bg-red-50 text-red-600 hover:bg-red-100 touch-target"
-                                                    title="Hapus">
-                                                    <i class="fas fa-trash"></i>
-                                                </button>
-                                            </div>
-                                        </td>
+                                        <td class="px-3 md:px-6 py-3 md:py-4 whitespace-nowrap"><div class="text-sm font-medium text-gray-900"><?= $p['tanggal_bayar'] ? date('d/m/Y', strtotime($p['tanggal_bayar'])) : '-' ?></div><div class="text-xs text-gray-500">Bulan: <?= date('M Y', strtotime($p['bulan_tagihan'] . '-01')) ?></div></td>
+                                        <td class="px-3 md:px-6 py-3 md:py-4"><div class="flex items-center"><div class="flex-shrink-0 h-8 w-8 md:h-10 md:w-10 bg-gradient-to-r from-blue-100 to-blue-50 rounded-full flex items-center justify-center"><i class="fas fa-user-graduate text-blue-600 text-sm md:text-base"></i></div><div class="ml-2 md:ml-4"><div class="text-sm font-medium text-gray-900"><?= htmlspecialchars($p['nama_lengkap']) ?></div><div class="text-xs text-gray-500"><?= $p['kelas'] ?></div></div></div></td>
+                                        <td class="px-3 md:px-6 py-3 md:py-4 hidden sm:table-cell"><div class="space-y-1"><div class="text-sm"><span class="text-gray-500">Tagihan:</span> <span class="font-semibold ml-1">Rp <?= number_format($p['nominal_tagihan'], 0, ',', '.') ?></span></div><div class="text-sm"><span class="text-gray-500">Dibayar:</span> <span class="font-semibold ml-1 text-green-600">Rp <?= number_format($p['nominal_dibayar'], 0, ',', '.') ?></span></div></div></td>
+                                        <td class="px-3 md:px-6 py-3 md:py-4"><div class="space-y-1"><?= $status_badge ?><?php if ($p['metode_bayar']): ?><div><?= $metode_badge ?></div><?php endif; ?></div></td>
+                                        <td class="px-3 md:px-6 py-3 md:py-4 whitespace-nowrap"><div class="flex gap-1"><button onclick="openEditModal(<?= $p['id'] ?>)" class="action-btn bg-yellow-50 text-yellow-600 hover:bg-yellow-100 p-2 rounded-lg" title="Edit"><i class="fas fa-edit"></i></button><button onclick="openDetailModal(<?= htmlspecialchars(json_encode($p)) ?>)" class="action-btn bg-blue-50 text-blue-600 hover:bg-blue-100 p-2 rounded-lg" title="Detail"><i class="fas fa-eye"></i></button><button onclick="confirmDelete(<?= $p['id'] ?>, '<?= htmlspecialchars($p['nama_lengkap']) ?>')" class="action-btn bg-red-50 text-red-600 hover:bg-red-100 p-2 rounded-lg" title="Hapus"><i class="fas fa-trash"></i></button></div></td>
                                     </tr>
                                 <?php endforeach; ?>
                             <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
-
-                <?php if (!empty($pembayaran_list)): ?>
-                    <div
-                        class="px-4 md:px-6 py-3 md:py-4 border-t border-gray-200 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs md:text-sm text-gray-500">
-                        <div class="mb-2 sm:mb-0">Menampilkan <span
-                                class="font-semibold"><?= count($pembayaran_list) ?></span> pembayaran</div>
-                        <div class="flex items-center space-x-3 md:space-x-4">
-                            <div class="flex items-center space-x-1 md:space-x-2">
-                                <div class="w-2 h-2 md:w-3 md:h-3 bg-green-500 rounded-full"></div>
-                                <span>Lunas: <?= $lunas_count ?></span>
-                            </div>
-                            <div class="flex items-center space-x-1 md:space-x-2">
-                                <div class="w-2 h-2 md:w-3 md:h-3 bg-red-500 rounded-full"></div>
-                                <span>Belum: <?= $belum_count ?></span>
-                            </div>
-                            <div class="hidden md:flex items-center space-x-2">
-                                <div class="w-3 h-3 bg-yellow-500 rounded-full"></div>
-                                <span>Bebas: <?= $bebas_count ?></span>
-                            </div>
-                        </div>
-                    </div>
-                <?php endif; ?>
             </div>
         </div>
     </div>
 
-    <!-- ================= MODALS ================= -->
-
     <!-- Modal Tambah Pembayaran -->
     <div id="modalTambah" class="modal">
         <div class="modal-content">
-            <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 md:px-6 py-3 md:py-4 rounded-t-lg">
-                <h2 class="text-lg md:text-xl font-bold flex items-center"><i class="fas fa-plus mr-2 md:mr-3"></i>
-                    Input Pembayaran Baru</h2>
-            </div>
+            <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 md:px-6 py-3 md:py-4 rounded-t-lg"><h2 class="text-lg md:text-xl font-bold"><i class="fas fa-plus mr-2"></i> Input Pembayaran Baru</h2></div>
             <form method="POST" class="p-4 md:p-6" id="formTambahPembayaran">
                 <input type="hidden" name="create_payment" value="1">
+                <input type="hidden" name="filter_tipe" value="<?= $filter_tipe ?>">
+                <input type="hidden" name="<?= $filter_tipe == 'bulan' ? 'bulan' : 'tahun' ?>" value="<?= $selected_filter ?>">
 
-                <!-- Search Siswa dengan Autocomplete -->
-                <div class="mb-4 md:mb-5">
-                    <label class="block text-gray-700 mb-1 md:mb-2 font-medium text-sm md:text-base">
-                        Cari Siswa: <span class="text-red-500">*</span>
-                        <span class="text-xs text-gray-500">(ketik nama siswa)</span>
-                    </label>
-
+                <div class="mb-4"><label class="block text-gray-700 mb-1 font-medium">Cari Siswa: <span class="text-red-500">*</span></label>
                     <div class="autocomplete-container">
-                        <input type="text" id="searchSiswa" class="autocomplete-input" placeholder="Ketik nama siswa..."
-                            autocomplete="off">
+                        <input type="text" id="searchSiswa" class="autocomplete-input" placeholder="Ketik nama siswa..." autocomplete="off">
                         <input type="hidden" name="siswa_id" id="selectedSiswaId">
-                        <button type="button" id="clearSearch" class="autocomplete-clear">
-                            <i class="fas fa-times"></i>
-                        </button>
+                        <button type="button" id="clearSearch" class="autocomplete-clear"><i class="fas fa-times"></i></button>
                         <div id="siswaDropdown" class="autocomplete-dropdown"></div>
                     </div>
-
-                    <!-- Info siswa yang dipilih -->
                     <div id="selectedSiswaInfo" class="selected-siswa-info mt-2 p-3 hidden">
-                        <div class="flex justify-between items-start">
-                            <div>
-                                <div class="font-medium text-gray-900" id="selectedSiswaName"></div>
-                                <div class="text-sm text-gray-600">
-                                    Kelas: <span id="selectedSiswaKelas"></span> |
-                                    Sekolah: <span id="selectedSiswaSekolah"></span>
-                                </div>
-                                <div class="text-xs text-gray-500 mt-1" id="selectedSiswaOrangtua"></div>
-                                <div class="text-xs text-blue-600 mt-1" id="selectedSiswaPendaftaran"></div>
-                            </div>
-                            <button type="button" onclick="clearSelectedSiswa()"
-                                class="text-gray-400 hover:text-gray-600">
-                                <i class="fas fa-times"></i>
-                            </button>
-                        </div>
+                        <div class="flex justify-between items-start"><div><div class="font-medium text-gray-900" id="selectedSiswaName"></div><div class="text-sm text-gray-600">Kelas: <span id="selectedSiswaKelas"></span> | Sekolah: <span id="selectedSiswaSekolah"></span></div><div class="text-xs text-gray-500 mt-1" id="selectedSiswaOrangtua"></div><div class="text-xs text-blue-600 mt-1" id="selectedSiswaPendaftaran"></div></div><button type="button" onclick="clearSelectedSiswa()" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button></div>
                     </div>
                 </div>
 
-                <!-- Bulan Tagihan -->
-                <div class="mb-4 md:mb-5">
-                    <label class="block text-gray-700 mb-1 md:mb-2 font-medium text-sm md:text-base">
-                        Bulan Tagihan: <span class="text-red-500">*</span>
-                    </label>
-                    <input type="month" name="bulan" value="<?= date('Y-m') ?>" required
-                        class="w-full border rounded-lg px-3 md:px-4 py-2.5 md:py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base"
-                        min="2020-01" max="<?= date('Y-m', strtotime('+1 year')) ?>">
-                    <p class="text-xs text-gray-500 mt-1">
-                        <i class="fas fa-info-circle mr-1"></i>
-                        Format: Bulan-Tahun. Bisa memilih bulan/tahun sebelumnya.
-                    </p>
+                <div class="mb-4"><label class="block text-gray-700 mb-1 font-medium">Tanggal Pembayaran: <span class="text-red-500">*</span></label><input type="date" name="tanggal_bayar" id="tanggalBayar" value="<?= date('Y-m-d') ?>" required class="w-full border rounded-lg px-3 md:px-4 py-2.5 focus:ring-2 focus:ring-blue-500"><p class="text-xs text-gray-500 mt-1"><i class="fas fa-info-circle mr-1"></i>Pilih tanggal sesuai saat orang tua membayar</p></div>
+
+                <div class="mb-4"><label class="block text-gray-700 mb-1 font-medium">Status Pembayaran: <span class="text-red-500">*</span></label><select name="status" id="statusSelect" required onchange="handleStatusChange(this.value)" class="w-full border rounded-lg px-3 md:px-4 py-2.5 focus:ring-2 focus:ring-blue-500"><?php foreach ($STATUS_PEMBAYARAN as $value => $label): ?><option value="<?= $value ?>"><?= $label ?></option><?php endforeach; ?></select></div>
+
+                <div class="mb-4"><label class="block text-gray-700 mb-1 font-medium">Nominal Tagihan: <span class="text-red-500">*</span></label><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><span class="text-gray-500">Rp</span></div><input type="text" name="nominal_tagihan" id="nominalTagihan" value="<?= number_format($NOMINAL_DEFAULT, 0, ',', '.') ?>" required oninput="formatCurrency(this)" class="w-full border rounded-lg pl-10 pr-3 py-2.5 focus:ring-2 focus:ring-blue-500"></div></div>
+
+                <div class="mb-4"><label class="block text-gray-700 mb-1 font-medium">Nominal Dibayar: <span class="text-red-500">*</span></label><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><span class="text-gray-500">Rp</span></div><input type="text" name="nominal_dibayar" id="nominalDibayar" value="<?= number_format($NOMINAL_DEFAULT, 0, ',', '.') ?>" required oninput="formatCurrency(this)" class="w-full border rounded-lg pl-10 pr-3 py-2.5 focus:ring-2 focus:ring-blue-500"></div></div>
+
+                <div class="mb-4"><label class="block text-gray-700 mb-1 font-medium">Metode Bayar:</label><select name="metode_bayar" id="metodeBayar" class="w-full border rounded-lg px-3 md:px-4 py-2.5 focus:ring-2 focus:ring-blue-500"><option value="">- Pilih Metode Bayar -</option><?php foreach ($METODE_BAYAR as $value => $label): ?><option value="<?= $value ?>"><?= $label ?></option><?php endforeach; ?></select></div>
+
+                <div class="mb-4"><label class="block text-gray-700 mb-1 font-medium">Keterangan:</label><textarea name="keterangan" rows="2" class="w-full border rounded-lg px-3 md:px-4 py-2.5 focus:ring-2 focus:ring-blue-500" placeholder="Catatan..."></textarea></div>
+
+                <div class="flex justify-end space-x-2 mt-4"><button type="button" onclick="closeTambahModal()" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Batal</button><button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"><i class="fas fa-save mr-2"></i> Simpan Pembayaran</button></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Edit Pembayaran (BARU) -->
+    <div id="modalEdit" class="modal">
+        <div class="modal-content">
+            <div class="bg-gradient-to-r from-yellow-500 to-yellow-600 text-white px-4 md:px-6 py-3 md:py-4 rounded-t-lg"><h2 class="text-lg md:text-xl font-bold"><i class="fas fa-edit mr-2"></i> Edit Pembayaran</h2></div>
+            <form method="POST" class="p-4 md:p-6" id="formEditPembayaran">
+                <input type="hidden" name="update_payment" value="1">
+                <input type="hidden" name="pembayaran_id" id="editPembayaranId">
+                <input type="hidden" name="filter_tipe" value="<?= $filter_tipe ?>">
+                <input type="hidden" name="<?= $filter_tipe == 'bulan' ? 'bulan' : 'tahun' ?>" value="<?= $selected_filter ?>">
+
+                <!-- Info Siswa (Readonly) -->
+                <div class="mb-4 p-3 bg-blue-50 rounded-lg">
+                    <label class="block text-gray-700 mb-1 font-medium">Informasi Siswa</label>
+                    <div class="font-medium text-gray-900" id="editNamaSiswa">-</div>
+                    <div class="text-sm text-gray-600" id="editInfoSiswa">-</div>
                 </div>
 
-                <!-- Status Pembayaran -->
-                <div class="mb-4 md:mb-5">
-                    <label class="block text-gray-700 mb-1 md:mb-2 font-medium text-sm md:text-base">
-                        Status Pembayaran: <span class="text-red-500">*</span>
-                    </label>
-                    <select name="status" id="statusSelect" required onchange="handleStatusChange(this.value)"
-                        class="w-full border rounded-lg px-3 md:px-4 py-2.5 md:py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base">
-                        <?php foreach ($STATUS_PEMBAYARAN as $value => $label): ?>
-                            <option value="<?= $value ?>"><?= $label ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                    <div id="statusHint" class="form-hint hint-info mt-1">
-                        <i class="fas fa-info-circle mr-1"></i> Pilih status sesuai kondisi pembayaran
-                    </div>
-                </div>
+                <div class="mb-4"><label class="block text-gray-700 mb-1 font-medium">Tanggal Pembayaran: <span class="text-red-500">*</span></label><input type="date" name="tanggal_bayar" id="editTanggalBayar" required class="w-full border rounded-lg px-3 md:px-4 py-2.5 focus:ring-2 focus:ring-yellow-500"></div>
 
-                <!-- Nominal Tagihan -->
-                <div class="mb-4 md:mb-5">
-                    <label class="block text-gray-700 mb-1 md:mb-2 font-medium text-sm md:text-base">
-                        Nominal Tagihan: <span class="text-red-500">*</span>
-                    </label>
-                    <div class="relative">
-                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <span class="text-gray-500">Rp</span>
-                        </div>
-                        <input type="text" name="nominal_tagihan" id="nominalTagihan"
-                            value="<?= number_format($NOMINAL_DEFAULT, 0, ',', '.') ?>" required
-                            oninput="formatCurrency(this)"
-                            class="w-full border rounded-lg pl-10 pr-3 py-2.5 md:py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base">
-                    </div>
-                </div>
+                <div class="mb-4"><label class="block text-gray-700 mb-1 font-medium">Status Pembayaran: <span class="text-red-500">*</span></label><select name="status" id="editStatusSelect" required onchange="handleEditStatusChange(this.value)" class="w-full border rounded-lg px-3 md:px-4 py-2.5 focus:ring-2 focus:ring-yellow-500"><?php foreach ($STATUS_PEMBAYARAN as $value => $label): ?><option value="<?= $value ?>"><?= $label ?></option><?php endforeach; ?></select></div>
 
-                <!-- Nominal Dibayar -->
-                <div class="mb-4 md:mb-5">
-                    <label class="block text-gray-700 mb-1 md:mb-2 font-medium text-sm md:text-base">
-                        Nominal Dibayar: <span class="text-red-500">*</span>
-                    </label>
-                    <div class="relative">
-                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <span class="text-gray-500">Rp</span>
-                        </div>
-                        <input type="text" name="nominal_dibayar" id="nominalDibayar"
-                            value="<?= number_format($NOMINAL_DEFAULT, 0, ',', '.') ?>" required
-                            oninput="formatCurrency(this)"
-                            class="w-full border rounded-lg pl-10 pr-3 py-2.5 md:py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base">
-                    </div>
-                    <div id="nominalHint" class="form-hint hint-info mt-1">
-                        <i class="fas fa-info-circle mr-1"></i> Sesuaikan dengan status yang dipilih
-                    </div>
-                </div>
+                <div class="mb-4"><label class="block text-gray-700 mb-1 font-medium">Nominal Tagihan: <span class="text-red-500">*</span></label><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><span class="text-gray-500">Rp</span></div><input type="text" name="nominal_tagihan" id="editNominalTagihan" required oninput="formatCurrency(this)" class="w-full border rounded-lg pl-10 pr-3 py-2.5 focus:ring-2 focus:ring-yellow-500"></div></div>
 
-                <!-- Metode Bayar -->
-                <div class="mb-4 md:mb-5">
-                    <label class="block text-gray-700 mb-1 md:mb-2 font-medium text-sm md:text-base">
-                        Metode Bayar:
-                    </label>
-                    <select name="metode_bayar" id="metodeBayar"
-                        class="w-full border rounded-lg px-3 md:px-4 py-2.5 md:py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base">
-                        <option value="">- Pilih Metode Bayar -</option>
-                        <?php foreach ($METODE_BAYAR as $value => $label): ?>
-                            <option value="<?= $value ?>"><?= $label ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                    <div id="metodeHint" class="form-hint hint-info mt-1">
-                        <i class="fas fa-info-circle mr-1"></i> Wajib diisi jika status "Lunas"
-                    </div>
-                </div>
+                <div class="mb-4"><label class="block text-gray-700 mb-1 font-medium">Nominal Dibayar: <span class="text-red-500">*</span></label><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><span class="text-gray-500">Rp</span></div><input type="text" name="nominal_dibayar" id="editNominalDibayar" required oninput="formatCurrency(this)" class="w-full border rounded-lg pl-10 pr-3 py-2.5 focus:ring-2 focus:ring-yellow-500"></div></div>
 
-                <!-- Keterangan -->
-                <div class="mb-4 md:mb-5">
-                    <label class="block text-gray-700 mb-1 md:mb-2 font-medium text-sm md:text-base">
-                        Keterangan:
-                    </label>
-                    <textarea name="keterangan" rows="2"
-                        class="w-full border rounded-lg px-3 md:px-4 py-2.5 md:py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base"
-                        placeholder="Catatan..."></textarea>
-                </div>
+                <div class="mb-4"><label class="block text-gray-700 mb-1 font-medium">Metode Bayar:</label><select name="metode_bayar" id="editMetodeBayar" class="w-full border rounded-lg px-3 md:px-4 py-2.5 focus:ring-2 focus:ring-yellow-500"><option value="">- Pilih Metode Bayar -</option><?php foreach ($METODE_BAYAR as $value => $label): ?><option value="<?= $value ?>"><?= $label ?></option><?php endforeach; ?></select></div>
 
-                <div class="flex justify-end space-x-2 md:space-x-3 mt-4 md:mt-6">
-                    <button type="button" onclick="closeTambahModal()"
-                        class="px-4 md:px-5 py-2 md:py-2.5 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium text-sm md:text-base">
-                        Batal
-                    </button>
-                    <button type="submit"
-                        class="px-4 md:px-5 py-2 md:py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center text-sm md:text-base">
-                        <i class="fas fa-save mr-2"></i> Simpan Pembayaran
-                    </button>
-                </div>
+                <div class="mb-4"><label class="block text-gray-700 mb-1 font-medium">Keterangan:</label><textarea name="keterangan" id="editKeterangan" rows="2" class="w-full border rounded-lg px-3 md:px-4 py-2.5 focus:ring-2 focus:ring-yellow-500" placeholder="Catatan..."></textarea></div>
+
+                <div class="flex justify-end space-x-2 mt-4"><button type="button" onclick="closeEditModal()" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Batal</button><button type="submit" class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700"><i class="fas fa-save mr-2"></i> Update Pembayaran</button></div>
             </form>
         </div>
     </div>
@@ -1321,160 +678,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
     <!-- Modal Detail -->
     <div id="detailModal" class="modal">
         <div class="modal-content">
-            <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 md:px-6 py-3 md:py-4 rounded-t-lg">
-                <h2 class="text-lg md:text-xl font-bold flex items-center"><i
-                        class="fas fa-info-circle mr-2 md:mr-3"></i> Detail Pembayaran</h2>
-            </div>
+            <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 md:px-6 py-3 md:py-4 rounded-t-lg"><h2 class="text-lg md:text-xl font-bold"><i class="fas fa-info-circle mr-2"></i> Detail Pembayaran</h2></div>
             <div class="p-4 md:p-6">
-                <!-- Info Status -->
-                <div class="mb-3 md:mb-4 p-3 bg-gray-50 rounded-lg">
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="text-gray-600 text-sm md:text-base">Status:</span>
-                        <span id="detailStatusBadge" class="text-xs md:text-sm font-semibold"></span>
-                    </div>
-                    <div class="flex justify-between items-center">
-                        <span class="text-gray-600 text-sm md:text-base">Bulan Tagihan:</span>
-                        <span id="detailBulan" class="font-medium text-sm md:text-base"></span>
-                    </div>
-                </div>
-
-                <!-- Info Siswa -->
-                <div class="mb-4 md:mb-6">
-                    <h3 class="font-medium text-gray-700 mb-2 md:mb-3 flex items-center text-sm md:text-base">
-                        <i class="fas fa-user-graduate mr-2 text-blue-500"></i>Informasi Siswa
-                    </h3>
-                    <div class="space-y-2 md:space-y-3">
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Nama Lengkap</span>
-                            <span id="detailNamaLengkap" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Kelas</span>
-                            <span id="detailKelas" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Sekolah Asal</span>
-                            <span id="detailSekolah" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Tempat/Tgl Lahir</span>
-                            <span id="detailTtl" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Jenis Kelamin</span>
-                            <span id="detailJenisKelamin" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Alamat</span>
-                            <span id="detailAlamat" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Info Program -->
-                <div class="mb-4 md:mb-6">
-                    <h3 class="font-medium text-gray-700 mb-2 md:mb-3 flex items-center text-sm md:text-base">
-                        <i class="fas fa-book-open mr-2 text-green-500"></i>Informasi Program
-                    </h3>
-                    <div class="space-y-2 md:space-y-3">
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Jenis Kelas</span>
-                            <span id="detailJenisKelas" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Tingkat</span>
-                            <span id="detailTingkat" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Tahun Ajaran</span>
-                            <span id="detailTahunAjaran" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Tanggal Mulai</span>
-                            <span id="detailTanggalMulai" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <?php if (!empty($p['tanggal_selesai'])): ?>
-                            <div class="detail-item">
-                                <span class="detail-label text-xs md:text-sm">Tanggal Selesai</span>
-                                <span id="detailTanggalSelesai" class="detail-value text-xs md:text-sm"></span>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-
-                <!-- Info Pembayaran -->
-                <div class="mb-4 md:mb-6">
-                    <h3 class="font-medium text-gray-700 mb-2 md:mb-3 flex items-center text-sm md:text-base">
-                        <i class="fas fa-credit-card mr-2 text-purple-500"></i>Informasi Pembayaran
-                    </h3>
-                    <div class="space-y-2 md:space-y-3">
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Nominal Tagihan</span>
-                            <span id="detailNominalTagihan"
-                                class="detail-value text-xs md:text-sm font-semibold"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Nominal Dibayar</span>
-                            <span id="detailNominalDibayar" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Sisa Tagihan</span>
-                            <span id="detailSisaTagihan" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Metode Bayar</span>
-                            <span id="detailMetodeBayar" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Tanggal Bayar</span>
-                            <span id="detailTanggalBayar" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Keterangan</span>
-                            <span id="detailKeterangan" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Info Orang Tua -->
-                <div class="mb-4 md:mb-6">
-                    <h3 class="font-medium text-gray-700 mb-2 md:mb-3 flex items-center text-sm md:text-base">
-                        <i class="fas fa-users mr-2 text-orange-500"></i>Informasi Orang Tua
-                    </h3>
-                    <div class="space-y-2 md:space-y-3">
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Nama Orang Tua</span>
-                            <span id="detailNamaOrtu" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Hubungan</span>
-                            <span id="detailHubungan" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">No. HP</span>
-                            <span id="detailNoHP" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Email</span>
-                            <span id="detailEmail" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Pekerjaan</span>
-                            <span id="detailPekerjaan" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label text-xs md:text-sm">Perusahaan</span>
-                            <span id="detailPerusahaan" class="detail-value text-xs md:text-sm"></span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flex justify-end">
-                    <button type="button" onclick="closeDetailModal()"
-                        class="px-4 md:px-5 py-2 md:py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors duration-150 text-sm md:text-base">
-                        <i class="fas fa-times mr-2"></i>Tutup
-                    </button>
-                </div>
+                <div class="mb-3 p-3 bg-gray-50 rounded-lg"><div class="flex justify-between items-center mb-2"><span class="text-gray-600">Status:</span><span id="detailStatusBadge" class="font-semibold"></span></div><div class="flex justify-between items-center"><span class="text-gray-600">Bulan Tagihan:</span><span id="detailBulan" class="font-medium"></span></div><div class="flex justify-between items-center mt-2"><span class="text-gray-600">Tanggal Bayar:</span><span id="detailTanggalBayar" class="font-medium"></span></div></div>
+                <div class="mb-4"><h3 class="font-medium text-gray-700 mb-2"><i class="fas fa-user-graduate mr-2 text-blue-500"></i>Informasi Siswa</h3><div class="space-y-2"><div class="detail-item"><span class="detail-label">Nama Lengkap</span><span id="detailNamaLengkap" class="detail-value"></span></div><div class="detail-item"><span class="detail-label">Kelas</span><span id="detailKelas" class="detail-value"></span></div><div class="detail-item"><span class="detail-label">Sekolah Asal</span><span id="detailSekolah" class="detail-value"></span></div></div></div>
+                <div class="mb-4"><h3 class="font-medium text-gray-700 mb-2"><i class="fas fa-credit-card mr-2 text-purple-500"></i>Informasi Pembayaran</h3><div class="space-y-2"><div class="detail-item"><span class="detail-label">Nominal Tagihan</span><span id="detailNominalTagihan" class="detail-value font-semibold"></span></div><div class="detail-item"><span class="detail-label">Nominal Dibayar</span><span id="detailNominalDibayar" class="detail-value"></span></div><div class="detail-item"><span class="detail-label">Sisa Tagihan</span><span id="detailSisaTagihan" class="detail-value"></span></div><div class="detail-item"><span class="detail-label">Metode Bayar</span><span id="detailMetodeBayar" class="detail-value"></span></div><div class="detail-item"><span class="detail-label">Keterangan</span><span id="detailKeterangan" class="detail-value"></span></div></div></div>
+                <div class="flex justify-end"><button onclick="closeDetailModal()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"><i class="fas fa-times mr-2"></i>Tutup</button></div>
             </div>
         </div>
     </div>
@@ -1484,21 +693,22 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
         let searchTimeout;
         let searchCache = {};
 
+        // ==================== FUNGSI FILTER ====================
+        function setFilter(tipe) {
+            if (tipe === 'bulan') window.location.href = '?filter_tipe=bulan&bulan=<?= date('Y-m') ?>';
+            else window.location.href = '?filter_tipe=tahun&tahun=<?= date('Y') ?>';
+        }
+        function changeFilter(tipe, value) { window.location.href = '?filter_tipe=' + tipe + '&' + (tipe === 'bulan' ? 'bulan' : 'tahun') + '=' + value; }
+
         // ==================== FUNGSI MODAL ====================
         function openTambahModal() {
             document.getElementById('modalTambah').style.display = 'block';
             document.body.style.overflow = 'hidden';
-
-            // Reset form
             clearSelectedSiswa();
             handleStatusChange('belum_bayar');
-
-            // Focus ke search input
-            setTimeout(() => {
-                document.getElementById('searchSiswa').focus();
-            }, 100);
+            document.getElementById('tanggalBayar').value = new Date().toISOString().split('T')[0];
+            setTimeout(() => { document.getElementById('searchSiswa').focus(); }, 100);
         }
-
         function closeTambahModal() {
             document.getElementById('modalTambah').style.display = 'none';
             document.body.style.overflow = 'auto';
@@ -1507,82 +717,88 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
             searchCache = {};
         }
 
-        function openDetailModal(paymentData) {
-            console.log('Payment Data:', paymentData);
+        // ==================== FUNGSI EDIT MODAL ====================
+        function openEditModal(paymentId) {
+            $('#modalEdit').show();
+            document.body.style.overflow = 'hidden';
+            
+            $.ajax({
+                url: '<?= $_SERVER['PHP_SELF'] ?>',
+                type: 'GET',
+                data: { ajax: 'get_payment_detail', payment_id: paymentId },
+                dataType: 'json',
+                success: function(response) {
+                    if (response.success) {
+                        const data = response.data;
+                        $('#editPembayaranId').val(data.id);
+                        $('#editNamaSiswa').text(data.nama_lengkap);
+                        $('#editInfoSiswa').text('Kelas: ' + data.kelas + ' | Sekolah: ' + (data.sekolah_asal || '-'));
+                        $('#editTanggalBayar').val(data.tanggal_bayar || new Date().toISOString().split('T')[0]);
+                        $('#editStatusSelect').val(data.status);
+                        $('#editNominalTagihan').val(formatNumberDisplay(data.nominal_tagihan));
+                        $('#editNominalDibayar').val(formatNumberDisplay(data.nominal_dibayar));
+                        $('#editMetodeBayar').val(data.metode_bayar || '');
+                        $('#editKeterangan').val(data.keterangan || '');
+                        handleEditStatusChange(data.status);
+                    } else {
+                        alert('Gagal mengambil data: ' + response.error);
+                        closeEditModal();
+                    }
+                },
+                error: function() {
+                    alert('Terjadi kesalahan saat mengambil data');
+                    closeEditModal();
+                }
+            });
+        }
 
-            // Status badge
+        function closeEditModal() {
+            $('#modalEdit').hide();
+            document.body.style.overflow = 'auto';
+        }
+
+        function handleEditStatusChange(status) {
+            const nominalDibayar = document.getElementById('editNominalDibayar');
+            const metodeBayar = document.getElementById('editMetodeBayar');
+            const nominalTagihan = document.getElementById('editNominalTagihan');
+            
+            if (status === 'lunas') {
+                const tagihanValue = nominalTagihan.value.replace(/\./g, '');
+                nominalDibayar.value = formatNumberDisplay(tagihanValue);
+                metodeBayar.required = true;
+            } else if (status === 'dibebaskan') {
+                nominalDibayar.value = '0';
+                metodeBayar.value = '';
+                metodeBayar.required = false;
+            } else {
+                metodeBayar.required = false;
+            }
+        }
+
+        // ==================== FUNGSI DETAIL MODAL ====================
+        function openDetailModal(paymentData) {
             let statusBadge = '';
             switch (paymentData.status) {
-                case 'lunas':
-                    statusBadge = '<span class="badge badge-success flex items-center"><span class="status-indicator status-lunas"></span>LUNAS</span>';
-                    break;
-                case 'belum_bayar':
-                    statusBadge = '<span class="badge badge-danger flex items-center"><span class="status-indicator status-belum"></span>BELUM BAYAR</span>';
-                    break;
-                case 'dibebaskan':
-                    statusBadge = '<span class="badge badge-warning flex items-center"><span class="status-indicator status-dibebaskan"></span>DIBEBASKAN</span>';
-                    break;
+                case 'lunas': statusBadge = '<span class="badge badge-success">LUNAS</span>'; break;
+                case 'belum_bayar': statusBadge = '<span class="badge badge-danger">BELUM BAYAR</span>'; break;
+                case 'dibebaskan': statusBadge = '<span class="badge badge-warning">DIBEBASKAN</span>'; break;
             }
             document.getElementById('detailStatusBadge').innerHTML = statusBadge;
-
-            // Format bulan
             document.getElementById('detailBulan').textContent = formatMonth(paymentData.bulan_tagihan);
-
-            // Siswa info
+            document.getElementById('detailTanggalBayar').textContent = paymentData.tgl_bayar_formatted || '-';
             document.getElementById('detailNamaLengkap').textContent = paymentData.nama_lengkap;
             document.getElementById('detailKelas').textContent = paymentData.kelas;
             document.getElementById('detailSekolah').textContent = paymentData.sekolah_asal || '-';
-
-            // TTL
-            const tempatLahir = paymentData.tempat_lahir || '';
-            const tglLahir = paymentData.tanggal_lahir ? formatDate(paymentData.tanggal_lahir) : '';
-            document.getElementById('detailTtl').textContent = tempatLahir + (tempatLahir && tglLahir ? ', ' : '') + tglLahir || '-';
-
-            document.getElementById('detailJenisKelamin').textContent = paymentData.jenis_kelamin === 'L' ? 'Laki-laki' : 'Perempuan';
-            document.getElementById('detailAlamat').textContent = paymentData.alamat || '-';
-
-            // Program info
-            document.getElementById('detailJenisKelas').textContent = paymentData.jenis_kelas;
-            document.getElementById('detailTingkat').textContent = paymentData.tingkat;
-            document.getElementById('detailTahunAjaran').textContent = paymentData.tahun_ajaran;
-            document.getElementById('detailTanggalMulai').textContent = formatDate(paymentData.tanggal_mulai);
-
-            // Pembayaran info
-            document.getElementById('detailNominalTagihan').textContent =
-                'Rp ' + new Intl.NumberFormat('id-ID').format(paymentData.nominal_tagihan);
-            document.getElementById('detailNominalDibayar').textContent =
-                'Rp ' + new Intl.NumberFormat('id-ID').format(paymentData.nominal_dibayar);
-            document.getElementById('detailSisaTagihan').textContent =
-                'Rp ' + new Intl.NumberFormat('id-ID').format(paymentData.sisa_tagihan);
-
-            // Metode bayar
+            document.getElementById('detailNominalTagihan').textContent = 'Rp ' + new Intl.NumberFormat('id-ID').format(paymentData.nominal_tagihan);
+            document.getElementById('detailNominalDibayar').textContent = 'Rp ' + new Intl.NumberFormat('id-ID').format(paymentData.nominal_dibayar);
+            document.getElementById('detailSisaTagihan').textContent = 'Rp ' + new Intl.NumberFormat('id-ID').format(paymentData.sisa_tagihan);
             let metodeText = '-';
             if (paymentData.metode_bayar) {
-                const metodeLabels = {
-                    'cash': 'Cash',
-                    'transfer': 'Transfer Bank',
-                    'qris': 'QRIS',
-                    'debit': 'Kartu Debit',
-                    'credit': 'Kartu Kredit',
-                    'ewallet': 'E-Wallet'
-                };
+                const metodeLabels = { 'cash': 'Cash', 'transfer': 'Transfer Bank', 'qris': 'QRIS', 'debit': 'Kartu Debit', 'credit': 'Kartu Kredit', 'ewallet': 'E-Wallet' };
                 metodeText = metodeLabels[paymentData.metode_bayar] || paymentData.metode_bayar;
             }
             document.getElementById('detailMetodeBayar').textContent = metodeText;
-
-            // Tanggal dan keterangan
-            document.getElementById('detailTanggalBayar').textContent = paymentData.tgl_bayar_formatted || '-';
             document.getElementById('detailKeterangan').textContent = paymentData.keterangan || '-';
-
-            // Orang tua info
-            document.getElementById('detailNamaOrtu').textContent = paymentData.nama_ortu || '-';
-            document.getElementById('detailHubungan').textContent = paymentData.hubungan_dengan_siswa || '-';
-            document.getElementById('detailNoHP').textContent = paymentData.no_hp || '-';
-            document.getElementById('detailEmail').textContent = paymentData.email_ortu || '-';
-            document.getElementById('detailPekerjaan').textContent = paymentData.pekerjaan || '-';
-            document.getElementById('detailPerusahaan').textContent = paymentData.perusahaan || '-';
-
-            // Tampilkan modal
             document.getElementById('detailModal').style.display = 'block';
             document.body.style.overflow = 'hidden';
         }
@@ -1592,227 +808,83 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
             document.body.style.overflow = 'auto';
         }
 
-        // ==================== AUTOSEARCH SISWA ====================
-        // Inisialisasi autocomplete saat DOM ready
-        $(document).ready(function () {
-            initAutocomplete();
-        });
+        function confirmDelete(id, name) {
+            if (confirm('Hapus pembayaran untuk ' + name + '? Tindakan ini tidak dapat dibatalkan!')) {
+                window.location.href = '?filter_tipe=<?= $filter_tipe ?>&<?= $filter_tipe == 'bulan' ? 'bulan' : 'tahun' ?>=<?= $selected_filter ?>&delete_id=' + id;
+            }
+        }
+
+        // ==================== AUTOCOMPLETE SISWA ====================
+        $(document).ready(function() { initAutocomplete(); });
 
         function initAutocomplete() {
             const searchInput = document.getElementById('searchSiswa');
             const clearButton = document.getElementById('clearSearch');
             const dropdown = document.getElementById('siswaDropdown');
-
             let selectedIndex = -1;
 
-            // Tampilkan dropdown saat fokus
-            searchInput.addEventListener('focus', function () {
-                if (this.value.length > 0) {
-                    filterSiswa(this.value);
-                }
-            });
-
-            // Filter siswa saat mengetik dengan debounce
-            searchInput.addEventListener('input', function (e) {
+            searchInput.addEventListener('focus', function() { if (this.value.length > 0) filterSiswa(this.value); });
+            searchInput.addEventListener('input', function(e) {
                 clearTimeout(searchTimeout);
                 const query = this.value;
-
-                if (query.length < 2) {
-                    dropdown.style.display = 'none';
-                    clearButton.style.display = 'none';
-                    return;
-                }
-
-                searchTimeout = setTimeout(() => {
-                    filterSiswa(query);
-                }, 300);
-
+                if (query.length < 2) { dropdown.style.display = 'none'; clearButton.style.display = 'none'; return; }
+                searchTimeout = setTimeout(() => filterSiswa(query), 300);
                 clearButton.style.display = query.length > 0 ? 'block' : 'none';
             });
-
-            // Clear search
-            clearButton.addEventListener('click', function () {
-                searchInput.value = '';
-                searchInput.focus();
-                clearButton.style.display = 'none';
-                dropdown.style.display = 'none';
-                clearSelectedSiswa();
-            });
-
-            // Navigasi dengan keyboard
-            searchInput.addEventListener('keydown', function (e) {
+            clearButton.addEventListener('click', function() { searchInput.value = ''; searchInput.focus(); clearButton.style.display = 'none'; dropdown.style.display = 'none'; clearSelectedSiswa(); });
+            searchInput.addEventListener('keydown', function(e) {
                 const items = dropdown.querySelectorAll('.autocomplete-item');
-
-                switch (e.key) {
-                    case 'ArrowDown':
-                        e.preventDefault();
-                        selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
-                        updateSelectedItem();
-                        break;
-
-                    case 'ArrowUp':
-                        e.preventDefault();
-                        selectedIndex = Math.max(selectedIndex - 1, -1);
-                        updateSelectedItem();
-                        break;
-
-                    case 'Enter':
-                        e.preventDefault();
-                        if (selectedIndex >= 0 && items[selectedIndex]) {
-                            selectSiswa(items[selectedIndex].dataset);
-                        }
-                        break;
-
-                    case 'Escape':
-                        dropdown.style.display = 'none';
-                        selectedIndex = -1;
-                        break;
+                switch(e.key) {
+                    case 'ArrowDown': e.preventDefault(); selectedIndex = Math.min(selectedIndex + 1, items.length - 1); updateSelectedItem(dropdown, items, selectedIndex); break;
+                    case 'ArrowUp': e.preventDefault(); selectedIndex = Math.max(selectedIndex - 1, -1); updateSelectedItem(dropdown, items, selectedIndex); break;
+                    case 'Enter': e.preventDefault(); if (selectedIndex >= 0 && items[selectedIndex]) selectSiswa(items[selectedIndex].dataset); break;
+                    case 'Escape': dropdown.style.display = 'none'; selectedIndex = -1; break;
                 }
             });
-
-            // Close dropdown saat klik di luar
-            document.addEventListener('click', function (e) {
-                if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
-                    dropdown.style.display = 'none';
-                }
-            });
+            document.addEventListener('click', function(e) { if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) dropdown.style.display = 'none'; });
         }
 
-        // Fungsi filter siswa dengan AJAX
         function filterSiswa(query) {
             const dropdown = document.getElementById('siswaDropdown');
-
-            // Tampilkan loading
             dropdown.innerHTML = '<div class="no-results"><span class="spinner"></span> Mencari...</div>';
             dropdown.style.display = 'block';
-
-            $.ajax({
-                url: '<?php echo $_SERVER['PHP_SELF']; ?>',
-                type: 'GET',
-                data: {
-                    ajax: 'get_siswa_list',
-                    search: query
-                },
-                dataType: 'json',
-                success: function (data) {
-                    renderDropdown(data);
-                },
-                error: function () {
-                    dropdown.innerHTML = '<div class="no-results">Gagal memuat data</div>';
-                }
-            });
+            $.ajax({ url: '<?= $_SERVER['PHP_SELF'] ?>', type: 'GET', data: { ajax: 'get_siswa_list', search: query }, dataType: 'json', success: renderDropdown, error: () => dropdown.innerHTML = '<div class="no-results">Gagal memuat data</div>' });
         }
 
-        // Render dropdown
         function renderDropdown(data) {
             const dropdown = document.getElementById('siswaDropdown');
             dropdown.innerHTML = '';
-
-            if (data.length === 0) {
-                dropdown.innerHTML = '<div class="no-results">Tidak ditemukan siswa</div>';
-                dropdown.style.display = 'block';
-                return;
-            }
-
-            data.forEach((siswa, index) => {
+            if (data.length === 0) { dropdown.innerHTML = '<div class="no-results">Tidak ditemukan siswa</div>'; dropdown.style.display = 'block'; return; }
+            data.forEach(siswa => {
                 const item = document.createElement('div');
                 item.className = 'autocomplete-item';
-                item.dataset.id = siswa.id;
-                item.dataset.nama = siswa.nama_lengkap;
-                item.dataset.kelas = siswa.kelas;
-                item.dataset.sekolah = siswa.sekolah_asal || '';
-                item.dataset.orangtua = siswa.orangtua_info || '';
-                item.dataset.pendaftaran = siswa.pendaftaran_aktif || '';
-                item.dataset.totalPendaftaran = siswa.total_pendaftaran_aktif || '0';
-
-                // Status badge
-                const statusBadge = siswa.status_siswa === 'aktif' ?
-                    '<span style="background-color:#d1fae5;color:#065f46;padding:2px 8px;border-radius:12px;font-size:11px;margin-left:5px;">Aktif</span>' :
-                    '<span style="background-color:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:12px;font-size:11px;margin-left:5px;">Non-Aktif</span>';
-
-                // Warning jika tidak ada pendaftaran aktif
-                const pendaftaranWarning = parseInt(siswa.total_pendaftaran_aktif) === 0 ?
-                    '<div style="color:#dc2626;font-size:11px;margin-top:2px;"><i class="fas fa-exclamation-triangle"></i> Tidak ada pendaftaran aktif</div>' :
-                    '';
-
-                item.innerHTML = `
-                    <div class="siswa-nama">${siswa.nama_lengkap} ${statusBadge}</div>
-                    <div class="siswa-info">
-                        Kelas: ${siswa.kelas} | Sekolah: ${siswa.sekolah_asal || '-'}
-                        ${siswa.orangtua_info ? '<br>Orang Tua: ' + siswa.orangtua_info : ''}
-                        ${siswa.pendaftaran_aktif ? '<br>Pendaftaran: ' + siswa.pendaftaran_aktif : ''}
-                        ${pendaftaranWarning}
-                    </div>
-                `;
-
-                item.addEventListener('click', function () {
-                    selectSiswa(this.dataset);
-                });
-
-                item.addEventListener('mouseenter', function () {
-                    const items = dropdown.querySelectorAll('.autocomplete-item');
-                    selectedIndex = Array.from(items).indexOf(this);
-                    updateSelectedItem();
-                });
-
+                item.dataset.id = siswa.id; item.dataset.nama = siswa.nama_lengkap; item.dataset.kelas = siswa.kelas; item.dataset.sekolah = siswa.sekolah_asal || '';
+                item.dataset.orangtua = siswa.orangtua_info || ''; item.dataset.pendaftaran = siswa.pendaftaran_aktif || ''; item.dataset.totalPendaftaran = siswa.total_pendaftaran_aktif || '0';
+                const statusBadge = siswa.status_siswa === 'aktif' ? '<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:12px;font-size:11px;margin-left:5px;">Aktif</span>' : '<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:12px;font-size:11px;margin-left:5px;">Non-Aktif</span>';
+                const pendaftaranWarning = parseInt(siswa.total_pendaftaran_aktif) === 0 ? '<div style="color:#dc2626;font-size:11px;margin-top:2px;"><i class="fas fa-exclamation-triangle"></i> Tidak ada pendaftaran aktif</div>' : '';
+                item.innerHTML = `<div class="siswa-nama">${siswa.nama_lengkap} ${statusBadge}</div><div class="siswa-info">Kelas: ${siswa.kelas} | Sekolah: ${siswa.sekolah_asal || '-'}${siswa.orangtua_info ? '<br>Orang Tua: ' + siswa.orangtua_info : ''}${siswa.pendaftaran_aktif ? '<br>Pendaftaran: ' + siswa.pendaftaran_aktif : ''}${pendaftaranWarning}</div>`;
+                item.addEventListener('click', () => selectSiswa(item.dataset));
                 dropdown.appendChild(item);
             });
-
             dropdown.style.display = 'block';
-            selectedIndex = -1;
         }
 
-        // Update selected item style
-        function updateSelectedItem() {
-            const dropdown = document.getElementById('siswaDropdown');
-            const items = dropdown.querySelectorAll('.autocomplete-item');
+        function updateSelectedItem(dropdown, items, index) { items.forEach((item, i) => { if (i === index) item.classList.add('active'); else item.classList.remove('active'); }); }
 
-            items.forEach((item, index) => {
-                if (index === selectedIndex) {
-                    item.classList.add('active');
-                    // Scroll ke item yang dipilih
-                    item.scrollIntoView({ block: 'nearest' });
-                } else {
-                    item.classList.remove('active');
-                }
-            });
-        }
-
-        // Fungsi pilih siswa
         function selectSiswa(data) {
-            const selectedSiswaId = document.getElementById('selectedSiswaId');
-            const searchInput = document.getElementById('searchSiswa');
-            const dropdown = document.getElementById('siswaDropdown');
-
-            selectedSiswaId.value = data.id;
-            searchInput.value = data.nama;
-            dropdown.style.display = 'none';
-
-            // Tampilkan info siswa yang dipilih
+            document.getElementById('selectedSiswaId').value = data.id;
+            document.getElementById('searchSiswa').value = data.nama;
+            document.getElementById('siswaDropdown').style.display = 'none';
             document.getElementById('selectedSiswaName').textContent = data.nama;
             document.getElementById('selectedSiswaKelas').textContent = data.kelas;
             document.getElementById('selectedSiswaSekolah').textContent = data.sekolah || '-';
-
-            if (data.orangtua) {
-                document.getElementById('selectedSiswaOrangtua').textContent = 'Orang Tua: ' + data.orangtua;
-            }
-
-            if (data.pendaftaran) {
-                document.getElementById('selectedSiswaPendaftaran').textContent = 'Pendaftaran Aktif: ' + data.pendaftaran;
-            }
-
-            // Tampilkan warning jika tidak ada pendaftaran aktif
-            const totalPendaftaran = parseInt(data.totalPendaftaran);
-            if (totalPendaftaran === 0) {
-                document.getElementById('selectedSiswaPendaftaran').innerHTML =
-                    '<span style="color:#dc2626;"><i class="fas fa-exclamation-triangle mr-1"></i>Tidak ada pendaftaran aktif!</span>';
-            }
-
+            if (data.orangtua) document.getElementById('selectedSiswaOrangtua').textContent = 'Orang Tua: ' + data.orangtua;
+            if (data.pendaftaran) document.getElementById('selectedSiswaPendaftaran').textContent = 'Pendaftaran Aktif: ' + data.pendaftaran;
+            if (parseInt(data.totalPendaftaran) === 0) document.getElementById('selectedSiswaPendaftaran').innerHTML = '<span style="color:#dc2626;"><i class="fas fa-exclamation-triangle mr-1"></i>Tidak ada pendaftaran aktif!</span>';
             document.getElementById('selectedSiswaInfo').classList.remove('hidden');
             document.getElementById('clearSearch').style.display = 'none';
         }
 
-        // Fungsi clear selected siswa
         function clearSelectedSiswa() {
             document.getElementById('searchSiswa').value = '';
             document.getElementById('selectedSiswaId').value = '';
@@ -1821,250 +893,78 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
         }
 
         // ==================== FUNGSI BANTU ====================
-        function changeMonth(month) {
-            window.location.href = '?bulan=' + month;
-        }
-
-        function formatCurrency(input) {
-            let value = input.value.replace(/\D/g, '');
-            if (value) {
-                value = parseInt(value, 10).toLocaleString('id-ID');
-            }
-            input.value = value;
-        }
+        function formatCurrency(input) { let value = input.value.replace(/\D/g, ''); if (value) value = parseInt(value, 10).toLocaleString('id-ID'); input.value = value; }
+        function formatNumberDisplay(num) { return new Intl.NumberFormat('id-ID').format(num); }
+        function formatMonth(monthStr) { if (!monthStr) return '-'; const date = new Date(monthStr + '-01'); return date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }); }
 
         function handleStatusChange(status) {
             const nominalTagihan = document.getElementById('nominalTagihan');
             const nominalDibayar = document.getElementById('nominalDibayar');
             const metodeBayar = document.getElementById('metodeBayar');
-            const statusHint = document.getElementById('statusHint');
-            const nominalHint = document.getElementById('nominalHint');
-            const metodeHint = document.getElementById('metodeHint');
-
-            // Reset semua hints
-            statusHint.className = 'form-hint hint-info mt-1';
-            nominalHint.className = 'form-hint hint-info mt-1';
-            metodeHint.className = 'form-hint hint-info mt-1';
-
-            // Reset required
-            metodeBayar.required = false;
-
-            switch (status) {
-                case 'lunas':
-                    // Jika lunas, set nominal dibayar = tagihan
-                    const tagihanValue = nominalTagihan.value.replace(/\./g, '');
-                    nominalDibayar.value = formatNumber(tagihanValue);
-                    metodeBayar.required = true;
-
-                    statusHint.innerHTML = '<i class="fas fa-check-circle mr-1"></i> Status: <span class="font-medium">LUNAS</span> - Pembayaran sudah lunas';
-                    statusHint.className = 'form-hint hint-success mt-1';
-
-                    nominalHint.innerHTML = '<i class="fas fa-info-circle mr-1"></i> Nominal dibayar otomatis disesuaikan dengan tagihan';
-
-                    metodeHint.innerHTML = '<i class="fas fa-exclamation-circle mr-1"></i> <span class="font-medium">Wajib</span> pilih metode pembayaran';
-                    metodeHint.className = 'form-hint hint-warning mt-1';
-                    break;
-
-                case 'dibebaskan':
-                    // Jika dibebaskan, set nominal dibayar = 0 dan kosongkan metode
-                    nominalDibayar.value = '0';
-                    metodeBayar.value = '';
-                    metodeBayar.required = false;
-
-                    statusHint.innerHTML = '<i class="fas fa-hand-holding-heart mr-1"></i> Status: <span class="font-medium">DIBEBASKAN</span> - Pembayaran gratis';
-                    statusHint.className = 'form-hint hint-warning mt-1';
-
-                    nominalHint.innerHTML = '<i class="fas fa-info-circle mr-1"></i> Nominal dibayar otomatis 0';
-
-                    metodeHint.innerHTML = '<i class="fas fa-info-circle mr-1"></i> Metode bayar tidak diperlukan';
-                    break;
-
-                case 'belum_bayar':
-                default:
-                    // Reset ke default
-                    const defaultTagihan = '<?= number_format($NOMINAL_DEFAULT, 0, ",", ".") ?>';
-                    if (nominalDibayar.value === '0') {
-                        nominalDibayar.value = defaultTagihan;
-                    }
-                    metodeBayar.required = false;
-
-                    statusHint.innerHTML = '<i class="fas fa-clock mr-1"></i> Status: <span class="font-medium">BELUM BAYAR</span> - Menunggu pembayaran';
-
-                    nominalHint.innerHTML = '<i class="fas fa-info-circle mr-1"></i> Bisa diisi nominal dibayar sebagian';
-
-                    metodeHint.innerHTML = '<i class="fas fa-info-circle mr-1"></i> Opsional, bisa diisi jika sudah ada pembayaran sebagian';
-                    break;
+            if (status === 'lunas') {
+                const tagihanValue = nominalTagihan.value.replace(/\./g, '');
+                nominalDibayar.value = formatNumberDisplay(tagihanValue);
+                metodeBayar.required = true;
+            } else if (status === 'dibebaskan') {
+                nominalDibayar.value = '0';
+                metodeBayar.value = '';
+                metodeBayar.required = false;
+            } else {
+                metodeBayar.required = false;
             }
         }
 
-        function formatNumber(num) {
-            const parsed = parseInt(num, 10);
-            return isNaN(parsed) ? '0' : parsed.toLocaleString('id-ID');
-        }
-
-        function formatDate(dateStr) {
-            if (!dateStr) return '-';
-            const date = new Date(dateStr);
-            return date.toLocaleDateString('id-ID', {
-                day: '2-digit',
-                month: 'long',
-                year: 'numeric'
-            });
-        }
-
-        function formatMonth(monthStr) {
-            if (!monthStr) return '-';
-            const date = new Date(monthStr + '-01');
-            return date.toLocaleDateString('id-ID', {
-                month: 'long',
-                year: 'numeric'
-            });
-        }
-
-        function confirmDelete(id, name) {
-            if (confirm('Hapus pembayaran untuk ' + name + '?')) {
-                window.location.href = '?bulan=<?= $selected_month ?>&delete_id=' + id;
-            }
-        }
-
-        // Close modal on escape key
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') {
-                closeTambahModal();
-                closeDetailModal();
+        // Form validations
+        document.getElementById('formTambahPembayaran')?.addEventListener('submit', function(e) {
+            if (!document.getElementById('selectedSiswaId').value) { e.preventDefault(); alert('Harap pilih siswa terlebih dahulu!'); document.getElementById('searchSiswa').focus(); return; }
+            const tagihan = this.querySelector('input[name="nominal_tagihan"]');
+            const dibayar = this.querySelector('input[name="nominal_dibayar"]');
+            if (tagihan && tagihan.value) tagihan.value = tagihan.value.replace(/\./g, '').replace(/,/g, '.');
+            if (dibayar && dibayar.value) dibayar.value = dibayar.value.replace(/\./g, '').replace(/,/g, '.');
+            if (document.getElementById('statusSelect').value === 'lunas' && !document.getElementById('metodeBayar').value) {
+                e.preventDefault(); alert('Untuk status LUNAS, metode bayar wajib diisi!'); document.getElementById('metodeBayar').focus(); return;
             }
         });
 
-        // Close modal when clicking outside
-        document.querySelectorAll('.modal').forEach(modal => {
-            modal.addEventListener('click', function (e) {
-                if (e.target === this) {
-                    if (this.id === 'modalTambah') closeTambahModal();
-                    if (this.id === 'detailModal') closeDetailModal();
-                }
-            });
-        });
-
-        // Mobile menu functions
-        document.getElementById('menuToggle')?.addEventListener('click', () => {
-            document.getElementById('mobileMenu').classList.add('menu-open');
-            document.getElementById('menuOverlay').classList.add('active');
-            document.body.style.overflow = 'hidden';
-        });
-
-        document.getElementById('menuClose')?.addEventListener('click', () => {
-            document.getElementById('mobileMenu').classList.remove('menu-open');
-            document.getElementById('menuOverlay').classList.remove('active');
-            document.body.style.overflow = 'auto';
-        });
-
-        document.getElementById('menuOverlay')?.addEventListener('click', () => {
-            document.getElementById('mobileMenu').classList.remove('menu-open');
-            document.getElementById('menuOverlay').classList.remove('active');
-            document.body.style.overflow = 'auto';
-        });
-
-        // Validasi form sebelum submit
-        document.getElementById('formTambahPembayaran').addEventListener('submit', function (e) {
-            const siswaId = document.getElementById('selectedSiswaId').value;
-            const nominalTagihan = this.querySelector('input[name="nominal_tagihan"]');
-            const nominalDibayar = this.querySelector('input[name="nominal_dibayar"]');
-            const status = document.getElementById('statusSelect').value;
-            const metodeBayar = document.getElementById('metodeBayar').value;
-
-            if (!siswaId) {
-                e.preventDefault();
-                alert('Harap pilih siswa terlebih dahulu!');
-                document.getElementById('searchSiswa').focus();
-                return;
-            }
-
-            // Format nominal untuk database
-            if (nominalTagihan && nominalTagihan.value) {
-                nominalTagihan.value = nominalTagihan.value.replace(/\./g, '').replace(/,/g, '.');
-            }
-            if (nominalDibayar && nominalDibayar.value) {
-                nominalDibayar.value = nominalDibayar.value.replace(/\./g, '').replace(/,/g, '.');
-            }
-
-            // Validasi metode untuk status lunas
-            if (status === 'lunas' && !metodeBayar) {
-                e.preventDefault();
-                alert('Untuk status LUNAS, metode bayar wajib diisi!');
-                document.getElementById('metodeBayar').focus();
-                return;
-            }
-
-            // Validasi total pendaftaran aktif
-            const totalPendaftaran = document.getElementById('selectedSiswaPendaftaran')?.textContent || '';
-            if (totalPendaftaran.includes('Tidak ada pendaftaran aktif')) {
-                e.preventDefault();
-                alert('Siswa tidak memiliki pendaftaran aktif! Tidak bisa mencatat pembayaran.');
-                return;
+        document.getElementById('formEditPembayaran')?.addEventListener('submit', function(e) {
+            const tagihan = this.querySelector('input[name="nominal_tagihan"]');
+            const dibayar = this.querySelector('input[name="nominal_dibayar"]');
+            if (tagihan && tagihan.value) tagihan.value = tagihan.value.replace(/\./g, '').replace(/,/g, '.');
+            if (dibayar && dibayar.value) dibayar.value = dibayar.value.replace(/\./g, '').replace(/,/g, '.');
+            if (document.getElementById('editStatusSelect').value === 'lunas' && !document.getElementById('editMetodeBayar').value) {
+                e.preventDefault(); alert('Untuk status LUNAS, metode bayar wajib diisi!'); document.getElementById('editMetodeBayar').focus(); return;
             }
         });
 
-        // Auto format saat input pembayaran baru dibuka
-        document.querySelector('button[onclick*="openTambahModal"]')?.addEventListener('click', function () {
-            setTimeout(() => {
-                handleStatusChange('belum_bayar');
-            }, 100);
-        });
+        // Mobile menu
+        document.getElementById('menuToggle')?.addEventListener('click', () => { document.getElementById('mobileMenu').classList.add('menu-open'); document.getElementById('menuOverlay').classList.add('active'); document.body.style.overflow = 'hidden'; });
+        document.getElementById('menuClose')?.addEventListener('click', () => { document.getElementById('mobileMenu').classList.remove('menu-open'); document.getElementById('menuOverlay').classList.remove('active'); document.body.style.overflow = 'auto'; });
+        document.getElementById('menuOverlay')?.addEventListener('click', () => { document.getElementById('mobileMenu').classList.remove('menu-open'); document.getElementById('menuOverlay').classList.remove('active'); document.body.style.overflow = 'auto'; });
 
-        // Close mobile menu ketika klik link
-        document.querySelectorAll('#mobileMenu a').forEach(link => {
-            link.addEventListener('click', () => {
-                document.getElementById('mobileMenu').classList.remove('menu-open');
-                document.getElementById('menuOverlay').classList.remove('active');
-                document.body.style.overflow = 'auto';
-            });
-        });
+        // Close modal on escape
+        document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { closeTambahModal(); closeEditModal(); closeDetailModal(); } });
+        document.querySelectorAll('.modal').forEach(modal => { modal.addEventListener('click', function(e) { if (e.target === this) { if (this.id === 'modalTambah') closeTambahModal(); if (this.id === 'modalEdit') closeEditModal(); if (this.id === 'detailModal') closeDetailModal(); } }); });
 
         // Dropdown functionality
         document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-            toggle.addEventListener('click', function (e) {
-                e.preventDefault();
-                e.stopPropagation();
-
-                const dropdownGroup = this.closest('.mb-1');
-                const submenu = dropdownGroup.querySelector('.dropdown-submenu');
+            toggle.addEventListener('click', function(e) {
+                e.preventDefault(); e.stopPropagation();
+                const submenu = this.closest('.mb-1').querySelector('.dropdown-submenu');
                 const arrow = this.querySelector('.arrow');
-
-                // Toggle current dropdown
                 if (submenu.style.display === 'block') {
                     submenu.style.display = 'none';
                     arrow.style.transform = 'rotate(0deg)';
                     this.classList.remove('open');
                 } else {
-                    // Close other dropdowns
-                    document.querySelectorAll('.dropdown-submenu').forEach(sm => {
-                        sm.style.display = 'none';
-                    });
-                    document.querySelectorAll('.dropdown-toggle').forEach(t => {
-                        t.classList.remove('open');
-                        t.querySelector('.arrow').style.transform = 'rotate(0deg)';
-                    });
-
-                    // Open this dropdown
+                    document.querySelectorAll('.dropdown-submenu').forEach(sm => sm.style.display = 'none');
+                    document.querySelectorAll('.dropdown-toggle').forEach(t => { t.classList.remove('open'); t.querySelector('.arrow').style.transform = 'rotate(0deg)'; });
                     submenu.style.display = 'block';
                     arrow.style.transform = 'rotate(-90deg)';
                     this.classList.add('open');
                 }
             });
         });
-
-        // Close dropdowns when clicking outside
-        document.addEventListener('click', function (e) {
-            if (!e.target.closest('.mb-1')) {
-                document.querySelectorAll('.dropdown-submenu').forEach(submenu => {
-                    submenu.style.display = 'none';
-                });
-                document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-                    toggle.classList.remove('open');
-                    toggle.querySelector('.arrow').style.transform = 'rotate(0deg)';
-                });
-            }
-        });           
+        document.addEventListener('click', function(e) { if (!e.target.closest('.mb-1')) { document.querySelectorAll('.dropdown-submenu').forEach(submenu => submenu.style.display = 'none'); document.querySelectorAll('.dropdown-toggle').forEach(toggle => { toggle.classList.remove('open'); toggle.querySelector('.arrow').style.transform = 'rotate(0deg)'; }); } });
     </script>
 </body>
 
