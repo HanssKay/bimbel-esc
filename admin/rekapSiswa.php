@@ -1,7 +1,7 @@
 <?php
 session_start();
 error_reporting(E_ALL);
-ini_set('display_errors', 0); // Matikan display error di VPS
+ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 ini_set('error_log', __DIR__ . '/../logs/error.log');
 
@@ -72,7 +72,7 @@ if (isset($_GET['periode']) && !empty($_GET['periode'])) {
     list($tahun, $bulan) = explode('-', $periode);
 }
 
-// Filter dengan search - SEPERTI DI JADWAL SISWA
+// Filter dengan search
 $filter_guru = isset($_GET['guru_id']) && is_numeric($_GET['guru_id']) ? (int) $_GET['guru_id'] : 0;
 $filter_siswa = isset($_GET['siswa_id']) && is_numeric($_GET['siswa_id']) ? (int) $_GET['siswa_id'] : 0;
 $filter_nama_siswa = isset($_GET['nama_siswa']) ? trim($_GET['nama_siswa']) : '';
@@ -119,7 +119,7 @@ try {
 }
 
 // ============================================
-// AMBIL DATA REKAP ABSENSI - TANPA KOLOM MAPEL
+// AMBIL DATA REKAP ABSENSI
 // ============================================
 $rekap_data = [];
 $statistik = [
@@ -412,7 +412,7 @@ if ($filter_siswa > 0) {
             font-weight: 500;
         }
 
-        /* Autocomplete styles seperti di jadwal siswa */
+        /* Autocomplete styles */
         .autocomplete-container {
             position: relative;
             width: 100%;
@@ -500,6 +500,209 @@ if ($filter_siswa > 0) {
             text-align: center;
             color: #6b7280;
             font-style: italic;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 9999;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            animation: fadeIn 0.3s;
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 800px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            animation: slideIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(-50px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .modal-header {
+            padding: 1rem 1.5rem;
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+            color: white;
+            border-radius: 12px 12px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .modal-header .close-modal {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: background-color 0.2s;
+        }
+
+        .modal-header .close-modal:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .modal-body {
+            padding: 1.5rem;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        .modal-footer {
+            padding: 1rem 1.5rem;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .detail-card {
+            background: #f8fafc;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            border-left: 4px solid;
+            transition: transform 0.2s;
+        }
+
+        .detail-card:hover {
+            transform: translateX(5px);
+        }
+
+        .detail-card.hadir {
+            border-left-color: #10b981;
+        }
+
+        .detail-card.izin {
+            border-left-color: #f59e0b;
+        }
+
+        .detail-card.sakit {
+            border-left-color: #3b82f6;
+        }
+
+        .detail-card.alpha {
+            border-left-color: #ef4444;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .status-hadir {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-izin {
+            background: #fed7aa;
+            color: #92400e;
+        }
+
+        .status-sakit {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .status-alpha {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .btn-detail {
+            background: none;
+            border: none;
+            color: #3b82f6;
+            cursor: pointer;
+            font-size: 0.875rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.375rem;
+            transition: all 0.2s;
+        }
+
+        .btn-detail:hover {
+            background: #eff6ff;
+            color: #1d4ed8;
+        }
+
+        .btn-detail i {
+            margin-right: 0.25rem;
+        }
+
+        /* Sembunyikan tombol detail di mobile jika perlu */
+        @media (max-width: 640px) {
+            .btn-detail span {
+                display: none;
+            }
+
+            .btn-detail i {
+                margin-right: 0;
+            }
         }
     </style>
 </head>
@@ -591,14 +794,15 @@ if ($filter_siswa > 0) {
                     <h1 class="md:text-2xl text-xl font-bold text-gray-800">
                         <i class="fas fa-chart-bar mr-2"></i> Rekap Absensi Seluruh Siswa
                     </h1>
-                    <p class="text-gray-600 md:text-md text-sm">Rekapitulasi absensi per siswa (tanpa detail mapel)</p>
+                    <p class="text-gray-600 md:text-md text-sm">Rekapitulasi absensi per siswa - Klik tombol Detail
+                        untuk melihat tanggal</p>
                 </div>
             </div>
         </div>
 
         <!-- Content -->
         <div class="container mx-auto p-4 md:p-6">
-            <!-- Filter Section dengan Search seperti Jadwal Siswa -->
+            <!-- Filter Section -->
             <div class="bg-white shadow rounded-lg p-6 mb-6">
                 <h3 class="text-lg font-medium text-gray-900 mb-4">Filter Rekap</h3>
                 <form method="GET" id="filterForm" class="filter-form grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -609,8 +813,8 @@ if ($filter_siswa > 0) {
                         <input type="month" name="periode" value="<?php echo $periode; ?>"
                             class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                     </div>
-                    
-                    <!-- Filter Guru dengan Search/Autocomplete -->
+
+                    <!-- Filter Guru -->
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">
                             <i class="fas fa-chalkboard-teacher mr-1"></i> Cari Guru
@@ -620,15 +824,16 @@ if ($filter_siswa > 0) {
                                 placeholder="Ketik nama guru..." autocomplete="off"
                                 value="<?php echo htmlspecialchars($selected_guru_name); ?>">
                             <input type="hidden" name="guru_id" id="selectedGuruId" value="<?php echo $filter_guru; ?>">
-                            <input type="hidden" name="nama_guru" id="selectedGuruName" value="<?php echo htmlspecialchars($selected_guru_name); ?>">
+                            <input type="hidden" name="nama_guru" id="selectedGuruName"
+                                value="<?php echo htmlspecialchars($selected_guru_name); ?>">
                             <button type="button" id="clearGuruSearch" class="autocomplete-clear">
                                 <i class="fas fa-times"></i>
                             </button>
                             <div id="guruDropdown" class="autocomplete-dropdown"></div>
                         </div>
                     </div>
-                    
-                    <!-- Filter Siswa dengan Search/Autocomplete -->
+
+                    <!-- Filter Siswa -->
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">
                             <i class="fas fa-user-graduate mr-1"></i> Cari Siswa
@@ -637,15 +842,17 @@ if ($filter_siswa > 0) {
                             <input type="text" id="searchSiswa" class="autocomplete-input"
                                 placeholder="Ketik nama siswa..." autocomplete="off"
                                 value="<?php echo htmlspecialchars($selected_siswa_name); ?>">
-                            <input type="hidden" name="siswa_id" id="selectedSiswaId" value="<?php echo $filter_siswa; ?>">
-                            <input type="hidden" name="nama_siswa" id="selectedSiswaName" value="<?php echo htmlspecialchars($selected_siswa_name); ?>">
+                            <input type="hidden" name="siswa_id" id="selectedSiswaId"
+                                value="<?php echo $filter_siswa; ?>">
+                            <input type="hidden" name="nama_siswa" id="selectedSiswaName"
+                                value="<?php echo htmlspecialchars($selected_siswa_name); ?>">
                             <button type="button" id="clearSiswaSearch" class="autocomplete-clear">
                                 <i class="fas fa-times"></i>
                             </button>
                             <div id="siswaDropdown" class="autocomplete-dropdown"></div>
                         </div>
                     </div>
-                    
+
                     <div class="flex items-end">
                         <div class="flex space-x-1 w-full mb-1">
                             <button type="submit"
@@ -659,34 +866,38 @@ if ($filter_siswa > 0) {
                         </div>
                     </div>
                 </form>
-                
+
                 <!-- Active Filters Display -->
                 <?php if ($filter_guru > 0 || $filter_siswa > 0 || !empty($filter_nama_guru) || !empty($filter_nama_siswa)): ?>
-                <div class="mt-3 pt-3 border-t border-gray-200">
-                    <div class="flex flex-wrap gap-2 items-center">
-                        <span class="text-sm text-gray-600">Filter aktif:</span>
-                        <?php if ($filter_guru > 0 && $selected_guru_name): ?>
-                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                            <i class="fas fa-chalkboard-teacher mr-1"></i>
-                            Guru: <?php echo htmlspecialchars($selected_guru_name); ?>
-                            <a href="?<?php echo http_build_query(array_merge($_GET, ['guru_id' => 0, 'nama_guru' => ''])); ?>" class="ml-2 text-blue-600 hover:text-blue-800">
-                                <i class="fas fa-times"></i>
-                            </a>
-                        </span>
-                        <?php endif; ?>
-                        <?php if ($filter_siswa > 0 && $selected_siswa_name): ?>
-                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                            <i class="fas fa-user-graduate mr-1"></i>
-                            Siswa: <?php echo htmlspecialchars($selected_siswa_name); ?>
-                            <a href="?<?php echo http_build_query(array_merge($_GET, ['siswa_id' => 0, 'nama_siswa' => ''])); ?>" class="ml-2 text-green-600 hover:text-green-800">
-                                <i class="fas fa-times"></i>
-                            </a>
-                        </span>
-                        <?php endif; ?>
+                    <div class="mt-3 pt-3 border-t border-gray-200">
+                        <div class="flex flex-wrap gap-2 items-center">
+                            <span class="text-sm text-gray-600">Filter aktif:</span>
+                            <?php if ($filter_guru > 0 && $selected_guru_name): ?>
+                                <span
+                                    class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    <i class="fas fa-chalkboard-teacher mr-1"></i>
+                                    Guru: <?php echo htmlspecialchars($selected_guru_name); ?>
+                                    <a href="?<?php echo http_build_query(array_merge($_GET, ['guru_id' => 0, 'nama_guru' => ''])); ?>"
+                                        class="ml-2 text-blue-600 hover:text-blue-800">
+                                        <i class="fas fa-times"></i>
+                                    </a>
+                                </span>
+                            <?php endif; ?>
+                            <?php if ($filter_siswa > 0 && $selected_siswa_name): ?>
+                                <span
+                                    class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                    <i class="fas fa-user-graduate mr-1"></i>
+                                    Siswa: <?php echo htmlspecialchars($selected_siswa_name); ?>
+                                    <a href="?<?php echo http_build_query(array_merge($_GET, ['siswa_id' => 0, 'nama_siswa' => ''])); ?>"
+                                        class="ml-2 text-green-600 hover:text-green-800">
+                                        <i class="fas fa-times"></i>
+                                    </a>
+                                </span>
+                            <?php endif; ?>
+                        </div>
                     </div>
-                </div>
                 <?php endif; ?>
-                
+
                 <p class="text-xs text-gray-500 mt-3">
                     <i class="fas fa-info-circle"></i> Menampilkan rekap absensi bulan
                     <?php echo date('F Y', strtotime($periode . '-01')); ?>
@@ -867,29 +1078,68 @@ if ($filter_siswa > 0) {
                                     <table class="min-w-full divide-y divide-gray-200">
                                         <thead class="bg-gray-50">
                                             <tr>
-                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No</th>
-                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama Siswa</th>
-                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kelas</th>
-                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hadir</th>
-                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Izin</th>
-                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sakit</th>
-                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Alpha</th>
-                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    No</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Nama Siswa</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Kelas</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Hadir</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Izin</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Sakit</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Alpha</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Total</th>
+                                                <th
+                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Aksi</th>
                                             </tr>
                                         </thead>
                                         <tbody class="bg-white divide-y divide-gray-200">
                                             <?php foreach ($guru['siswa'] as $idx => $siswa): ?>
                                                 <tr class="hover:bg-gray-50">
-                                                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900"><?php echo $idx + 1; ?></td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                                                        <?php echo $idx + 1; ?></td>
                                                     <td class="px-4 py-3 whitespace-nowrap">
-                                                        <div class="text-sm font-medium text-gray-900"><?php echo htmlspecialchars($siswa['nama_lengkap']); ?></div>
+                                                        <div class="text-sm font-medium text-gray-900">
+                                                            <?php echo htmlspecialchars($siswa['nama_lengkap']); ?></div>
                                                     </td>
-                                                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500"><?php echo htmlspecialchars($siswa['kelas_sekolah']); ?></td>
-                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-green-600"><?php echo $siswa['total_hadir']; ?></td>
-                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-yellow-600"><?php echo $siswa['total_izin']; ?></td>
-                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-blue-600"><?php echo $siswa['total_sakit']; ?></td>
-                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-red-600"><?php echo $siswa['total_alpha']; ?></td>
-                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900"><?php echo $siswa['total_sesi']; ?></td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                                                        <?php echo htmlspecialchars($siswa['kelas_sekolah']); ?></td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-green-600">
+                                                        <?php echo $siswa['total_hadir']; ?></td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-yellow-600">
+                                                        <?php echo $siswa['total_izin']; ?></td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-blue-600">
+                                                        <?php echo $siswa['total_sakit']; ?></td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-red-600">
+                                                        <?php echo $siswa['total_alpha']; ?></td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                                                        <?php echo $siswa['total_sesi']; ?></td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm">
+                                                        <button type="button" class="btn-detail"
+                                                            data-siswa-id="<?php echo $siswa['id']; ?>"
+                                                            data-siswa-nama="<?php echo htmlspecialchars($siswa['nama_lengkap']); ?>"
+                                                            data-guru-id="<?php echo $guru['guru_id']; ?>"
+                                                            data-guru-nama="<?php echo htmlspecialchars($guru['nama_guru']); ?>"
+                                                            data-periode="<?php echo $periode; ?>"
+                                                            onclick="showAbsensiDetail(this)">
+                                                            <i class="fas fa-calendar-alt"></i>
+                                                            <span>Detail</span>
+                                                        </button>
+                                                    </td>
                                                 </tr>
                                             <?php endforeach; ?>
                                         </tbody>
@@ -918,6 +1168,28 @@ if ($filter_siswa > 0) {
                 </div>
             </div>
         </footer>
+    </div>
+
+    <!-- Modal Detail Absensi -->
+    <div id="absensiModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">Detail Absensi Siswa</h3>
+                <button type="button" class="close-modal" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <div class="text-center py-8">
+                    <div class="loading-spinner"></div>
+                    <p class="mt-3 text-gray-600">Memuat data...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" onclick="closeModal()"
+                    class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">
+                    Tutup
+                </button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -982,7 +1254,9 @@ if ($filter_siswa > 0) {
                     });
                     document.querySelectorAll('.dropdown-toggle').forEach(t => {
                         t.classList.remove('open');
-                        t.querySelector('.arrow').style.transform = 'rotate(0deg)';
+                        if (t.querySelector('.arrow')) {
+                            t.querySelector('.arrow').style.transform = 'rotate(0deg)';
+                        }
                     });
 
                     submenu.style.display = 'block';
@@ -1004,11 +1278,12 @@ if ($filter_siswa > 0) {
             }
         });
 
-        // ==================== DATA UNTUK SEARCH ====================
+        // ==================== AUTOCOMPLETE FUNCTIONS ====================
         const siswaData = <?php echo json_encode($siswa_list); ?>;
         const guruData = <?php echo json_encode($guru_list); ?>;
 
-        // ==================== AUTOCOMPLETE UNTUK FILTER GURU ====================
+        let selectedIndex = -1;
+
         function initGuruAutocomplete() {
             const searchInput = document.getElementById('searchGuru');
             const clearButton = document.getElementById('clearGuruSearch');
@@ -1018,7 +1293,6 @@ if ($filter_siswa > 0) {
 
             if (!searchInput) return;
 
-            let selectedIndex = -1;
             let searchTimeout;
 
             searchInput.addEventListener('focus', function () {
@@ -1050,8 +1324,6 @@ if ($filter_siswa > 0) {
                 guruNameInput.value = '';
                 clearButton.style.display = 'none';
                 dropdown.style.display = 'none';
-                
-                // Submit form untuk reset filter
                 document.getElementById('filterForm').submit();
             });
 
@@ -1064,20 +1336,17 @@ if ($filter_siswa > 0) {
                         selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
                         updateSelectedItem(dropdown, items, selectedIndex);
                         break;
-
                     case 'ArrowUp':
                         e.preventDefault();
                         selectedIndex = Math.max(selectedIndex - 1, -1);
                         updateSelectedItem(dropdown, items, selectedIndex);
                         break;
-
                     case 'Enter':
                         e.preventDefault();
                         if (selectedIndex >= 0 && items[selectedIndex]) {
                             selectGuru(items[selectedIndex].dataset);
                         }
                         break;
-
                     case 'Escape':
                         dropdown.style.display = 'none';
                         selectedIndex = -1;
@@ -1160,11 +1429,9 @@ if ($filter_siswa > 0) {
             dropdown.style.display = 'none';
             clearButton.style.display = 'block';
 
-            // Submit form untuk filter
             document.getElementById('filterForm').submit();
         }
 
-        // ==================== AUTOCOMPLETE UNTUK FILTER SISWA ====================
         function initSiswaAutocomplete() {
             const searchInput = document.getElementById('searchSiswa');
             const clearButton = document.getElementById('clearSiswaSearch');
@@ -1174,7 +1441,6 @@ if ($filter_siswa > 0) {
 
             if (!searchInput) return;
 
-            let selectedIndex = -1;
             let searchTimeout;
 
             searchInput.addEventListener('focus', function () {
@@ -1206,8 +1472,6 @@ if ($filter_siswa > 0) {
                 siswaNameInput.value = '';
                 clearButton.style.display = 'none';
                 dropdown.style.display = 'none';
-                
-                // Submit form untuk reset filter
                 document.getElementById('filterForm').submit();
             });
 
@@ -1220,20 +1484,17 @@ if ($filter_siswa > 0) {
                         selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
                         updateSelectedItem(dropdown, items, selectedIndex);
                         break;
-
                     case 'ArrowUp':
                         e.preventDefault();
                         selectedIndex = Math.max(selectedIndex - 1, -1);
                         updateSelectedItem(dropdown, items, selectedIndex);
                         break;
-
                     case 'Enter':
                         e.preventDefault();
                         if (selectedIndex >= 0 && items[selectedIndex]) {
                             selectSiswaFilter(items[selectedIndex].dataset);
                         }
                         break;
-
                     case 'Escape':
                         dropdown.style.display = 'none';
                         selectedIndex = -1;
@@ -1318,7 +1579,6 @@ if ($filter_siswa > 0) {
             dropdown.style.display = 'none';
             clearButton.style.display = 'block';
 
-            // Submit form untuk filter
             document.getElementById('filterForm').submit();
         }
 
@@ -1338,6 +1598,207 @@ if ($filter_siswa > 0) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // ==================== MODAL FUNCTIONS ====================
+        let currentModal = null;
+
+        function showAbsensiDetail(button) {
+            const siswaId = button.dataset.siswaId;
+            const siswaNama = button.dataset.siswaNama;
+            const guruId = button.dataset.guruId;
+            const guruNama = button.dataset.guruNama;
+            const periode = button.dataset.periode;
+
+            const modal = document.getElementById('absensiModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+
+            modalTitle.innerHTML = `<i class="fas fa-calendar-alt mr-2"></i> Detail Absensi: ${escapeHtml(siswaNama)}`;
+            modalBody.innerHTML = `
+                <div class="text-center py-8">
+                    <div class="loading-spinner"></div>
+                    <p class="mt-3 text-gray-600">Memuat data absensi...</p>
+                </div>
+            `;
+
+            modal.style.display = 'block';
+            document.body.style.overflow = 'hidden';
+
+            // Fetch data via AJAX
+            $.ajax({
+                url: 'ajax_get_absensi_detail.php',
+                type: 'GET',
+                data: {
+                    siswa_id: siswaId,
+                    guru_id: guruId,
+                    periode: periode
+                },
+                dataType: 'json',
+                success: function (response) {
+                    if (response.success) {
+                        renderAbsensiDetail(response, siswaNama, guruNama, periode);
+                    } else {
+                        modalBody.innerHTML = `
+                            <div class="text-center py-8">
+                                <i class="fas fa-exclamation-triangle text-5xl text-red-400 mb-4"></i>
+                                <p class="text-gray-700">Gagal memuat data: ${response.message}</p>
+                            </div>
+                        `;
+                    }
+                },
+                error: function (xhr, status, error) {
+                    modalBody.innerHTML = `
+                        <div class="text-center py-8">
+                            <i class="fas fa-exclamation-triangle text-5xl text-red-400 mb-4"></i>
+                            <p class="text-gray-700">Terjadi kesalahan: ${error}</p>
+                        </div>
+                    `;
+                }
+            });
+        }
+
+        function renderAbsensiDetail(data, siswaNama, guruNama, periode) {
+            const modalBody = document.getElementById('modalBody');
+
+            if (data.total === 0) {
+                modalBody.innerHTML = `
+                    <div class="text-center py-8">
+                        <i class="fas fa-calendar-times text-5xl text-gray-400 mb-4"></i>
+                        <p class="text-gray-700">Tidak ada data absensi untuk periode ini.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+            const [tahun, bulan] = periode.split('-');
+            const bulanName = monthNames[parseInt(bulan) - 1];
+
+            let html = `
+                <div class="mb-4 p-3 bg-gray-100 rounded-lg">
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+                        <div class="bg-green-100 rounded-lg p-2">
+                            <div class="text-sm text-gray-600">Hadir</div>
+                            <div class="text-xl font-bold text-green-600">${data.summary.hadir}</div>
+                        </div>
+                        <div class="bg-yellow-100 rounded-lg p-2">
+                            <div class="text-sm text-gray-600">Izin</div>
+                            <div class="text-xl font-bold text-yellow-600">${data.summary.izin}</div>
+                        </div>
+                        <div class="bg-blue-100 rounded-lg p-2">
+                            <div class="text-sm text-gray-600">Sakit</div>
+                            <div class="text-xl font-bold text-blue-600">${data.summary.sakit}</div>
+                        </div>
+                        <div class="bg-red-100 rounded-lg p-2">
+                            <div class="text-sm text-gray-600">Alpha</div>
+                            <div class="text-xl font-bold text-red-600">${data.summary.alpha}</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-3 text-sm text-gray-500">
+                    <i class="fas fa-chalkboard-teacher mr-1"></i> Guru: ${escapeHtml(guruNama)}
+                    <span class="mx-2">|</span>
+                    <i class="fas fa-calendar mr-1"></i> Periode: ${bulanName} ${tahun}
+                    <span class="mx-2">|</span>
+                    <i class="fas fa-chart-line mr-1"></i> Total Sesi: ${data.total}
+                </div>
+                
+                <div class="border-t border-gray-200 mt-2 pt-3">
+                    <h4 class="font-medium text-gray-800 mb-3">
+                        <i class="fas fa-list-ul mr-1"></i> Daftar Absensi
+                    </h4>
+                    <div class="space-y-2">
+            `;
+
+            const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
+            data.data.forEach(function (item) {
+                const statusClass = `detail-card ${item.status}`;
+                const statusBadgeClass = `status-badge status-${item.status}`;
+                let statusIcon = '';
+                let statusText = '';
+
+                switch (item.status) {
+                    case 'hadir':
+                        statusIcon = 'fa-check-circle';
+                        statusText = 'Hadir';
+                        break;
+                    case 'izin':
+                        statusIcon = 'fa-envelope';
+                        statusText = 'Izin';
+                        break;
+                    case 'sakit':
+                        statusIcon = 'fa-thermometer-half';
+                        statusText = 'Sakit';
+                        break;
+                    case 'alpha':
+                        statusIcon = 'fa-times-circle';
+                        statusText = 'Alpha';
+                        break;
+                }
+
+                const tanggal = new Date(item.tanggal_absensi);
+                const dayName = dayNames[tanggal.getDay()];
+                const tanggalFormatted = `${dayName}, ${tanggal.getDate()} ${monthNames[tanggal.getMonth()]} ${tanggal.getFullYear()}`;
+
+                html += `
+                    <div class="${statusClass} p-3">
+                        <div class="flex justify-between items-start flex-wrap gap-2">
+                            <div class="flex items-center">
+                                <i class="fas ${statusIcon} mr-2 text-lg"></i>
+                                <div>
+                                    <div class="font-medium">${tanggalFormatted}</div>
+                                </div>
+                            </div>
+                            <div>
+                                <span class="${statusBadgeClass}">${statusText}</span>
+                            </div>
+                        </div>
+                `;
+
+                if (item.keterangan && item.keterangan.trim() !== '') {
+                    html += `
+                        <div class="mt-2 text-sm text-gray-600 pl-6">
+                            <i class="fas fa-comment mr-1"></i> Keterangan: ${escapeHtml(item.keterangan)}
+                        </div>
+                    `;
+                }
+
+                if (item.bukti_izin && item.bukti_izin.trim() !== '') {
+                    html += `
+                        <div class="mt-1 text-sm text-gray-500 pl-6">
+                            <i class="fas fa-paperclip mr-1"></i> Ada bukti izin
+                        </div>
+                    `;
+                }
+
+                html += `</div>`;
+            });
+
+            html += `
+                    </div>
+                </div>
+            `;
+
+            modalBody.innerHTML = html;
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('absensiModal');
+            if (modal) {
+                modal.style.display = 'none';
+                document.body.style.overflow = 'auto';
+            }
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function (event) {
+            const modal = document.getElementById('absensiModal');
+            if (event.target === modal) {
+                closeModal();
+            }
         }
 
         // Initialize autocomplete
