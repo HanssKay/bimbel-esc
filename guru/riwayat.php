@@ -1490,30 +1490,41 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list_riwayat') {
         }
 
         function renderEditIndicator(label, fieldName, value) {
-            const percentage = (value / 10) * 100;
+            // Jika value 0 atau null, tampilkan kosong
+            const displayValue = (value && value > 0) ? value : '';
+            const percentage = (displayValue ? (displayValue / 10) * 100 : 0);
             let color = '';
-            if (value >= 9) color = 'bg-green-500';
-            else if (value >= 7) color = 'bg-blue-500';
-            else if (value >= 5) color = 'bg-yellow-500';
-            else color = 'bg-red-500';
+            if (displayValue >= 9) color = 'bg-green-500';
+            else if (displayValue >= 7) color = 'bg-blue-500';
+            else if (displayValue >= 5) color = 'bg-yellow-500';
+            else if (displayValue > 0) color = 'bg-red-500';
+            else color = 'bg-gray-300';
 
             return `
         <div class="indicator-box-edit">
             <div class="flex justify-between items-center mb-2">
                 <label class="font-medium text-gray-700 text-sm">${label}</label>
-                <input type="number" name="${fieldName}" min="1" max="10" step="1" value="${value}"
+                <input type="number" name="${fieldName}" min="1" max="10" step="1" value="${displayValue}"
+                    placeholder="-"
                     class="rating-input-edit" oninput="validateEditRating(this); updateEditPreview();">
             </div>
             <div class="w-full bg-gray-200 rounded-full h-2">
                 <div class="${color} h-2 rounded-full" style="width: ${percentage}%"></div>
             </div>
-            <p class="text-xs text-gray-500 mt-1">Skala 1-10</p>
+            <p class="text-xs text-gray-500 mt-1">Skala 1-10 (kosongkan jika tidak diisi)</p>
         </div>
     `;
         }
 
         function validateEditRating(input) {
-            let value = parseInt(input.value) || 5;
+            let value = parseInt(input.value);
+
+            // Jika kosong atau NaN, biarkan kosong (tidak diisi default 5)
+            if (isNaN(value) || input.value === '') {
+                input.value = '';
+                return;
+            }
+
             if (value < 1) value = 1;
             if (value > 10) value = 10;
             input.value = value;
@@ -1524,28 +1535,53 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list_riwayat') {
                 input.addEventListener('input', function () {
                     validateEditRating(this);
                     updateEditPreview();
+                    // Update warna progress bar
+                    updateIndicatorColor(this);
                 });
-            });
 
-            // Also listen to date and periode changes if needed
-            const tanggalInput = document.getElementById('editTanggalPenilaian');
-            if (tanggalInput) {
-                // No preview update needed for date
+                // Trigger preview on load
+                updateIndicatorColor(input);
+            });
+        }
+
+        function updateIndicatorColor(input) {
+            const value = parseInt(input.value);
+            const parentDiv = input.closest('.indicator-box-edit');
+            const progressBar = parentDiv.querySelector('.rounded-full');
+
+            if (isNaN(value) || input.value === '') {
+                progressBar.style.width = '0%';
+                progressBar.className = 'bg-gray-300 h-2 rounded-full';
+                return;
             }
+
+            const percentage = (value / 10) * 100;
+            progressBar.style.width = `${percentage}%`;
+
+            if (value >= 9) progressBar.className = 'bg-green-500 h-2 rounded-full';
+            else if (value >= 7) progressBar.className = 'bg-blue-500 h-2 rounded-full';
+            else if (value >= 5) progressBar.className = 'bg-yellow-500 h-2 rounded-full';
+            else progressBar.className = 'bg-red-500 h-2 rounded-full';
         }
 
         function updateEditPreview() {
             const fields = ['willingness_learn', 'problem_solving', 'critical_thinking', 'concentration', 'independence'];
             let total = 0;
+            let filledCount = 0;
 
             fields.forEach(field => {
                 const input = document.querySelector(`input[name="${field}"]`);
-                if (input) {
-                    total += parseInt(input.value) || 0;
+                if (input && input.value !== '') {
+                    const val = parseInt(input.value);
+                    if (!isNaN(val)) {
+                        total += val;
+                        filledCount++;
+                    }
                 }
             });
 
-            const persentase = Math.round((total / 50) * 100);
+            // Jika tidak ada nilai yang diisi, total = 0
+            const persentase = filledCount > 0 ? Math.round((total / 50) * 100) : 0;
             let kategori = '-';
             let kategoriColor = 'text-gray-600';
 
