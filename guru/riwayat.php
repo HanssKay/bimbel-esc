@@ -1909,7 +1909,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list_riwayat') {
                             </div>
                             <div class="mt-2 md:mt-0">
                                 <span class="px-3 py-1 rounded-full text-sm font-medium ${kategoriBgClass} ${kategoriClass}">
-                                    ${escapeHtml(safeData.kategori)} (${safeData.persentase}%)
+                                    ${escapeHtml(safeData.kategori)}
                                 </span>
                             </div>
                         </div>
