@@ -627,7 +627,7 @@ if (isset($_GET['ajax'])) {
         .autocomplete-dropdown {
             position: absolute;
             top: 100%;
-            left: 20%;
+            left: 0%;
             right: auto;
             min-width: 100%;
             max-height: 300px;
@@ -910,7 +910,7 @@ if (isset($_GET['ajax'])) {
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
                 <div>
                     <h1 class="text-xl md:text-2xl font-bold text-gray-800">
-                        <i class="fas fa-credit-card mr-2"></i>Informasi Pembayaran
+                        <i class="fas fa-credit-card mr-2"></i>Manajemen Pembayaran
                     </h1>
                     <p class="text-gray-600 text-sm md:text-base">Input, edit, dan kelola pembayaran siswa dengan
                         tanggal spesifik</p>
@@ -988,7 +988,7 @@ if (isset($_GET['ajax'])) {
                             </button>
                         </div>
                         <div id="filterSiswaDropdown"
-                            class="absolute top-[180px] left-[650px] z-50 w-90 bg-white mt-100 border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto hidden">
+                            class="absolute md:top-[180px] md:left-[650px] top-[360px] left-[10px] z-50 w-90 bg-white mt-100 border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto hidden">
                         </div>
                     </div>
 
@@ -1460,7 +1460,7 @@ if (isset($_GET['ajax'])) {
                 <!-- Informasi Pembayaran -->
                 <div class="mb-4">
                     <h3 class="font-medium text-gray-700 mb-2 border-b pb-1">
-                        <i class="fas fa-credit-card mr-2 text-purple-500"></i>Informasi Pembayaran
+                        <i class="fas fa-credit-card mr-2 text-purple-500"></i>Manajemen Pembayaran
                     </h3>
                     <div class="space-y-1">
                         <div class="detail-item">
