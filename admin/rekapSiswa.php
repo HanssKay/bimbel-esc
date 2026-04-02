@@ -1009,10 +1009,10 @@ if ($filter_siswa > 0) {
                                 </span>
                             <?php endif; ?>
                         </h3>
-                        <div class="text-sm text-gray-500">
+                        <!-- <div class="text-sm text-gray-500">
                             <i class="fas fa-clock mr-1"></i>
                             <?php echo date('d/m/Y H:i:s'); ?>
-                        </div>
+                        </div> -->
                     </div>
                 </div>
 
