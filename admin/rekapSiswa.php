@@ -1,14 +1,16 @@
 <?php
 session_start();
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('display_errors', 0); // Matikan display error di VPS
+ini_set('log_errors', 1);
+ini_set('error_log', __DIR__ . '/../logs/error.log');
 
 require_once '../includes/config.php';
 require_once '../config/menu.php';
 require_once '../includes/menu_functions.php';
 
 // CEK LOGIN & ROLE
-if (!isset($_SESSION['user_id'])) {
+if (!isset($_SESSION['user_id']) || !is_numeric($_SESSION['user_id'])) {
     header('Location: ../index.php');
     exit();
 }
@@ -18,8 +20,47 @@ if ($_SESSION['user_role'] != 'admin') {
     exit();
 }
 
-$full_name = $_SESSION['full_name'] ?? 'Admin';
+$full_name = htmlspecialchars($_SESSION['full_name'] ?? 'Admin', ENT_QUOTES, 'UTF-8');
 $currentPage = basename($_SERVER['PHP_SELF']);
+
+// FUNGSI LOGGING
+function writeLog($message, $type = 'INFO')
+{
+    $log_message = date('Y-m-d H:i:s') . " [$type] " . $message . PHP_EOL;
+    error_log($log_message);
+}
+
+// FUNGSI HELPER UNTUK DATABASE DENGAN ERROR HANDLING LEBIH BAIK
+function executeQuery($conn, $sql, $params = [], $types = "")
+{
+    try {
+        if (!$conn) {
+            throw new Exception("Koneksi database tidak tersedia");
+        }
+
+        $stmt = $conn->prepare($sql);
+        if (!$stmt) {
+            throw new Exception("Query preparation failed: " . $conn->error . " - SQL: " . $sql);
+        }
+
+        if (!empty($params)) {
+            if (strlen($types) !== count($params)) {
+                throw new Exception("Parameter count mismatch. Types: {$types}, Params: " . count($params));
+            }
+            $stmt->bind_param($types, ...$params);
+        }
+
+        if (!$stmt->execute()) {
+            throw new Exception("Query execution failed: " . $stmt->error);
+        }
+
+        return $stmt;
+
+    } catch (Exception $e) {
+        writeLog($e->getMessage(), 'ERROR');
+        throw $e;
+    }
+}
 
 // Set default periode (bulan ini)
 $tahun = date('Y');
@@ -31,46 +72,51 @@ if (isset($_GET['periode']) && !empty($_GET['periode'])) {
     list($tahun, $bulan) = explode('-', $periode);
 }
 
-// Filter guru
-$filter_guru = isset($_GET['guru_id']) ? intval($_GET['guru_id']) : 0;
-
-// Filter siswa
-$filter_siswa = isset($_GET['siswa_id']) ? intval($_GET['siswa_id']) : 0;
-
-// Ambil daftar guru untuk dropdown
-$guru_options = [];
-$sql_guru = "SELECT g.id, u.full_name as nama_guru 
-             FROM guru g
-             JOIN users u ON g.user_id = u.id
-             WHERE g.status = 'aktif'
-             ORDER BY u.full_name";
-$stmt_guru = $conn->prepare($sql_guru);
-$stmt_guru->execute();
-$result_guru = $stmt_guru->get_result();
-
-while ($row = $result_guru->fetch_assoc()) {
-    $guru_options[$row['id']] = $row;
-}
-$stmt_guru->close();
-
-// Ambil daftar siswa untuk dropdown
-$siswa_options = [];
-$sql_siswa = "SELECT s.id, s.nama_lengkap, s.kelas
-              FROM siswa s
-              WHERE s.status = 'aktif'
-              ORDER BY s.nama_lengkap";
-$stmt_siswa = $conn->prepare($sql_siswa);
-$stmt_siswa->execute();
-$result_siswa = $stmt_siswa->get_result();
-
-while ($row = $result_siswa->fetch_assoc()) {
-    $siswa_options[$row['id']] = $row;
-}
-$stmt_siswa->close();
+// Filter dengan search - SEPERTI DI JADWAL SISWA
+$filter_guru = isset($_GET['guru_id']) && is_numeric($_GET['guru_id']) ? (int) $_GET['guru_id'] : 0;
+$filter_siswa = isset($_GET['siswa_id']) && is_numeric($_GET['siswa_id']) ? (int) $_GET['siswa_id'] : 0;
+$filter_nama_siswa = isset($_GET['nama_siswa']) ? trim($_GET['nama_siswa']) : '';
+$filter_nama_guru = isset($_GET['nama_guru']) ? trim($_GET['nama_guru']) : '';
 
 // Hitung tanggal awal dan akhir bulan
 $tanggal_awal = date('Y-m-01', strtotime("$tahun-$bulan-01"));
 $tanggal_akhir = date('Y-m-t', strtotime("$tahun-$bulan-01"));
+
+// AMBIL DATA UNTUK FILTER (siswa dan guru)
+$siswa_list = [];
+$guru_list = [];
+
+try {
+    // Daftar siswa aktif untuk search
+    $sql_siswa = "SELECT s.id, s.nama_lengkap, s.kelas, s.sekolah_asal
+                  FROM siswa s
+                  WHERE s.status = 'aktif'
+                  ORDER BY s.nama_lengkap";
+    $result_siswa = $conn->query($sql_siswa);
+    if ($result_siswa) {
+        while ($row = $result_siswa->fetch_assoc()) {
+            $siswa_list[] = $row;
+        }
+    }
+
+    // Daftar guru aktif untuk search
+    $sql_guru = "SELECT g.id, u.full_name as nama_guru, g.bidang_keahlian
+                FROM guru g 
+                INNER JOIN users u ON g.user_id = u.id 
+                WHERE g.status = 'aktif' 
+                ORDER BY u.full_name";
+    $result_guru = $conn->query($sql_guru);
+    if ($result_guru) {
+        while ($row = $result_guru->fetch_assoc()) {
+            $guru_list[] = $row;
+        }
+    }
+
+    writeLog("Data filter loaded: " . count($siswa_list) . " siswa, " . count($guru_list) . " guru", 'INFO');
+
+} catch (Exception $e) {
+    writeLog("Error fetching filter data: " . $e->getMessage(), 'ERROR');
+}
 
 // ============================================
 // AMBIL DATA REKAP ABSENSI - TANPA KOLOM MAPEL
@@ -86,15 +132,17 @@ $statistik = [
     'alpha' => 0
 ];
 
-// Ambil semua guru yang mengajar
+// Ambil semua guru yang mengajar (dengan filter)
 $guru_ids = [];
 if ($filter_guru > 0) {
     $guru_ids[] = $filter_guru;
 } else {
     $sql_guru_all = "SELECT id FROM guru WHERE status = 'aktif'";
     $result_guru_all = $conn->query($sql_guru_all);
-    while ($row = $result_guru_all->fetch_assoc()) {
-        $guru_ids[] = $row['id'];
+    if ($result_guru_all) {
+        while ($row = $result_guru_all->fetch_assoc()) {
+            $guru_ids[] = $row['id'];
+        }
     }
 }
 $statistik['total_guru'] = count($guru_ids);
@@ -131,6 +179,10 @@ foreach ($guru_ids as $guru_id) {
         $sql_siswa .= " AND s.id = ?";
         $params[] = $filter_siswa;
         $types .= "i";
+    } elseif (!empty($filter_nama_siswa)) {
+        $sql_siswa .= " AND s.nama_lengkap LIKE ?";
+        $params[] = "%" . $filter_nama_siswa . "%";
+        $types .= "s";
     }
 
     $sql_siswa .= " ORDER BY s.nama_lengkap";
@@ -213,6 +265,31 @@ foreach ($guru_ids as $guru_id) {
 usort($rekap_data, function ($a, $b) {
     return strcmp($a['nama_guru'], $b['nama_guru']);
 });
+
+// Ambil nama yang dipilih untuk ditampilkan
+$selected_guru_name = '';
+if ($filter_guru > 0) {
+    foreach ($guru_list as $guru) {
+        if ($guru['id'] == $filter_guru) {
+            $selected_guru_name = $guru['nama_guru'];
+            break;
+        }
+    }
+} elseif (!empty($filter_nama_guru)) {
+    $selected_guru_name = $filter_nama_guru;
+}
+
+$selected_siswa_name = '';
+if ($filter_siswa > 0) {
+    foreach ($siswa_list as $siswa) {
+        if ($siswa['id'] == $filter_siswa) {
+            $selected_siswa_name = $siswa['nama_lengkap'] . ' (' . $siswa['kelas'] . ')';
+            break;
+        }
+    }
+} elseif (!empty($filter_nama_siswa)) {
+    $selected_siswa_name = $filter_nama_siswa;
+}
 ?>
 
 <!DOCTYPE html>
@@ -224,6 +301,7 @@ usort($rekap_data, function ($a, $b) {
     <title>Rekap Absensi - Bimbel Esc</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <style>
         .table-responsive {
             overflow-x: auto;
@@ -333,6 +411,96 @@ usort($rekap_data, function ($a, $b) {
             font-size: 0.75rem;
             font-weight: 500;
         }
+
+        /* Autocomplete styles seperti di jadwal siswa */
+        .autocomplete-container {
+            position: relative;
+            width: 100%;
+        }
+
+        .autocomplete-input {
+            width: 100%;
+            padding: 0.5rem 2rem 0.5rem 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+            background-color: white;
+        }
+
+        .autocomplete-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+        }
+
+        .autocomplete-clear {
+            position: absolute;
+            right: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: #9ca3af;
+            cursor: pointer;
+            display: none;
+        }
+
+        .autocomplete-clear:hover {
+            color: #6b7280;
+        }
+
+        .autocomplete-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            max-height: 300px;
+            overflow-y: auto;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.5rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            display: none;
+        }
+
+        .autocomplete-item {
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            border-bottom: 1px solid #f3f4f6;
+            transition: background-color 0.2s;
+        }
+
+        .autocomplete-item:last-child {
+            border-bottom: none;
+        }
+
+        .autocomplete-item:hover {
+            background-color: #f9fafb;
+        }
+
+        .autocomplete-item.active {
+            background-color: #eff6ff;
+        }
+
+        .autocomplete-item .item-nama {
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .autocomplete-item .item-info {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 0.25rem;
+        }
+
+        .no-results {
+            padding: 1rem;
+            text-align: center;
+            color: #6b7280;
+            font-style: italic;
+        }
     </style>
 </head>
 
@@ -430,11 +598,10 @@ usort($rekap_data, function ($a, $b) {
 
         <!-- Content -->
         <div class="container mx-auto p-4 md:p-6">
-            <!-- Filter Section -->
-            <!-- Filter Section -->
+            <!-- Filter Section dengan Search seperti Jadwal Siswa -->
             <div class="bg-white shadow rounded-lg p-6 mb-6">
                 <h3 class="text-lg font-medium text-gray-900 mb-4">Filter Rekap</h3>
-                <form method="GET" class="filter-form grid grid-cols-1 md:grid-cols-4 gap-4">
+                <form method="GET" id="filterForm" class="filter-form grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">
                             <i class="fas fa-calendar mr-1"></i> Periode (Bulan-Tahun)
@@ -442,34 +609,43 @@ usort($rekap_data, function ($a, $b) {
                         <input type="month" name="periode" value="<?php echo $periode; ?>"
                             class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                     </div>
+                    
+                    <!-- Filter Guru dengan Search/Autocomplete -->
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">
-                            <i class="fas fa-chalkboard-teacher mr-1"></i> Guru
+                            <i class="fas fa-chalkboard-teacher mr-1"></i> Cari Guru
                         </label>
-                        <select name="guru_id"
-                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="0">Semua Guru</option>
-                            <?php foreach ($guru_options as $guru): ?>
-                                <option value="<?php echo $guru['id']; ?>" <?php echo ($filter_guru == $guru['id']) ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($guru['nama_guru']); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
+                        <div class="autocomplete-container">
+                            <input type="text" id="searchGuru" class="autocomplete-input"
+                                placeholder="Ketik nama guru..." autocomplete="off"
+                                value="<?php echo htmlspecialchars($selected_guru_name); ?>">
+                            <input type="hidden" name="guru_id" id="selectedGuruId" value="<?php echo $filter_guru; ?>">
+                            <input type="hidden" name="nama_guru" id="selectedGuruName" value="<?php echo htmlspecialchars($selected_guru_name); ?>">
+                            <button type="button" id="clearGuruSearch" class="autocomplete-clear">
+                                <i class="fas fa-times"></i>
+                            </button>
+                            <div id="guruDropdown" class="autocomplete-dropdown"></div>
+                        </div>
                     </div>
+                    
+                    <!-- Filter Siswa dengan Search/Autocomplete -->
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">
-                            <i class="fas fa-user-graduate mr-1"></i> Siswa
+                            <i class="fas fa-user-graduate mr-1"></i> Cari Siswa
                         </label>
-                        <select name="siswa_id"
-                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="0">Semua Siswa</option>
-                            <?php foreach ($siswa_options as $siswa): ?>
-                                <option value="<?php echo $siswa['id']; ?>" <?php echo ($filter_siswa == $siswa['id']) ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($siswa['nama_lengkap'] . ' - ' . $siswa['kelas']); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
+                        <div class="autocomplete-container">
+                            <input type="text" id="searchSiswa" class="autocomplete-input"
+                                placeholder="Ketik nama siswa..." autocomplete="off"
+                                value="<?php echo htmlspecialchars($selected_siswa_name); ?>">
+                            <input type="hidden" name="siswa_id" id="selectedSiswaId" value="<?php echo $filter_siswa; ?>">
+                            <input type="hidden" name="nama_siswa" id="selectedSiswaName" value="<?php echo htmlspecialchars($selected_siswa_name); ?>">
+                            <button type="button" id="clearSiswaSearch" class="autocomplete-clear">
+                                <i class="fas fa-times"></i>
+                            </button>
+                            <div id="siswaDropdown" class="autocomplete-dropdown"></div>
+                        </div>
                     </div>
+                    
                     <div class="flex items-end">
                         <div class="flex space-x-1 w-full mb-1">
                             <button type="submit"
@@ -483,6 +659,34 @@ usort($rekap_data, function ($a, $b) {
                         </div>
                     </div>
                 </form>
+                
+                <!-- Active Filters Display -->
+                <?php if ($filter_guru > 0 || $filter_siswa > 0 || !empty($filter_nama_guru) || !empty($filter_nama_siswa)): ?>
+                <div class="mt-3 pt-3 border-t border-gray-200">
+                    <div class="flex flex-wrap gap-2 items-center">
+                        <span class="text-sm text-gray-600">Filter aktif:</span>
+                        <?php if ($filter_guru > 0 && $selected_guru_name): ?>
+                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                            <i class="fas fa-chalkboard-teacher mr-1"></i>
+                            Guru: <?php echo htmlspecialchars($selected_guru_name); ?>
+                            <a href="?<?php echo http_build_query(array_merge($_GET, ['guru_id' => 0, 'nama_guru' => ''])); ?>" class="ml-2 text-blue-600 hover:text-blue-800">
+                                <i class="fas fa-times"></i>
+                            </a>
+                        </span>
+                        <?php endif; ?>
+                        <?php if ($filter_siswa > 0 && $selected_siswa_name): ?>
+                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            <i class="fas fa-user-graduate mr-1"></i>
+                            Siswa: <?php echo htmlspecialchars($selected_siswa_name); ?>
+                            <a href="?<?php echo http_build_query(array_merge($_GET, ['siswa_id' => 0, 'nama_siswa' => ''])); ?>" class="ml-2 text-green-600 hover:text-green-800">
+                                <i class="fas fa-times"></i>
+                            </a>
+                        </span>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <?php endif; ?>
+                
                 <p class="text-xs text-gray-500 mt-3">
                     <i class="fas fa-info-circle"></i> Menampilkan rekap absensi bulan
                     <?php echo date('F Y', strtotime($periode . '-01')); ?>
@@ -498,13 +702,12 @@ usort($rekap_data, function ($a, $b) {
                             Statistik Rekap - <?php echo date('F Y', strtotime($periode . '-01')); ?>
                         </h3>
                         <p class="text-gray-600 text-sm">
-                            <?php if ($filter_guru > 0 && isset($guru_options[$filter_guru])): ?>
-                                Guru: <?php echo htmlspecialchars($guru_options[$filter_guru]['nama_guru']); ?>
+                            <?php if ($filter_guru > 0 && $selected_guru_name): ?>
+                                Guru: <?php echo htmlspecialchars($selected_guru_name); ?>
                             <?php endif; ?>
-                            <?php if ($filter_siswa > 0 && isset($siswa_options[$filter_siswa])): ?>
+                            <?php if ($filter_siswa > 0 && $selected_siswa_name): ?>
                                 <?php echo ($filter_guru > 0) ? ' | ' : ''; ?>
-                                Siswa:
-                                <?php echo htmlspecialchars($siswa_options[$filter_siswa]['nama_lengkap'] . ' (' . $siswa_options[$filter_siswa]['kelas'] . ')'); ?>
+                                Siswa: <?php echo htmlspecialchars($selected_siswa_name); ?>
                             <?php endif; ?>
                         </p>
                     </div>
@@ -659,66 +862,34 @@ usort($rekap_data, function ($a, $b) {
                                     </div>
                                 </div>
 
-                                <!-- Tabel Siswa (TANPA KOLOM MAPEL) -->
+                                <!-- Tabel Siswa -->
                                 <div class="px-6 py-4">
                                     <table class="min-w-full divide-y divide-gray-200">
                                         <thead class="bg-gray-50">
                                             <tr>
-                                                <th
-                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                    No</th>
-                                                <th
-                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                    Nama Siswa</th>
-                                                <th
-                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                    Kelas</th>
-                                                <th
-                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                    Hadir</th>
-                                                <th
-                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                    Izin</th>
-                                                <th
-                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                    Sakit</th>
-                                                <th
-                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                    Alpha</th>
-                                                <th
-                                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                                    Total</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama Siswa</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kelas</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hadir</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Izin</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sakit</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Alpha</th>
+                                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
                                             </tr>
                                         </thead>
                                         <tbody class="bg-white divide-y divide-gray-200">
                                             <?php foreach ($guru['siswa'] as $idx => $siswa): ?>
                                                 <tr class="hover:bg-gray-50">
-                                                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                                                        <?php echo $idx + 1; ?>
-                                                    </td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900"><?php echo $idx + 1; ?></td>
                                                     <td class="px-4 py-3 whitespace-nowrap">
-                                                        <div class="text-sm font-medium text-gray-900">
-                                                            <?php echo htmlspecialchars($siswa['nama_lengkap']); ?>
-                                                        </div>
+                                                        <div class="text-sm font-medium text-gray-900"><?php echo htmlspecialchars($siswa['nama_lengkap']); ?></div>
                                                     </td>
-                                                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                                                        <?php echo htmlspecialchars($siswa['kelas_sekolah']); ?>
-                                                    </td>
-                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-green-600">
-                                                        <?php echo $siswa['total_hadir']; ?>
-                                                    </td>
-                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-yellow-600">
-                                                        <?php echo $siswa['total_izin']; ?>
-                                                    </td>
-                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-blue-600">
-                                                        <?php echo $siswa['total_sakit']; ?>
-                                                    </td>
-                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-red-600">
-                                                        <?php echo $siswa['total_alpha']; ?>
-                                                    </td>
-                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                                                        <?php echo $siswa['total_sesi']; ?>
-                                                    </td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500"><?php echo htmlspecialchars($siswa['kelas_sekolah']); ?></td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-green-600"><?php echo $siswa['total_hadir']; ?></td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-yellow-600"><?php echo $siswa['total_izin']; ?></td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-blue-600"><?php echo $siswa['total_sakit']; ?></td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-red-600"><?php echo $siswa['total_alpha']; ?></td>
+                                                    <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900"><?php echo $siswa['total_sesi']; ?></td>
                                                 </tr>
                                             <?php endforeach; ?>
                                         </tbody>
@@ -832,6 +1003,354 @@ usort($rekap_data, function ($a, $b) {
                 });
             }
         });
+
+        // ==================== DATA UNTUK SEARCH ====================
+        const siswaData = <?php echo json_encode($siswa_list); ?>;
+        const guruData = <?php echo json_encode($guru_list); ?>;
+
+        // ==================== AUTOCOMPLETE UNTUK FILTER GURU ====================
+        function initGuruAutocomplete() {
+            const searchInput = document.getElementById('searchGuru');
+            const clearButton = document.getElementById('clearGuruSearch');
+            const dropdown = document.getElementById('guruDropdown');
+            const guruIdInput = document.getElementById('selectedGuruId');
+            const guruNameInput = document.getElementById('selectedGuruName');
+
+            if (!searchInput) return;
+
+            let selectedIndex = -1;
+            let searchTimeout;
+
+            searchInput.addEventListener('focus', function () {
+                if (this.value.length > 0) {
+                    filterGuru(this.value);
+                }
+            });
+
+            searchInput.addEventListener('input', function (e) {
+                clearTimeout(searchTimeout);
+                const query = this.value;
+
+                if (query.length < 2) {
+                    dropdown.style.display = 'none';
+                    clearButton.style.display = 'none';
+                    return;
+                }
+
+                searchTimeout = setTimeout(() => {
+                    filterGuru(query);
+                }, 300);
+
+                clearButton.style.display = query.length > 0 ? 'block' : 'none';
+            });
+
+            clearButton.addEventListener('click', function () {
+                searchInput.value = '';
+                guruIdInput.value = '';
+                guruNameInput.value = '';
+                clearButton.style.display = 'none';
+                dropdown.style.display = 'none';
+                
+                // Submit form untuk reset filter
+                document.getElementById('filterForm').submit();
+            });
+
+            searchInput.addEventListener('keydown', function (e) {
+                const items = dropdown.querySelectorAll('.autocomplete-item');
+
+                switch (e.key) {
+                    case 'ArrowDown':
+                        e.preventDefault();
+                        selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+                        updateSelectedItem(dropdown, items, selectedIndex);
+                        break;
+
+                    case 'ArrowUp':
+                        e.preventDefault();
+                        selectedIndex = Math.max(selectedIndex - 1, -1);
+                        updateSelectedItem(dropdown, items, selectedIndex);
+                        break;
+
+                    case 'Enter':
+                        e.preventDefault();
+                        if (selectedIndex >= 0 && items[selectedIndex]) {
+                            selectGuru(items[selectedIndex].dataset);
+                        }
+                        break;
+
+                    case 'Escape':
+                        dropdown.style.display = 'none';
+                        selectedIndex = -1;
+                        break;
+                }
+            });
+
+            document.addEventListener('click', function (e) {
+                if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+                    dropdown.style.display = 'none';
+                }
+            });
+        }
+
+        function filterGuru(query) {
+            const dropdown = document.getElementById('guruDropdown');
+            if (!dropdown) return;
+
+            const filtered = guruData.filter(guru =>
+                guru.nama_guru.toLowerCase().includes(query.toLowerCase()) ||
+                (guru.bidang_keahlian && guru.bidang_keahlian.toLowerCase().includes(query.toLowerCase()))
+            );
+
+            renderGuruDropdown(filtered);
+        }
+
+        function renderGuruDropdown(data) {
+            const dropdown = document.getElementById('guruDropdown');
+            if (!dropdown) return;
+
+            dropdown.innerHTML = '';
+
+            if (data.length === 0) {
+                dropdown.innerHTML = '<div class="no-results">Tidak ditemukan guru</div>';
+                dropdown.style.display = 'block';
+                return;
+            }
+
+            data.forEach((guru, index) => {
+                const item = document.createElement('div');
+                item.className = 'autocomplete-item';
+                item.dataset.id = guru.id;
+                item.dataset.nama = guru.nama_guru;
+                item.dataset.keahlian = guru.bidang_keahlian || '';
+
+                item.innerHTML = `
+                    <div class="item-nama">${escapeHtml(guru.nama_guru)}</div>
+                    <div class="item-info">
+                        ${guru.bidang_keahlian ? 'Bidang: ' + escapeHtml(guru.bidang_keahlian) : '-'}
+                    </div>
+                `;
+
+                item.addEventListener('click', function () {
+                    selectGuru(this.dataset);
+                });
+
+                item.addEventListener('mouseenter', function () {
+                    const items = dropdown.querySelectorAll('.autocomplete-item');
+                    selectedIndex = Array.from(items).indexOf(this);
+                    updateSelectedItem(dropdown, items, selectedIndex);
+                });
+
+                dropdown.appendChild(item);
+            });
+
+            dropdown.style.display = 'block';
+            selectedIndex = -1;
+        }
+
+        function selectGuru(data) {
+            const searchInput = document.getElementById('searchGuru');
+            const guruIdInput = document.getElementById('selectedGuruId');
+            const guruNameInput = document.getElementById('selectedGuruName');
+            const dropdown = document.getElementById('guruDropdown');
+            const clearButton = document.getElementById('clearGuruSearch');
+
+            searchInput.value = data.nama;
+            guruIdInput.value = data.id;
+            guruNameInput.value = data.nama;
+            dropdown.style.display = 'none';
+            clearButton.style.display = 'block';
+
+            // Submit form untuk filter
+            document.getElementById('filterForm').submit();
+        }
+
+        // ==================== AUTOCOMPLETE UNTUK FILTER SISWA ====================
+        function initSiswaAutocomplete() {
+            const searchInput = document.getElementById('searchSiswa');
+            const clearButton = document.getElementById('clearSiswaSearch');
+            const dropdown = document.getElementById('siswaDropdown');
+            const siswaIdInput = document.getElementById('selectedSiswaId');
+            const siswaNameInput = document.getElementById('selectedSiswaName');
+
+            if (!searchInput) return;
+
+            let selectedIndex = -1;
+            let searchTimeout;
+
+            searchInput.addEventListener('focus', function () {
+                if (this.value.length > 0) {
+                    filterSiswaFilter(this.value);
+                }
+            });
+
+            searchInput.addEventListener('input', function (e) {
+                clearTimeout(searchTimeout);
+                const query = this.value;
+
+                if (query.length < 2) {
+                    dropdown.style.display = 'none';
+                    clearButton.style.display = 'none';
+                    return;
+                }
+
+                searchTimeout = setTimeout(() => {
+                    filterSiswaFilter(query);
+                }, 300);
+
+                clearButton.style.display = query.length > 0 ? 'block' : 'none';
+            });
+
+            clearButton.addEventListener('click', function () {
+                searchInput.value = '';
+                siswaIdInput.value = '';
+                siswaNameInput.value = '';
+                clearButton.style.display = 'none';
+                dropdown.style.display = 'none';
+                
+                // Submit form untuk reset filter
+                document.getElementById('filterForm').submit();
+            });
+
+            searchInput.addEventListener('keydown', function (e) {
+                const items = dropdown.querySelectorAll('.autocomplete-item');
+
+                switch (e.key) {
+                    case 'ArrowDown':
+                        e.preventDefault();
+                        selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+                        updateSelectedItem(dropdown, items, selectedIndex);
+                        break;
+
+                    case 'ArrowUp':
+                        e.preventDefault();
+                        selectedIndex = Math.max(selectedIndex - 1, -1);
+                        updateSelectedItem(dropdown, items, selectedIndex);
+                        break;
+
+                    case 'Enter':
+                        e.preventDefault();
+                        if (selectedIndex >= 0 && items[selectedIndex]) {
+                            selectSiswaFilter(items[selectedIndex].dataset);
+                        }
+                        break;
+
+                    case 'Escape':
+                        dropdown.style.display = 'none';
+                        selectedIndex = -1;
+                        break;
+                }
+            });
+
+            document.addEventListener('click', function (e) {
+                if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+                    dropdown.style.display = 'none';
+                }
+            });
+        }
+
+        function filterSiswaFilter(query) {
+            const dropdown = document.getElementById('siswaDropdown');
+            if (!dropdown) return;
+
+            const filtered = siswaData.filter(siswa =>
+                siswa.nama_lengkap.toLowerCase().includes(query.toLowerCase()) ||
+                (siswa.kelas && siswa.kelas.toLowerCase().includes(query.toLowerCase()))
+            );
+
+            renderSiswaDropdown(filtered);
+        }
+
+        function renderSiswaDropdown(data) {
+            const dropdown = document.getElementById('siswaDropdown');
+            if (!dropdown) return;
+
+            dropdown.innerHTML = '';
+
+            if (data.length === 0) {
+                dropdown.innerHTML = '<div class="no-results">Tidak ditemukan siswa</div>';
+                dropdown.style.display = 'block';
+                return;
+            }
+
+            data.forEach((siswa, index) => {
+                const item = document.createElement('div');
+                item.className = 'autocomplete-item';
+                item.dataset.id = siswa.id;
+                item.dataset.nama = siswa.nama_lengkap;
+                item.dataset.kelas = siswa.kelas;
+                item.dataset.sekolah = siswa.sekolah_asal || '';
+
+                item.innerHTML = `
+                    <div class="item-nama">${escapeHtml(siswa.nama_lengkap)}</div>
+                    <div class="item-info">
+                        Kelas: ${escapeHtml(siswa.kelas)} | 
+                        Sekolah: ${escapeHtml(siswa.sekolah_asal || '-')}
+                    </div>
+                `;
+
+                item.addEventListener('click', function () {
+                    selectSiswaFilter(this.dataset);
+                });
+
+                item.addEventListener('mouseenter', function () {
+                    const items = dropdown.querySelectorAll('.autocomplete-item');
+                    selectedIndex = Array.from(items).indexOf(this);
+                    updateSelectedItem(dropdown, items, selectedIndex);
+                });
+
+                dropdown.appendChild(item);
+            });
+
+            dropdown.style.display = 'block';
+            selectedIndex = -1;
+        }
+
+        function selectSiswaFilter(data) {
+            const searchInput = document.getElementById('searchSiswa');
+            const siswaIdInput = document.getElementById('selectedSiswaId');
+            const siswaNameInput = document.getElementById('selectedSiswaName');
+            const dropdown = document.getElementById('siswaDropdown');
+            const clearButton = document.getElementById('clearSiswaSearch');
+
+            searchInput.value = data.nama;
+            siswaIdInput.value = data.id;
+            siswaNameInput.value = data.nama;
+            dropdown.style.display = 'none';
+            clearButton.style.display = 'block';
+
+            // Submit form untuk filter
+            document.getElementById('filterForm').submit();
+        }
+
+        function updateSelectedItem(dropdown, items, index) {
+            items.forEach((item, i) => {
+                if (i === index) {
+                    item.classList.add('active');
+                    item.scrollIntoView({ block: 'nearest' });
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Initialize autocomplete
+        initGuruAutocomplete();
+        initSiswaAutocomplete();
+
+        // Show clear buttons if there are values
+        if (document.getElementById('searchGuru').value) {
+            document.getElementById('clearGuruSearch').style.display = 'block';
+        }
+        if (document.getElementById('searchSiswa').value) {
+            document.getElementById('clearSiswaSearch').style.display = 'block';
+        }
     </script>
 </body>
 
