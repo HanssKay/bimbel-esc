@@ -538,7 +538,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_payment_detail') {
                             <input type="month" id="monthFilter" value="<?= $selected_filter ?>" onchange="changeFilter('bulan', this.value)" class="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
                         <?php else: ?>
                             <select id="yearFilter" onchange="changeFilter('tahun', this.value)" class="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500">
-                                <?php for ($y = date('Y') - 2; $y <= date('Y') + 1; $y++): ?>
+                                <?php for ($y = date('Y') - 2; $y <= date('Y') + 5; $y++): ?>
                                     <option value="<?= $y ?>" <?= $selected_filter == $y ? 'selected' : '' ?>><?= $y ?></option>
                                 <?php endfor; ?>
                             </select>
