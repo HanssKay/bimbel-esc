@@ -1034,9 +1034,6 @@ usort($rekap_data, function ($a, $b) {
                                 <i class="fas ${statusIcon} mr-2 text-lg"></i>
                                 <div>
                                     <div class="font-medium">${tanggalFormatted}</div>
-                                    <div class="text-xs text-gray-500 mt-1">
-                                        <i class="far fa-clock mr-1"></i> Input: ${item.waktu_input || '-'}
-                                    </div>
                                 </div>
                             </div>
                             <div>
