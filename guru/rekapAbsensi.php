@@ -575,7 +575,7 @@ usort($rekap_data, function ($a, $b) {
         <div class="container mx-auto p-4 md:p-6">
             <!-- Filter Periode dan Search -->
             <div class="bg-white shadow rounded-lg p-6 mb-6">
-                <form method="GET" id="filterForm" class="flex flex-col md:flex-row gap-4 items-end">
+                <form method="GET" id="filterForm" class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                     <div class="flex-1">
                         <label class="block text-sm font-medium text-gray-700 mb-1">
                             <i class="fas fa-calendar mr-1"></i> Pilih Periode
