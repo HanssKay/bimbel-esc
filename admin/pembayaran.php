@@ -44,6 +44,15 @@ $STATUS_PEMBAYARAN = [
     'dibebaskan' => 'Dibebaskan'
 ];
 
+// ============================================
+// GENERATE OPTIONS BULAN TAGIHAN (6 bulan lalu s/d 6 bulan depan)
+// ============================================
+$BULAN_TAGIHAN_OPTIONS = [];
+for ($i = -6; $i <= 6; $i++) {
+    $date = strtotime("$i months");
+    $BULAN_TAGIHAN_OPTIONS[date('Y-m', $date)] = date('F Y', $date);
+}
+
 // Tangani actions
 $current_month = isset($_GET['bulan']) ? $_GET['bulan'] : date('Y-m');
 $current_year = isset($_GET['tahun']) ? $_GET['tahun'] : date('Y');
@@ -66,19 +75,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_payment'])) {
 
     $siswa_id = intval($_POST['siswa_id']);
     $tanggal_bayar_input = $_POST['tanggal_bayar'] ?? date('Y-m-d');
+    $bulan_tagihan = $_POST['bulan_tagihan']; // <-- AMBIL DARI INPUT
     $nominal_tagihan = floatval(str_replace(['.', ','], ['', '.'], $_POST['nominal_tagihan'] ?? $NOMINAL_DEFAULT));
     $nominal_dibayar = floatval(str_replace(['.', ','], ['', '.'], $_POST['nominal_dibayar'] ?? 0));
     $metode_bayar = $_POST['metode_bayar'] ?? NULL;
     $keterangan = $_POST['keterangan'] ?? NULL;
     $status = $_POST['status'] ?? 'belum_bayar';
 
-    $bulan_tagihan = date('Y-m', strtotime($tanggal_bayar_input));
-
     $errors = [];
     if (!$siswa_id)
         $errors[] = "Harap pilih siswa!";
     if (empty($tanggal_bayar_input))
         $errors[] = "Harap pilih tanggal pembayaran!";
+    if (empty($bulan_tagihan))
+        $errors[] = "Harap pilih bulan tagihan!";
 
     if (empty($errors)) {
         $check_pendaftaran = $conn->query("SELECT id FROM pendaftaran_siswa WHERE siswa_id = $siswa_id AND status = 'aktif' LIMIT 1");
@@ -94,7 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_payment'])) {
                                  WHERE ps.siswa_id = $siswa_id AND p.bulan_tagihan = '$bulan_tagihan'");
 
             if ($check->num_rows > 0) {
-                $errors[] = "Sudah ada pembayaran untuk siswa ini di bulan " . date('F Y', strtotime($bulan_tagihan));
+                $errors[] = "Sudah ada pembayaran untuk siswa ini di bulan " . date('F Y', strtotime($bulan_tagihan . '-01'));
             } else {
                 $tanggal_bayar_db = $tanggal_bayar_input;
                 $metode_bayar_escaped = $metode_bayar ? "'" . $conn->real_escape_string($metode_bayar) . "'" : "NULL";
@@ -144,9 +154,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
     $metode_bayar = $_POST['metode_bayar'] ?? NULL;
     $keterangan = $_POST['keterangan'] ?? NULL;
     $tanggal_bayar = $_POST['tanggal_bayar'] ?? date('Y-m-d');
+    $bulan_tagihan = $_POST['bulan_tagihan']; // <-- AMBIL DARI INPUT
     $nominal_tagihan = floatval(str_replace(['.', ','], ['', '.'], $_POST['nominal_tagihan'] ?? $NOMINAL_DEFAULT));
 
-    error_log("Update - Status: $status, ID: $pembayaran_id, Tanggal: $tanggal_bayar");
+    error_log("Update - Status: $status, ID: $pembayaran_id, Tanggal: $tanggal_bayar, Bulan Tagihan: $bulan_tagihan");
 
     $nominal_dibayar = floatval(str_replace(['.', ','], ['', '.'], $nominal_dibayar));
 
@@ -174,19 +185,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
         metode_bayar = ?,
         tanggal_bayar = ?,
         keterangan = ?,
+        bulan_tagihan = ?,
         diperbarui_oleh = ?,
         diperbarui_pada = NOW()
         WHERE id = ?");
 
     if ($update) {
         $update->bind_param(
-            "sddsssii",
+            "sddssssii", // 9 parameter (s: status, d: nominal_tagihan, d: nominal_dibayar, s: metode_bayar, s: tanggal_bayar, s: keterangan, s: bulan_tagihan, i: diperbarui_oleh, i: id)
             $status,
             $nominal_tagihan,
             $nominal_dibayar,
             $metode_bayar,
             $tanggal_bayar,
             $keterangan,
+            $bulan_tagihan,
             $_SESSION['user_id'],
             $pembayaran_id
         );
@@ -293,12 +306,12 @@ $types = "";
 
 // Filter periode
 if ($filter_tipe == 'bulan') {
-    $sql .= " AND (DATE_FORMAT(p.tanggal_bayar, '%Y-%m') = ? OR (p.tanggal_bayar IS NULL AND p.bulan_tagihan = ?))";
+    $sql .= " AND (DATE_FORMAT(p.tanggal_bayar, '%Y-%m') = ? OR p.bulan_tagihan = ?)";
     $params[] = $selected_filter;
     $params[] = $selected_filter;
     $types .= "ss";
 } else {
-    $sql .= " AND (YEAR(p.tanggal_bayar) = ? OR (p.tanggal_bayar IS NULL AND YEAR(STR_TO_DATE(CONCAT(p.bulan_tagihan, '-01'), '%Y-%m-%d')) = ?))";
+    $sql .= " AND (YEAR(p.tanggal_bayar) = ? OR YEAR(STR_TO_DATE(CONCAT(p.bulan_tagihan, '-01'), '%Y-%m-%d')) = ?)";
     $params[] = $selected_filter;
     $params[] = $selected_filter;
     $types .= "ss";
@@ -315,7 +328,7 @@ if ($filter_siswa_id > 0) {
     $types .= "s";
 }
 
-$sql .= " ORDER BY p.tanggal_bayar DESC, FIELD(p.status, 'belum_bayar', 'dibebaskan', 'lunas'), s.nama_lengkap";
+$sql .= " ORDER BY STR_TO_DATE(CONCAT(p.bulan_tagihan, '-01'), '%Y-%m-%d') DESC, FIELD(p.status, 'belum_bayar', 'dibebaskan', 'lunas'), s.nama_lengkap";
 
 $stmt = $conn->prepare($sql);
 if (!empty($params)) {
@@ -414,6 +427,7 @@ if (isset($_GET['ajax'])) {
             if ($payment_id > 0) {
                 $sql_detail = "SELECT 
                     p.*,
+                    p.bulan_tagihan,
                     s.nama_lengkap,
                     s.kelas,
                     s.sekolah_asal,
@@ -1063,7 +1077,7 @@ if (isset($_GET['ajax'])) {
                             <tr>
                                 <th
                                     class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Tanggal</th>
+                                    Info Bayar</th>
                                 <th
                                     class="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Siswa</th>
@@ -1135,10 +1149,12 @@ if (isset($_GET['ajax'])) {
                                     <tr class="hover:bg-gray-50">
                                         <td class="px-3 md:px-6 py-3 md:py-4 whitespace-nowrap">
                                             <div class="text-sm font-medium text-gray-900">
-                                                <?= $p['tanggal_bayar'] ? date('d/m/Y', strtotime($p['tanggal_bayar'])) : '-' ?>
+                                                <span class="text-gray-500 text-xs">Tagihan Bulan:</span><br>
+                                                <?= date('F Y', strtotime($p['bulan_tagihan'] . '-01')) ?>
                                             </div>
-                                            <div class="text-xs text-gray-500">Bulan:
-                                                <?= date('M Y', strtotime($p['bulan_tagihan'] . '-01')) ?>
+                                            <div class="text-xs text-gray-500 mt-1">
+                                                <span class="text-gray-400">Bayar tgl:</span>
+                                                <?= $p['tanggal_bayar'] ? date('d/m/Y', strtotime($p['tanggal_bayar'])) : '-' ?>
                                             </div>
                                         </td>
                                         <td class="px-3 md:px-6 py-3 md:py-4">
@@ -1243,11 +1259,24 @@ if (isset($_GET['ajax'])) {
                     </div>
                 </div>
 
+                <!-- BULAN TAGIHAN - DITAMBAHKAN -->
+                <div class="mb-4">
+                    <div class="mb-4">
+                        <label class="block text-gray-700 mb-1 font-medium">Bulan Tagihan: <span
+                                class="text-red-500">*</span></label>
+                        <input type="month" name="bulan_tagihan" id="bulanTagihanTambah" value="<?= date('Y-m') ?>"
+                            required
+                            class="w-full border rounded-lg px-3 md:px-4 py-2.5 focus:ring-2 focus:ring-blue-500">
+                        <p class="text-xs text-gray-500 mt-1">Pilih bulan tagihan (contoh: Januari 2026)</p>
+                    </div>
+                </div>
+
                 <div class="mb-4">
                     <label class="block text-gray-700 mb-1 font-medium">Tanggal Pembayaran: <span
                             class="text-red-500">*</span></label>
                     <input type="date" name="tanggal_bayar" id="tanggalBayar" value="<?= date('Y-m-d') ?>" required
                         class="w-full border rounded-lg px-3 md:px-4 py-2.5 focus:ring-2 focus:ring-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">Kapan pembayaran dilakukan</p>
                 </div>
 
                 <div class="mb-4">
@@ -1335,6 +1364,16 @@ if (isset($_GET['ajax'])) {
                     <label class="block text-gray-700 mb-1 font-medium">Informasi Siswa</label>
                     <div class="font-medium text-gray-900" id="editNamaSiswa">-</div>
                     <div class="text-sm text-gray-600" id="editInfoSiswa">-</div>
+                </div>
+
+                <!-- BULAN TAGIHAN - DITAMBAHKAN -->
+                <div class="mb-4">
+                    <div class="mb-4">
+                        <label class="block text-gray-700 mb-1 font-medium">Bulan Tagihan: <span
+                                class="text-red-500">*</span></label>
+                        <input type="month" name="bulan_tagihan" id="editBulanTagihan" required
+                            class="w-full border rounded-lg px-3 md:px-4 py-2.5 focus:ring-2 focus:ring-yellow-500">
+                    </div>
                 </div>
 
                 <div class="mb-4">
@@ -1852,6 +1891,8 @@ if (isset($_GET['ajax'])) {
             clearSelectedSiswa();
             handleStatusChange('belum_bayar');
             document.getElementById('tanggalBayar').value = new Date().toISOString().split('T')[0];
+            // Set default bulan tagihan ke bulan sekarang
+            document.getElementById('bulanTagihanTambah').value = new Date().toISOString().slice(0, 7);
             setTimeout(() => { document.getElementById('searchSiswa').focus(); }, 100);
         }
 
@@ -1875,6 +1916,7 @@ if (isset($_GET['ajax'])) {
                     if (response.success) {
                         const data = response.data;
                         document.getElementById('editPembayaranId').value = data.id;
+                        document.getElementById('editBulanTagihan').value = data.bulan_tagihan;
                         document.getElementById('editNamaSiswa').textContent = data.nama_lengkap;
                         document.getElementById('editInfoSiswa').textContent = 'Kelas: ' + data.kelas + ' | Sekolah: ' + (data.sekolah_asal || '-');
                         document.getElementById('editTanggalBayar').value = data.tanggal_bayar || new Date().toISOString().split('T')[0];
