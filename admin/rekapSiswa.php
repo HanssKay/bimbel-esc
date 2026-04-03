@@ -794,7 +794,7 @@ if ($filter_siswa > 0) {
                     <h1 class="md:text-2xl text-xl font-bold text-gray-800">
                         <i class="fas fa-chart-bar mr-2"></i> Rekap Absensi Seluruh Siswa
                     </h1>
-                    <p class="text-gray-600 md:text-md text-sm">Rekapitulasi absensi per siswa - Klik tombol Detail
+                    <p class="text-gray-600 md:text-md text-sm">Rekapitulasi absensi per siswa
                         untuk melihat tanggal</p>
                 </div>
             </div>
@@ -1111,23 +1111,31 @@ if ($filter_siswa > 0) {
                                             <?php foreach ($guru['siswa'] as $idx => $siswa): ?>
                                                 <tr class="hover:bg-gray-50">
                                                     <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                                                        <?php echo $idx + 1; ?></td>
+                                                        <?php echo $idx + 1; ?>
+                                                    </td>
                                                     <td class="px-4 py-3 whitespace-nowrap">
                                                         <div class="text-sm font-medium text-gray-900">
-                                                            <?php echo htmlspecialchars($siswa['nama_lengkap']); ?></div>
+                                                            <?php echo htmlspecialchars($siswa['nama_lengkap']); ?>
+                                                        </div>
                                                     </td>
                                                     <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                                                        <?php echo htmlspecialchars($siswa['kelas_sekolah']); ?></td>
+                                                        <?php echo htmlspecialchars($siswa['kelas_sekolah']); ?>
+                                                    </td>
                                                     <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-green-600">
-                                                        <?php echo $siswa['total_hadir']; ?></td>
+                                                        <?php echo $siswa['total_hadir']; ?>
+                                                    </td>
                                                     <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-yellow-600">
-                                                        <?php echo $siswa['total_izin']; ?></td>
+                                                        <?php echo $siswa['total_izin']; ?>
+                                                    </td>
                                                     <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-blue-600">
-                                                        <?php echo $siswa['total_sakit']; ?></td>
+                                                        <?php echo $siswa['total_sakit']; ?>
+                                                    </td>
                                                     <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-red-600">
-                                                        <?php echo $siswa['total_alpha']; ?></td>
+                                                        <?php echo $siswa['total_alpha']; ?>
+                                                    </td>
                                                     <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                                                        <?php echo $siswa['total_sesi']; ?></td>
+                                                        <?php echo $siswa['total_sesi']; ?>
+                                                    </td>
                                                     <td class="px-4 py-3 whitespace-nowrap text-sm">
                                                         <button type="button" class="btn-detail"
                                                             data-siswa-id="<?php echo $siswa['id']; ?>"
