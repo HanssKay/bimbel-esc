@@ -322,7 +322,7 @@ usort($rekap_data, function ($a, $b) {
             top: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0,0,0,0.5);
+            background-color: rgba(0, 0, 0, 0.5);
             animation: fadeIn 0.3s;
         }
 
@@ -333,18 +333,30 @@ usort($rekap_data, function ($a, $b) {
             border-radius: 12px;
             width: 90%;
             max-width: 800px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
             animation: slideIn 0.3s;
         }
 
         @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
         }
 
         @keyframes slideIn {
-            from { transform: translateY(-50px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
+            from {
+                transform: translateY(-50px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
         }
 
         .modal-header {
@@ -380,7 +392,7 @@ usort($rekap_data, function ($a, $b) {
         }
 
         .modal-header .close-modal:hover {
-            background-color: rgba(255,255,255,0.2);
+            background-color: rgba(255, 255, 255, 0.2);
         }
 
         .modal-body {
@@ -409,10 +421,21 @@ usort($rekap_data, function ($a, $b) {
             transform: translateX(5px);
         }
 
-        .detail-card.hadir { border-left-color: #10b981; }
-        .detail-card.izin { border-left-color: #f59e0b; }
-        .detail-card.sakit { border-left-color: #3b82f6; }
-        .detail-card.alpha { border-left-color: #ef4444; }
+        .detail-card.hadir {
+            border-left-color: #10b981;
+        }
+
+        .detail-card.izin {
+            border-left-color: #f59e0b;
+        }
+
+        .detail-card.sakit {
+            border-left-color: #3b82f6;
+        }
+
+        .detail-card.alpha {
+            border-left-color: #ef4444;
+        }
 
         .status-badge {
             display: inline-block;
@@ -422,10 +445,25 @@ usort($rekap_data, function ($a, $b) {
             font-weight: 600;
         }
 
-        .status-hadir { background: #d1fae5; color: #065f46; }
-        .status-izin { background: #fed7aa; color: #92400e; }
-        .status-sakit { background: #dbeafe; color: #1e40af; }
-        .status-alpha { background: #fee2e2; color: #991b1b; }
+        .status-hadir {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-izin {
+            background: #fed7aa;
+            color: #92400e;
+        }
+
+        .status-sakit {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .status-alpha {
+            background: #fee2e2;
+            color: #991b1b;
+        }
 
         .loading-spinner {
             display: inline-block;
@@ -438,8 +476,13 @@ usort($rekap_data, function ($a, $b) {
         }
 
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
         }
 
         .btn-detail {
@@ -466,6 +509,7 @@ usort($rekap_data, function ($a, $b) {
             .btn-detail span {
                 display: none;
             }
+
             .btn-detail i {
                 margin-right: 0;
             }
@@ -560,7 +604,7 @@ usort($rekap_data, function ($a, $b) {
                     <h1 class="text-2xl font-bold text-gray-800">
                         <i class="fas fa-chart-bar mr-2"></i> Rekap Absensi
                     </h1>
-                    <p class="text-gray-600">Rekapitulasi absensi siswa per bulan - Klik Detail untuk melihat tanggal</p>
+                    <p class="text-gray-600">Rekapitulasi absensi siswa per bulan</p>
                 </div>
                 <div class="mt-2 md:mt-0">
                     <a href="absensiSiswa.php"
@@ -704,7 +748,7 @@ usort($rekap_data, function ($a, $b) {
                                 Tidak ditemukan siswa dengan nama "<?php echo htmlspecialchars($search_query); ?>" untuk periode
                                 ini
                             <?php else: ?>
-                                Belum ada siswa atau data absensi untuk periode ini
+                                Belum ada siswa atau data absensi untuk bulan ini ini
                             <?php endif; ?>
                         </p>
                         <?php if (!empty($search_query)): ?>
@@ -772,14 +816,11 @@ usort($rekap_data, function ($a, $b) {
                                             <?php echo $siswa['total_sesi']; ?>
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                            <button type="button" 
-                                                    class="btn-detail"
-                                                    data-siswa-id="<?php echo $siswa['id']; ?>"
-                                                    data-siswa-nama="<?php echo htmlspecialchars($siswa['nama_lengkap']); ?>"
-                                                    data-guru-id="<?php echo $guru_id; ?>"
-                                                    data-guru-nama="<?php echo htmlspecialchars($full_name); ?>"
-                                                    data-periode="<?php echo $periode; ?>"
-                                                    onclick="showAbsensiDetail(this)">
+                                            <button type="button" class="btn-detail" data-siswa-id="<?php echo $siswa['id']; ?>"
+                                                data-siswa-nama="<?php echo htmlspecialchars($siswa['nama_lengkap']); ?>"
+                                                data-guru-id="<?php echo $guru_id; ?>"
+                                                data-guru-nama="<?php echo htmlspecialchars($full_name); ?>"
+                                                data-periode="<?php echo $periode; ?>" onclick="showAbsensiDetail(this)">
                                                 <i class="fas fa-calendar-alt"></i>
                                                 <span>Detail</span>
                                             </button>
@@ -815,7 +856,8 @@ usort($rekap_data, function ($a, $b) {
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" onclick="closeModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">
+                <button type="button" onclick="closeModal()"
+                    class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">
                     Tutup
                 </button>
             </div>
@@ -861,10 +903,10 @@ usort($rekap_data, function ($a, $b) {
 
                 const dropdownGroup = this.closest('.mb-1');
                 if (!dropdownGroup) return;
-                
+
                 const submenu = dropdownGroup.querySelector('.dropdown-submenu');
                 if (!submenu) return;
-                
+
                 const arrow = this.querySelector('.arrow');
                 const isOpen = submenu.style.display === 'block';
 
@@ -920,7 +962,7 @@ usort($rekap_data, function ($a, $b) {
                     periode: periode
                 },
                 dataType: 'json',
-                success: function(response) {
+                success: function (response) {
                     if (response.success) {
                         renderAbsensiDetail(response, siswaNama, guruNama, periode);
                     } else {
@@ -932,7 +974,7 @@ usort($rekap_data, function ($a, $b) {
                         `;
                     }
                 },
-                error: function(xhr, status, error) {
+                error: function (xhr, status, error) {
                     modalBody.innerHTML = `
                         <div class="text-center py-8">
                             <i class="fas fa-exclamation-triangle text-5xl text-red-400 mb-4"></i>
@@ -945,7 +987,7 @@ usort($rekap_data, function ($a, $b) {
 
         function renderAbsensiDetail(data, siswaNama, guruNama, periode) {
             const modalBody = document.getElementById('modalBody');
-            
+
             if (data.total === 0) {
                 modalBody.innerHTML = `
                     <div class="text-center py-8">
@@ -998,13 +1040,13 @@ usort($rekap_data, function ($a, $b) {
                     <div class="space-y-2">
             `;
 
-            data.data.forEach(function(item) {
+            data.data.forEach(function (item) {
                 const statusClass = `detail-card ${item.status}`;
                 const statusBadgeClass = `status-badge status-${item.status}`;
                 let statusIcon = '';
                 let statusText = '';
-                
-                switch(item.status) {
+
+                switch (item.status) {
                     case 'hadir':
                         statusIcon = 'fa-check-circle';
                         statusText = 'Hadir';
@@ -1022,11 +1064,11 @@ usort($rekap_data, function ($a, $b) {
                         statusText = 'Alpha';
                         break;
                 }
-                
+
                 const tanggal = new Date(item.tanggal_absensi);
                 const dayName = dayNames[tanggal.getDay()];
                 const tanggalFormatted = `${dayName}, ${tanggal.getDate()} ${monthNames[tanggal.getMonth()]} ${tanggal.getFullYear()}`;
-                
+
                 html += `
                     <div class="${statusClass} p-3">
                         <div class="flex justify-between items-start flex-wrap gap-2">
@@ -1041,7 +1083,7 @@ usort($rekap_data, function ($a, $b) {
                             </div>
                         </div>
                 `;
-                
+
                 if (item.keterangan && item.keterangan.trim() !== '') {
                     html += `
                         <div class="mt-2 text-sm text-gray-600 pl-6">
@@ -1049,7 +1091,7 @@ usort($rekap_data, function ($a, $b) {
                         </div>
                     `;
                 }
-                
+
                 if (item.bukti_izin && item.bukti_izin.trim() !== '') {
                     html += `
                         <div class="mt-1 text-sm text-gray-500 pl-6">
@@ -1057,15 +1099,15 @@ usort($rekap_data, function ($a, $b) {
                         </div>
                     `;
                 }
-                
+
                 html += `</div>`;
             });
-            
+
             html += `
                     </div>
                 </div>
             `;
-            
+
             modalBody.innerHTML = html;
         }
 
@@ -1078,7 +1120,7 @@ usort($rekap_data, function ($a, $b) {
         }
 
         // Close modal when clicking outside
-        window.onclick = function(event) {
+        window.onclick = function (event) {
             const modal = document.getElementById('absensiModal');
             if (event.target === modal) {
                 closeModal();
