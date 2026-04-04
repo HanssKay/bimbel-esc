@@ -926,8 +926,7 @@ if (isset($_GET['ajax'])) {
                     <h1 class="text-xl md:text-2xl font-bold text-gray-800">
                         <i class="fas fa-credit-card mr-2"></i>Manajemen Pembayaran
                     </h1>
-                    <p class="text-gray-600 text-sm md:text-base">Input, edit, dan kelola pembayaran siswa dengan
-                        tanggal spesifik</p>
+                    <p class="text-gray-600 text-sm md:text-base">Input, edit, dan kelola pembayaran siswa</p>
                 </div>
                 <div class="mt-2 md:mt-0 text-right">
                     <span
@@ -1267,7 +1266,7 @@ if (isset($_GET['ajax'])) {
                         <input type="month" name="bulan_tagihan" id="bulanTagihanTambah" value="<?= date('Y-m') ?>"
                             required
                             class="w-full border rounded-lg px-3 md:px-4 py-2.5 focus:ring-2 focus:ring-blue-500">
-                        <p class="text-xs text-gray-500 mt-1">Pilih bulan tagihan (contoh: Januari 2026)</p>
+                        <!-- <p class="text-xs text-gray-500 mt-1">Pilih bulan tagihan (contoh: Januari 2026)</p> -->
                     </div>
                 </div>
 
@@ -1276,7 +1275,7 @@ if (isset($_GET['ajax'])) {
                             class="text-red-500">*</span></label>
                     <input type="date" name="tanggal_bayar" id="tanggalBayar" value="<?= date('Y-m-d') ?>" required
                         class="w-full border rounded-lg px-3 md:px-4 py-2.5 focus:ring-2 focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">Kapan pembayaran dilakukan</p>
+                    <!-- <p class="text-xs text-gray-500 mt-1">Kapan pembayaran dilakukan</p> -->
                 </div>
 
                 <div class="mb-4">
