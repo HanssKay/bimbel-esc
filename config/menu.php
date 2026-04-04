@@ -61,10 +61,23 @@ $menuConfig = [
         //     'active' => ['laporan.php']
         // ],
         [
-            'title' => 'Pembayaran',
+            'title' => 'Manajemen Keuangan',
             'icon' => 'fas fa-money-bill-wave',
-            'url' => 'pembayaran.php',
-            'active' => ['pembayaran.php']
+            'submenu' => [
+                [
+                    'title' => 'Pembayaran Bulanan',
+                    'icon' => 'fas fa-money-bill-wave',
+                    'url' => 'pembayaran.php',
+                    'active' => ['pembayaran.php']
+                ],
+                [
+                    'title' => 'Pembayaran Lainnya',
+                    'icon' => 'fas fa-school',
+                    'url' => 'pembayaran_kegiatan.php',
+                    'active' => ['pembayaran_kegiatan.php']
+                ]
+            ]
+
         ],
         [
             'title' => 'Pengumuman',
@@ -196,7 +209,7 @@ $menuConfig = [
         //             'url' => 'perkembanganAnak.php',
         //             'active' => ['perkembanganAnak.php']
         //         ],
-                
+
         //     ]
         // ],
         [
@@ -220,10 +233,23 @@ $menuConfig = [
         ],
 
         [
-            'title' => 'Pembayaran',
+            'title' => 'Manajemen Pembayaran',
             'icon' => 'fas fa-money-bill-wave',
-            'url' => 'pembayaranOrtu.php',
-            'active' => ['pembayaranOrtu.php']
+            'submenu' => [
+                [
+                    'title' => 'Pembayaran Bulanan',
+                    'icon' => 'fas fa-money-bill-wave',
+                    'url' => 'pembayaranOrtu.php',
+                    'active' => ['pembayaranOrtu.php']
+                ],
+                [
+                    'title' => 'Pembayaran Lainnya',
+                    'icon' => 'fas fa-school',
+                    'url' => 'pembayaranLainnya.php',
+                    'active' => ['pembayaranLainnya.php']
+                ]
+            ]
+
         ],
 
         [
