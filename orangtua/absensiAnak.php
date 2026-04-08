@@ -800,8 +800,8 @@ function getStatusIcon($status) {
                                         <div class="text-xs text-gray-500 mt-1">
                                             <i class="far fa-clock mr-1"></i> 
                                             <?php echo $absensi['waktu_input']; ?>
-                                        </div>
-                                        <?php else: ?> -->
+                                        </div> -->
+                                        <?php else: ?>
                                         <div class="text-xs text-gray-400 mt-1">
                                             <i class="far fa-clock mr-1"></i> 
                                             Waktu tidak tersedia
