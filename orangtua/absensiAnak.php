@@ -770,7 +770,7 @@ function getStatusIcon($status) {
                         <table class="table-jadwal">
                             <thead>
                                 <tr>
-                                    <th>Tanggal & Waktu Input</th>
+                                    <th>Tanggal & Waktu </th>
                                     <th>Hari</th>
                                     <th>Sesi Ke-</th>
                                     <th>Mata Pelajaran</th>
