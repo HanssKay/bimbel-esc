@@ -178,6 +178,24 @@ if ($selected_siswa_id > 0 && $orangtua_id > 0) {
     }
 }
 
+function getBulanIndonesia($bulan_angka) {
+    $bulan = [
+        1 => 'Januari',
+        2 => 'Februari',
+        3 => 'Maret',
+        4 => 'April',
+        5 => 'Mei',
+        6 => 'Juni',
+        7 => 'Juli',
+        8 => 'Agustus',
+        9 => 'September',
+        10 => 'Oktober',
+        11 => 'November',
+        12 => 'Desember'
+    ];
+    return $bulan[(int)$bulan_angka] ?? '';
+}
+
 // Fungsi untuk mendapatkan nama hari dalam Bahasa Indonesia
 function getHariIndonesia($hari_inggris) {
     $hari = [
@@ -781,21 +799,26 @@ function getStatusIcon($status) {
                             </thead>
                             <tbody>
                                 <?php foreach ($detail_absensi as $absensi): 
-                                    $hari_indo = getHariIndonesia($absensi['hari_nama']);
-                                    $sesi = $absensi['sesi_ke'] ?? 1;
-                                    // Tentukan class untuk badge sesi
-                                    $sesiClass = 'sesi-badge-default';
-                                    if ($sesi == 1) $sesiClass = 'sesi-badge-1';
-                                    elseif ($sesi == 2) $sesiClass = 'sesi-badge-2';
-                                    elseif ($sesi == 3) $sesiClass = 'sesi-badge-3';
-                                    elseif ($sesi == 4) $sesiClass = 'sesi-badge-4';
-                                    elseif ($sesi == 5) $sesiClass = 'sesi-badge-5';
-                                ?>
+                $timestamp = strtotime($absensi['tanggal_absensi']);
+                $hari_indo = getHariIndonesia(date('l', $timestamp));
+                $tanggal = date('j', $timestamp); // tanggal tanpa leading zero
+                $bulan_indo = getBulanIndonesia(date('n', $timestamp));
+                $tahun = date('Y', $timestamp);
+                $sesi = $absensi['sesi_ke'] ?? 1;
+                
+                // Tentukan class untuk badge sesi
+                $sesiClass = 'sesi-badge-default';
+                if ($sesi == 1) $sesiClass = 'sesi-badge-1';
+                elseif ($sesi == 2) $sesiClass = 'sesi-badge-2';
+                elseif ($sesi == 3) $sesiClass = 'sesi-badge-3';
+                elseif ($sesi == 4) $sesiClass = 'sesi-badge-4';
+                elseif ($sesi == 5) $sesiClass = 'sesi-badge-5';
+            ?>
                                 <tr>
                                     <td class="px-4 py-3">
                                         <div class="font-medium text-gray-900">
-                                            <?php echo date('d/m/Y', strtotime($absensi['tanggal_absensi'])); ?>
-                                        </div>
+                        <?php echo $hari_indo . ', ' . $tanggal . ' ' . $bulan_indo . ' ' . $tahun; ?>
+                    </div>
                                         <!-- <?php if (!empty($absensi['waktu_input'])): ?>
                                         <div class="text-xs text-gray-500 mt-1">
                                             <i class="far fa-clock mr-1"></i> 
