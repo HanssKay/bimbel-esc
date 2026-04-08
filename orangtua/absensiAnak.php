@@ -65,7 +65,7 @@ if ($selected_siswa_id == 0 && !empty($siswa_list)) {
     $selected_siswa_id = $siswa_list[0]['id'];
 }
 
-// Filter bulan - PERBAIKAN: gunakan $selected_month
+// Filter bulan
 $selected_month = isset($_GET['bulan']) ? $_GET['bulan'] : date('Y-m');
 
 // Inisialisasi variabel
@@ -117,11 +117,13 @@ if ($selected_siswa_id > 0 && $orangtua_id > 0) {
         $siswa_detail = $result_detail->fetch_assoc() ?? [];
         $stmt_detail->close();
         
-        // AMBIL DETAIL ABSENSI UNTUK BULAN YANG DIPILIH - PERBAIKAN: gunakan $selected_month
+        // AMBIL DETAIL ABSENSI UNTUK BULAN YANG DIPILIH - dengan sesi_ke
         $sql_detail_absensi = "SELECT 
                                 a.*,
+                                a.sesi_ke,
                                 DATE_FORMAT(a.tanggal_absensi, '%W') as hari_nama,
                                 DATE_FORMAT(a.tanggal_absensi, '%d') as tanggal,
+                                DATE_FORMAT(a.created_at, '%H:%i:%s') as waktu_input,
                                 sp.nama_pelajaran,
                                 u.full_name as nama_guru,
                                 WEEK(a.tanggal_absensi, 1) as minggu_ke
@@ -131,7 +133,7 @@ if ($selected_siswa_id > 0 && $orangtua_id > 0) {
                             LEFT JOIN users u ON g.user_id = u.id
                             WHERE a.siswa_id = ?
                             AND DATE_FORMAT(a.tanggal_absensi, '%Y-%m') = ?
-                            ORDER BY a.tanggal_absensi DESC";
+                            ORDER BY a.tanggal_absensi DESC, a.created_at DESC";
         
         $stmt_detail_absensi = $conn->prepare($sql_detail_absensi);
         $stmt_detail_absensi->bind_param("is", $selected_siswa_id, $selected_month);
@@ -210,13 +212,6 @@ function getStatusIcon($status) {
         default: return 'fa-question-circle';
     }
 }
-
-// Generate list bulan (12 bulan terakhir)
-$bulan_list = [];
-for ($i = 0; $i < 12; $i++) {
-    $timestamp = strtotime("-$i months");
-    $bulan_list[] = date('Y-m', $timestamp);
-}
 ?>
 
 <!DOCTYPE html>
@@ -224,44 +219,37 @@ for ($i = 0; $i < 12; $i++) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rekap Absensi - Bimbel Esc</title>
+    <title>Rekap Absensi Anak - Bimbel Esc</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         .stat-card {
             transition: transform 0.3s, box-shadow 0.3s;
         }
-
         .stat-card:hover {
             transform: translateY(-5px);
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
         }
-        
         .progress-bar {
             height: 8px;
             border-radius: 4px;
             overflow: hidden;
             background-color: #e5e7eb;
         }
-        
         .progress-fill {
             height: 100%;
             transition: width 0.5s ease;
         }
-        
         .progress-green { background-color: #10b981; }
         .progress-yellow { background-color: #f59e0b; }
         .progress-red { background-color: #ef4444; }
-        
         .table-container {
             overflow-x: auto;
         }
-        
         .table-jadwal {
             width: 100%;
             border-collapse: collapse;
         }
-        
         .table-jadwal th {
             background-color: #f3f4f6;
             font-weight: 600;
@@ -269,17 +257,14 @@ for ($i = 0; $i < 12; $i++) {
             padding: 12px 16px;
             border-bottom: 2px solid #e5e7eb;
         }
-        
         .table-jadwal td {
             padding: 12px 16px;
             border-bottom: 1px solid #e5e7eb;
+            vertical-align: top;
         }
-        
         .table-jadwal tr:hover {
             background-color: #f9fafb;
         }
-        
-        /* Badge styles */
         .badge {
             display: inline-block;
             padding: 4px 8px;
@@ -287,30 +272,22 @@ for ($i = 0; $i < 12; $i++) {
             font-size: 12px;
             font-weight: 500;
         }
-        
-        /* Dropdown styles */
         .dropdown-submenu {
             display: none;
             max-height: 500px;
             overflow: hidden;
             transition: max-height 0.3s ease;
         }
-
         .dropdown-submenu[style*="display: block"] {
             display: block;
         }
-
         .dropdown-toggle.open .arrow {
             transform: rotate(90deg);
         }
-
-        /* Active menu item */
         .menu-item.active {
             background-color: rgba(255, 255, 255, 0.1);
             border-left: 4px solid #60A5FA;
         }
-
-        /* Mobile menu styles */
         #mobileMenu {
             position: fixed;
             top: 0;
@@ -323,11 +300,9 @@ for ($i = 0; $i < 12; $i++) {
             box-shadow: 5px 0 25px rgba(0, 0, 0, 0.2);
             background-color: #1e40af;
         }
-
         #mobileMenu.menu-open {
             transform: translateX(0);
         }
-
         .menu-overlay {
             display: none;
             position: fixed;
@@ -338,63 +313,72 @@ for ($i = 0; $i < 12; $i++) {
             background-color: rgba(0, 0, 0, 0.5);
             z-index: 1099;
         }
-
         .menu-overlay.active {
             display: block;
         }
-
-        /* Responsive */
         @media (min-width: 768px) {
             .desktop-sidebar {
                 display: block;
             }
-            
             .mobile-header {
                 display: none;
             }
-            
             #mobileMenu {
                 display: none;
             }
-            
             .menu-overlay {
                 display: none !important;
             }
         }
-
         @media (max-width: 767px) {
             .desktop-sidebar {
                 display: none;
             }
-            
             .stat-card {
                 padding: 1rem !important;
             }
         }
-        
-        /* Card styles */
         .anak-card {
             border: 2px solid #e5e7eb;
             border-radius: 12px;
             transition: all 0.3s ease;
         }
-        
         .anak-card:hover {
             border-color: #60a5fa;
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
         }
-        
-        /* Highlight untuk data terpilih */
         .filter-active {
             background-color: #3b82f6 !important;
             color: white !important;
         }
-        
-        /* Chart container */
-        .chart-container {
-            position: relative;
-            height: 300px;
+        .keterangan-cell {
+            max-width: 250px;
+            word-wrap: break-word;
+            white-space: normal;
+            line-height: 1.4;
         }
+        .keterangan-text {
+            display: block;
+            white-space: normal;
+            word-break: break-word;
+            overflow-wrap: break-word;
+        }
+        .sesi-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            font-weight: 700;
+            font-size: 14px;
+        }
+        .sesi-badge-1 { color: #57585e; }
+        .sesi-badge-2 { color: #57585e; }
+        .sesi-badge-3 { color: #57585e; }
+        .sesi-badge-4 { color: #57585e; }
+        .sesi-badge-5 { color: #57585e; }
+        .sesi-badge-default { background-color: #f3f4f6; color: #374151; }
     </style>
 </head>
 <body class="bg-gray-100">
@@ -495,7 +479,7 @@ for ($i = 0; $i < 12; $i++) {
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
                 <div>
                     <h1 class="text-2xl font-bold text-gray-800">
-                        <i class="fas fa-chart-bar mr-2"></i> Rekap Absensi
+                        <i class="fas fa-chart-bar mr-2"></i> Rekap Absensi Anak
                     </h1>
                     <p class="text-gray-600">
                         Lihat rekap kehadiran anak anda selama belajar
@@ -516,7 +500,7 @@ for ($i = 0; $i < 12; $i++) {
 
         <!-- Content -->
         <div class="container mx-auto p-4 md:p-6">
-            <!-- Filter Section - PERBAIKAN: gunakan form dengan method GET -->
+            <!-- Filter Section -->
             <div class="bg-white shadow rounded-lg p-6 mb-6">
                 <h3 class="text-lg font-medium text-gray-900 mb-4">
                     <i class="fas fa-filter mr-2"></i> Filter Data
@@ -556,7 +540,7 @@ for ($i = 0; $i < 12; $i++) {
                             <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 <i class="fas fa-search mr-2"></i> Tampilkan
                             </button>
-                            <a href="rekapAbsensi.php" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50">
+                            <a href="absensiAnak.php" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50">
                                 Reset
                             </a>
                         </div>
@@ -763,7 +747,6 @@ for ($i = 0; $i < 12; $i++) {
                 </div>
                 
                 <?php if (empty($detail_absensi)): ?>
-                <!-- TAMPILAN KETIKA TIDAK ADA DATA -->
                 <div class="p-12 text-center">
                     <div class="mb-4">
                         <i class="fas fa-calendar-times text-gray-300 text-5xl mb-3"></i>
@@ -782,60 +765,84 @@ for ($i = 0; $i < 12; $i++) {
                     </div>
                 </div>
                 <?php else: ?>
-                <!-- TAMPILAN TABEL KETIKA ADA DATA -->
                 <div class="p-6">
                     <div class="table-container">
                         <table class="table-jadwal">
                             <thead>
                                 <tr>
-                                    <th>Tanggal</th>
+                                    <th>Tanggal & Waktu Input</th>
                                     <th>Hari</th>
+                                    <th>Sesi Ke-</th>
                                     <th>Mata Pelajaran</th>
                                     <th>Status</th>
                                     <th>Guru</th>
-                                    <th>Keterangan</th>
+                                    <th class="keterangan-cell">Keterangan</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php foreach ($detail_absensi as $absensi): 
                                     $hari_indo = getHariIndonesia($absensi['hari_nama']);
+                                    $sesi = $absensi['sesi_ke'] ?? 1;
+                                    // Tentukan class untuk badge sesi
+                                    $sesiClass = 'sesi-badge-default';
+                                    if ($sesi == 1) $sesiClass = 'sesi-badge-1';
+                                    elseif ($sesi == 2) $sesiClass = 'sesi-badge-2';
+                                    elseif ($sesi == 3) $sesiClass = 'sesi-badge-3';
+                                    elseif ($sesi == 4) $sesiClass = 'sesi-badge-4';
+                                    elseif ($sesi == 5) $sesiClass = 'sesi-badge-5';
                                 ?>
                                 <tr>
-                                    <td>
+                                    <td class="px-4 py-3">
                                         <div class="font-medium text-gray-900">
                                             <?php echo date('d/m/Y', strtotime($absensi['tanggal_absensi'])); ?>
                                         </div>
+                                        <?php if (!empty($absensi['waktu_input'])): ?>
+                                        <div class="text-xs text-gray-500 mt-1">
+                                            <i class="far fa-clock mr-1"></i> 
+                                            <?php echo $absensi['waktu_input']; ?>
+                                        </div>
+                                        <?php else: ?>
+                                        <div class="text-xs text-gray-400 mt-1">
+                                            <i class="far fa-clock mr-1"></i> 
+                                            Waktu tidak tersedia
+                                        </div>
+                                        <?php endif; ?>
                                     </td>
-                                    <td><?php echo $hari_indo; ?></td>
-                                    <td>
+                                    <td class="px-4 py-3"><?php echo $hari_indo; ?></td>
+                                    <td class="px-4 py-3">
+                                        <span class="sesi-badge <?php echo $sesiClass; ?>">
+                                            <?php echo $sesi; ?>
+                                        </span>
+                                    </td>
+                                    <td class="px-4 py-3">
                                         <?php if (!empty($absensi['nama_pelajaran'])): ?>
                                         <div class="font-medium"><?php echo htmlspecialchars($absensi['nama_pelajaran']); ?></div>
                                         <?php else: ?>
                                         <div class="text-gray-400 italic">-</div>
                                         <?php endif; ?>
                                     </td>
-                                    <td>
+                                    <td class="px-4 py-3">
                                         <span class="badge <?php echo getStatusClass($absensi['status']); ?>">
                                             <i class="fas <?php echo getStatusIcon($absensi['status']); ?> mr-1"></i>
                                             <?php echo ucfirst($absensi['status']); ?>
                                         </span>
                                     </td>
-                                    <td>
+                                    <td class="px-4 py-3">
                                         <?php if (!empty($absensi['nama_guru'])): ?>
                                         <div class="text-sm"><?php echo htmlspecialchars($absensi['nama_guru']); ?></div>
                                         <?php else: ?>
                                         <div class="text-gray-400 italic">-</div>
                                         <?php endif; ?>
                                     </td>
-                                    <td>
-                                        <div class="text-sm text-gray-600 max-w-xs truncate">
-                                            <?php if (!empty($absensi['keterangan'])): ?>
+                                    <td class="keterangan-cell px-4 py-3">
+                                        <?php if (!empty($absensi['keterangan'])): ?>
+                                            <div class="text-sm text-gray-600 keterangan-text">
                                                 <i class="fas fa-quote-left text-gray-300 mr-1"></i>
-                                                <?php echo htmlspecialchars($absensi['keterangan']); ?>
-                                            <?php else: ?>
-                                                <span class="text-gray-400 italic">-</span>
-                                            <?php endif; ?>
-                                        </div>
+                                                <?php echo nl2br(htmlspecialchars($absensi['keterangan'])); ?>
+                                            </div>
+                                        <?php else: ?>
+                                            <span class="text-gray-400 italic">-</span>
+                                        <?php endif; ?>
                                     </td>
                                 </tr>
                                 <?php endforeach; ?>
@@ -853,7 +860,7 @@ for ($i = 0; $i < 12; $i++) {
             <div class="container mx-auto py-4 px-4">
                 <div class="md:flex md:items-center md:justify-between">
                     <div class="text-sm text-gray-500">
-                        <p>© <?php echo date('Y'); ?> Bimbel Esc - Rekap Absensi</p>
+                        <p>© <?php echo date('Y'); ?> Bimbel Esc - Rekap Absensi Anak</p>
                         <p class="mt-1 text-xs text-gray-400">
                             Login terakhir: <?php echo date('d F Y H:i'); ?>
                         </p>
@@ -929,22 +936,20 @@ for ($i = 0; $i < 12; $i++) {
                 const submenu = dropdownGroup.querySelector('.dropdown-submenu');
                 const arrow = this.querySelector('.arrow');
                 
-                // Toggle current dropdown
                 if (submenu.style.display === 'block') {
                     submenu.style.display = 'none';
                     arrow.style.transform = 'rotate(0deg)';
                     this.classList.remove('open');
                 } else {
-                    // Close other dropdowns
                     document.querySelectorAll('.dropdown-submenu').forEach(sm => {
                         sm.style.display = 'none';
                     });
                     document.querySelectorAll('.dropdown-toggle').forEach(t => {
                         t.classList.remove('open');
-                        t.querySelector('.arrow').style.transform = 'rotate(0deg)';
+                        const tArrow = t.querySelector('.arrow');
+                        if (tArrow) tArrow.style.transform = 'rotate(0deg)';
                     });
                     
-                    // Open this dropdown
                     submenu.style.display = 'block';
                     arrow.style.transform = 'rotate(-90deg)';
                     this.classList.add('open');
@@ -952,7 +957,6 @@ for ($i = 0; $i < 12; $i++) {
             });
         });
 
-        // Close dropdowns when clicking outside
         document.addEventListener('click', function(e) {
             if (!e.target.closest('.mb-1')) {
                 document.querySelectorAll('.dropdown-submenu').forEach(submenu => {
@@ -960,24 +964,11 @@ for ($i = 0; $i < 12; $i++) {
                 });
                 document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
                     toggle.classList.remove('open');
-                    toggle.querySelector('.arrow').style.transform = 'rotate(0deg)';
+                    const tArrow = toggle.querySelector('.arrow');
+                    if (tArrow) tArrow.style.transform = 'rotate(0deg)';
                 });
             }
         });
-
-        // Fungsi untuk meng-handle perubahan bulan
-        function changeMonth(month) {
-            if (month) {
-                const siswaSelect = document.querySelector('select[name="siswa_id"]');
-                const siswaId = siswaSelect ? siswaSelect.value : '<?php echo $selected_siswa_id; ?>';
-                
-                if (siswaId) {
-                    window.location.href = 'rekapAbsensi.php?siswa_id=' + siswaId + '&bulan=' + month;
-                } else {
-                    window.location.href = 'rekapAbsensi.php?bulan=' + month;
-                }
-            }
-        }
 
         // Update server time
         function updateServerTime() {
@@ -1008,7 +999,6 @@ for ($i = 0; $i < 12; $i++) {
                 });
             }, { threshold: 0.5 });
             
-            // Observe semua progress bar
             document.querySelectorAll('.progress-fill').forEach(bar => {
                 observer.observe(bar);
             });
