@@ -30,38 +30,6 @@ function writeLog($message, $type = 'INFO')
     error_log($log_message);
 }
 
-// FUNGSI HELPER UNTUK DATABASE DENGAN ERROR HANDLING LEBIH BAIK
-function executeQuery($conn, $sql, $params = [], $types = "")
-{
-    try {
-        if (!$conn) {
-            throw new Exception("Koneksi database tidak tersedia");
-        }
-
-        $stmt = $conn->prepare($sql);
-        if (!$stmt) {
-            throw new Exception("Query preparation failed: " . $conn->error . " - SQL: " . $sql);
-        }
-
-        if (!empty($params)) {
-            if (strlen($types) !== count($params)) {
-                throw new Exception("Parameter count mismatch. Types: {$types}, Params: " . count($params));
-            }
-            $stmt->bind_param($types, ...$params);
-        }
-
-        if (!$stmt->execute()) {
-            throw new Exception("Query execution failed: " . $stmt->error);
-        }
-
-        return $stmt;
-
-    } catch (Exception $e) {
-        writeLog($e->getMessage(), 'ERROR');
-        throw $e;
-    }
-}
-
 // Set default periode (bulan ini)
 $tahun = date('Y');
 $bulan = date('m');
@@ -87,7 +55,7 @@ $siswa_list = [];
 $guru_list = [];
 
 try {
-    // Daftar siswa aktif untuk search
+    // Daftar semua siswa aktif 
     $sql_siswa = "SELECT s.id, s.nama_lengkap, s.kelas, s.sekolah_asal
                   FROM siswa s
                   WHERE s.status = 'aktif'
@@ -99,7 +67,7 @@ try {
         }
     }
 
-    // Daftar guru aktif untuk search
+    // Daftar semua guru aktif
     $sql_guru = "SELECT g.id, u.full_name as nama_guru, g.bidang_keahlian
                 FROM guru g 
                 INNER JOIN users u ON g.user_id = u.id 
@@ -119,7 +87,7 @@ try {
 }
 
 // ============================================
-// AMBIL DATA REKAP ABSENSI
+// AMBIL DATA REKAP ABSENSI - SEMUA SISWA
 // ============================================
 $rekap_data = [];
 $statistik = [
@@ -132,7 +100,7 @@ $statistik = [
     'alpha' => 0
 ];
 
-// Ambil semua guru yang mengajar (dengan filter)
+// Ambil semua guru (atau filter guru)
 $guru_ids = [];
 if ($filter_guru > 0) {
     $guru_ids[] = $filter_guru;
@@ -158,23 +126,20 @@ foreach ($guru_ids as $guru_id) {
     $nama_guru = $result_nama->fetch_assoc()['full_name'] ?? 'Guru';
     $stmt_nama->close();
 
-    // Ambil semua siswa yang diajar guru ini (UNIQUE)
+    // ========== PERBAIKAN: AMBIL SEMUA SISWA (TANPA FILTER JADWAL) ==========
     $sql_siswa = "SELECT DISTINCT 
                     s.id,
                     s.nama_lengkap,
                     s.kelas as kelas_sekolah
                   FROM siswa s
                   INNER JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
-                  INNER JOIN jadwal_belajar jb ON ps.id = jb.pendaftaran_id
-                  INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
-                  WHERE smg.guru_id = ?
-                  AND jb.status = 'aktif'
-                  AND ps.status = 'aktif'
+                  WHERE ps.status = 'aktif'
                   AND s.status = 'aktif'";
 
-    $params = [$guru_id];
-    $types = "i";
+    $params = [];
+    $types = "";
 
+    // Filter siswa jika ada
     if ($filter_siswa > 0) {
         $sql_siswa .= " AND s.id = ?";
         $params[] = $filter_siswa;
@@ -188,7 +153,9 @@ foreach ($guru_ids as $guru_id) {
     $sql_siswa .= " ORDER BY s.nama_lengkap";
 
     $stmt_siswa = $conn->prepare($sql_siswa);
-    $stmt_siswa->bind_param($types, ...$params);
+    if (!empty($params)) {
+        $stmt_siswa->bind_param($types, ...$params);
+    }
     $stmt_siswa->execute();
     $result_siswa = $stmt_siswa->get_result();
 
@@ -207,12 +174,12 @@ foreach ($guru_ids as $guru_id) {
     }
     $stmt_siswa->close();
 
-    // Jika ada siswa untuk guru ini
+    // Jika ada siswa untuk guru ini, ambil data absensi
     if (!empty($siswa_data)) {
         $siswa_ids = array_keys($siswa_data);
         $placeholders = implode(',', array_fill(0, count($siswa_ids), '?'));
 
-        // Ambil data absensi untuk periode ini
+        // Ambil data absensi untuk periode ini (dari GURU INI)
         $sql_absensi = "SELECT 
                           a.siswa_id,
                           a.status,
@@ -245,7 +212,7 @@ foreach ($guru_ids as $guru_id) {
         }
         $stmt_absensi->close();
 
-        // Hanya tampilkan siswa yang memiliki data absensi
+        // TAMPILKAN SEMUA SISWA YANG PUNYA ABSENSI (total_sesi > 0)
         $siswa_with_absensi = array_filter($siswa_data, function ($s) {
             return $s['total_sesi'] > 0;
         });
@@ -794,7 +761,7 @@ if ($filter_siswa > 0) {
                     <h1 class="md:text-2xl text-xl font-bold text-gray-800">
                         <i class="fas fa-chart-bar mr-2"></i> Rekap Absensi Seluruh Siswa
                     </h1>
-                    <p class="text-gray-600 md:text-md text-sm">Rekapitulasi absensi per siswa
+                    <p class="text-gray-600 md:text-md text-sm">Rekapitulasi absensi per siswa - Klik tombol Detail
                         untuk melihat tanggal</p>
                 </div>
             </div>
@@ -811,6 +778,7 @@ if ($filter_siswa > 0) {
                             <i class="fas fa-calendar mr-1"></i> Periode (Bulan-Tahun)
                         </label>
                         <input type="month" name="periode" value="<?php echo $periode; ?>"
+                             onchange="this.form.submit()"
                             class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                     </div>
 
@@ -1009,10 +977,10 @@ if ($filter_siswa > 0) {
                                 </span>
                             <?php endif; ?>
                         </h3>
-                        <!-- <div class="text-sm text-gray-500">
+                        <div class="text-sm text-gray-500">
                             <i class="fas fa-clock mr-1"></i>
                             <?php echo date('d/m/Y H:i:s'); ?>
-                        </div> -->
+                        </div>
                     </div>
                 </div>
 
@@ -1671,11 +1639,11 @@ if ($filter_siswa > 0) {
 
             if (data.total === 0) {
                 modalBody.innerHTML = `
-                    <div class="text-center py-8">
-                        <i class="fas fa-calendar-times text-5xl text-gray-400 mb-4"></i>
-                        <p class="text-gray-700">Tidak ada data absensi untuk periode ini.</p>
-                    </div>
-                `;
+            <div class="text-center py-8">
+                <i class="fas fa-calendar-times text-5xl text-gray-400 mb-4"></i>
+                <p class="text-gray-700">Tidak ada data absensi untuk periode ini.</p>
+            </div>
+        `;
                 return;
             }
 
@@ -1684,41 +1652,41 @@ if ($filter_siswa > 0) {
             const bulanName = monthNames[parseInt(bulan) - 1];
 
             let html = `
-                <div class="mb-4 p-3 bg-gray-100 rounded-lg">
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
-                        <div class="bg-green-100 rounded-lg p-2">
-                            <div class="text-sm text-gray-600">Hadir</div>
-                            <div class="text-xl font-bold text-green-600">${data.summary.hadir}</div>
-                        </div>
-                        <div class="bg-yellow-100 rounded-lg p-2">
-                            <div class="text-sm text-gray-600">Izin</div>
-                            <div class="text-xl font-bold text-yellow-600">${data.summary.izin}</div>
-                        </div>
-                        <div class="bg-blue-100 rounded-lg p-2">
-                            <div class="text-sm text-gray-600">Sakit</div>
-                            <div class="text-xl font-bold text-blue-600">${data.summary.sakit}</div>
-                        </div>
-                        <div class="bg-red-100 rounded-lg p-2">
-                            <div class="text-sm text-gray-600">Alpha</div>
-                            <div class="text-xl font-bold text-red-600">${data.summary.alpha}</div>
-                        </div>
-                    </div>
+        <div class="mb-4 p-3 bg-gray-100 rounded-lg">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+                <div class="bg-green-100 rounded-lg p-2">
+                    <div class="text-sm text-gray-600">Hadir</div>
+                    <div class="text-xl font-bold text-green-600">${data.summary.hadir}</div>
                 </div>
-                
-                <div class="mb-3 text-sm text-gray-500">
-                    <i class="fas fa-chalkboard-teacher mr-1"></i> Guru: ${escapeHtml(guruNama)}
-                    <span class="mx-2">|</span>
-                    <i class="fas fa-calendar mr-1"></i> Periode: ${bulanName} ${tahun}
-                    <span class="mx-2">|</span>
-                    <i class="fas fa-chart-line mr-1"></i> Total Sesi: ${data.total}
+                <div class="bg-yellow-100 rounded-lg p-2">
+                    <div class="text-sm text-gray-600">Izin</div>
+                    <div class="text-xl font-bold text-yellow-600">${data.summary.izin}</div>
                 </div>
-                
-                <div class="border-t border-gray-200 mt-2 pt-3">
-                    <h4 class="font-medium text-gray-800 mb-3">
-                        <i class="fas fa-list-ul mr-1"></i> Daftar Absensi
-                    </h4>
-                    <div class="space-y-2">
-            `;
+                <div class="bg-blue-100 rounded-lg p-2">
+                    <div class="text-sm text-gray-600">Sakit</div>
+                    <div class="text-xl font-bold text-blue-600">${data.summary.sakit}</div>
+                </div>
+                <div class="bg-red-100 rounded-lg p-2">
+                    <div class="text-sm text-gray-600">Alpha</div>
+                    <div class="text-xl font-bold text-red-600">${data.summary.alpha}</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="mb-3 text-sm text-gray-500">
+            <i class="fas fa-chalkboard-teacher mr-1"></i> Guru: ${escapeHtml(guruNama)}
+            <span class="mx-2">|</span>
+            <i class="fas fa-calendar mr-1"></i> Periode: ${bulanName} ${tahun}
+            <span class="mx-2">|</span>
+            <i class="fas fa-chart-line mr-1"></i> Total Sesi: ${data.total}
+        </div>
+        
+        <div class="border-t border-gray-200 mt-2 pt-3">
+            <h4 class="font-medium text-gray-800 mb-3">
+                <i class="fas fa-list-ul mr-1"></i> Daftar Absensi
+            </h4>
+            <div class="space-y-2">
+    `;
 
             const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -1752,34 +1720,46 @@ if ($filter_siswa > 0) {
                 const tanggalFormatted = `${dayName}, ${tanggal.getDate()} ${monthNames[tanggal.getMonth()]} ${tanggal.getFullYear()}`;
 
                 html += `
-                    <div class="${statusClass} p-3">
-                        <div class="flex justify-between items-start flex-wrap gap-2">
-                            <div class="flex items-center">
-                                <i class="fas ${statusIcon} mr-2 text-lg"></i>
+            <div class="${statusClass} p-3">
+                <div class="flex justify-between items-start flex-wrap gap-2">
+                    <div class="flex-1">
+                        <div class="flex items-center mb-2 flex-wrap gap-1">
+                            <i class="fas ${statusIcon} mr-2 text-lg"></i>
+                            <div class="font-medium">${tanggalFormatted}</div>
+                            <span class="mx-2 text-gray-400">|</span>
+                            <span class="${statusBadgeClass}">${statusText}</span>
+                        </div>
+                        <div class="text-xs text-gray-500 ml-6">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
                                 <div>
-                                    <div class="font-medium">${tanggalFormatted}</div>
+                                    <i class="fas fa-book mr-1"></i> <span class="font-medium">Mapel:</span> ${escapeHtml(item.nama_pelajaran)}
+                                </div>
+                                <div>
+                                    <i class="fas fa-layer-group mr-1"></i> <span class="font-medium">Sesi ke-${item.sesi_ke}</span>
+                                </div>
+                                <div>
+                                    <i class="fas fa-clock mr-1"></i> <span class="font-medium">Jam:</span> ${escapeHtml(item.jam_input)}
                                 </div>
                             </div>
-                            <div>
-                                <span class="${statusBadgeClass}">${statusText}</span>
-                            </div>
                         </div>
-                `;
+                    </div>
+                </div>
+        `;
 
                 if (item.keterangan && item.keterangan.trim() !== '') {
                     html += `
-                        <div class="mt-2 text-sm text-gray-600 pl-6">
-                            <i class="fas fa-comment mr-1"></i> Keterangan: ${escapeHtml(item.keterangan)}
-                        </div>
-                    `;
+                <div class="mt-2 text-sm text-gray-600 pl-6">
+                    <i class="fas fa-comment mr-1"></i> Keterangan: ${escapeHtml(item.keterangan)}
+                </div>
+            `;
                 }
 
                 if (item.bukti_izin && item.bukti_izin.trim() !== '') {
                     html += `
-                        <div class="mt-1 text-sm text-gray-500 pl-6">
-                            <i class="fas fa-paperclip mr-1"></i> Ada bukti izin
-                        </div>
-                    `;
+                <div class="mt-1 text-sm text-gray-500 pl-6">
+                    <i class="fas fa-paperclip mr-1"></i> Ada bukti izin
+                </div>
+            `;
                 }
 
                 html += `</div>`;
@@ -1788,7 +1768,8 @@ if ($filter_siswa > 0) {
             html += `
                     </div>
                 </div>
-            `;
+            </div>
+        `;
 
             modalBody.innerHTML = html;
         }
