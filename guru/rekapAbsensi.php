@@ -37,12 +37,15 @@ if (isset($_GET['periode']) && !empty($_GET['periode'])) {
 // Filter pencarian
 $search_query = isset($_GET['search']) ? trim($_GET['search']) : '';
 
+// Filter kelas
+$filter_kelas = isset($_GET['kelas']) ? trim($_GET['kelas']) : '';
+
 // Hitung tanggal awal dan akhir bulan
 $tanggal_awal = date('Y-m-01', strtotime("$tahun-$bulan-01"));
 $tanggal_akhir = date('Y-m-t', strtotime("$tahun-$bulan-01"));
 
 // ============================================
-// AMBIL DATA REKAP ABSENSI - DENGAN SEARCH
+// AMBIL DATA REKAP ABSENSI - SEMUA SISWA
 // ============================================
 $rekap_data = [];
 $statistik = [
@@ -55,7 +58,15 @@ $statistik = [
     'alpha' => 0
 ];
 
-// Ambil semua siswa yang diajar guru ini (dengan filter search)
+// Ambil daftar kelas unik untuk filter
+$kelas_list = [];
+$sql_kelas = "SELECT DISTINCT kelas FROM siswa WHERE status = 'aktif' ORDER BY kelas";
+$result_kelas = $conn->query($sql_kelas);
+while ($row = $result_kelas->fetch_assoc()) {
+    $kelas_list[] = $row['kelas'];
+}
+
+// AMBIL SEMUA SISWA AKTIF (tanpa filter jadwal)
 $sql_siswa = "SELECT DISTINCT 
                 s.id,
                 s.nama_lengkap,
@@ -63,18 +74,10 @@ $sql_siswa = "SELECT DISTINCT
               FROM siswa s
               INNER JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
               WHERE ps.status = 'aktif'
-              AND s.status = 'aktif'
-              AND EXISTS (
-                  SELECT 1 
-                  FROM jadwal_belajar jb
-                  INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
-                  WHERE jb.pendaftaran_id = ps.id
-                  AND jb.status = 'aktif'
-                  AND smg.guru_id = ?
-              )";
+              AND s.status = 'aktif'";
 
-$params = [$guru_id];
-$types = "i";
+$params = [];
+$types = "";
 
 // Tambahkan filter search jika ada
 if (!empty($search_query)) {
@@ -83,10 +86,19 @@ if (!empty($search_query)) {
     $types .= "s";
 }
 
+// Tambahkan filter kelas jika ada
+if (!empty($filter_kelas)) {
+    $sql_siswa .= " AND s.kelas = ?";
+    $params[] = $filter_kelas;
+    $types .= "s";
+}
+
 $sql_siswa .= " ORDER BY s.nama_lengkap";
 
 $stmt_siswa = $conn->prepare($sql_siswa);
-$stmt_siswa->bind_param($types, ...$params);
+if (!empty($params)) {
+    $stmt_siswa->bind_param($types, ...$params);
+}
 $stmt_siswa->execute();
 $result_siswa = $stmt_siswa->get_result();
 
@@ -136,14 +148,16 @@ if (!empty($siswa_ids)) {
             $mapel_per_siswa[$siswa_id] = [];
         }
         $mapel_per_siswa[$siswa_id][] = $row['nama_pelajaran'];
-
-        // Update rekap_data dengan mapel
-        $rekap_data[$siswa_id]['mapel_list'] = $mapel_per_siswa[$siswa_id];
         $statistik['total_mapel']++;
     }
     $stmt_mapel->close();
 
-    // Ambil data absensi untuk periode ini
+    // Update rekap_data dengan mapel
+    foreach ($rekap_data as $siswa_id => &$data) {
+        $data['mapel_list'] = $mapel_per_siswa[$siswa_id] ?? [];
+    }
+
+    // Ambil data absensi untuk periode ini (dari GURU INI)
     $sql_absensi = "SELECT 
                       a.siswa_id,
                       a.status,
@@ -617,17 +631,32 @@ usort($rekap_data, function ($a, $b) {
 
         <!-- Content -->
         <div class="container mx-auto p-4 md:p-6">
-            <!-- Filter Periode dan Search -->
+            <!-- Filter Periode, Kelas, dan Search -->
             <div class="bg-white shadow rounded-lg p-6 mb-6">
-                <form method="GET" id="filterForm" class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-                    <div class="flex-1">
+                <form method="GET" id="filterForm" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                    <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">
                             <i class="fas fa-calendar mr-1"></i> Pilih Periode
                         </label>
                         <input type="month" name="periode" value="<?php echo $periode; ?>"
+                            onchange="this.form.submit()"
                             class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                     </div>
-                    <div class="flex-1">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">
+                            <i class="fas fa-layer-group mr-1"></i> Filter Kelas
+                        </label>
+                        <select name="kelas" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="">Semua Kelas</option>
+                            <?php foreach ($kelas_list as $kelas): ?>
+                                <option value="<?php echo htmlspecialchars($kelas); ?>" 
+                                    <?php echo $filter_kelas == $kelas ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($kelas); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">
                             <i class="fas fa-search mr-1"></i> Cari Nama Siswa
                         </label>
@@ -635,7 +664,7 @@ usort($rekap_data, function ($a, $b) {
                             <input type="text" name="search" value="<?php echo htmlspecialchars($search_query); ?>"
                                 placeholder="Ketik nama siswa..." class="search-input" id="searchInput">
                             <?php if (!empty($search_query)): ?>
-                                <a href="rekapAbsensi.php?periode=<?php echo $periode; ?>" class="clear-search">
+                                <a href="rekapAbsensi.php?periode=<?php echo $periode; ?><?php echo !empty($filter_kelas) ? '&kelas=' . urlencode($filter_kelas) : ''; ?>" class="clear-search">
                                     <i class="fas fa-times"></i>
                                 </a>
                             <?php endif; ?>
@@ -650,16 +679,23 @@ usort($rekap_data, function ($a, $b) {
                     </div>
                 </form>
 
-                <?php if (!empty($search_query)): ?>
+                <?php if (!empty($search_query) || !empty($filter_kelas)): ?>
                     <div class="mt-3 text-sm text-blue-600">
-                        <i class="fas fa-filter mr-1"></i> Filter aktif: Pencarian
-                        "<?php echo htmlspecialchars($search_query); ?>"
+                        <i class="fas fa-filter mr-1"></i> Filter aktif: 
+                        <?php if (!empty($search_query)): ?>
+                            Pencarian "<?php echo htmlspecialchars($search_query); ?>"
+                        <?php endif; ?>
+                        <?php if (!empty($filter_kelas)): ?>
+                            <?php if (!empty($search_query)): ?> | <?php endif; ?>
+                            Kelas "<?php echo htmlspecialchars($filter_kelas); ?>"
+                        <?php endif; ?>
                     </div>
                 <?php endif; ?>
 
                 <p class="text-xs text-gray-500 mt-2">
                     <i class="fas fa-info-circle"></i> Menampilkan rekap absensi bulan
                     <?php echo date('F Y', strtotime("$tahun-$bulan-01")); ?>
+                    untuk semua siswa aktif
                 </p>
             </div>
 
@@ -744,17 +780,16 @@ usort($rekap_data, function ($a, $b) {
                         <i class="fas fa-database text-4xl mb-3"></i>
                         <p class="text-lg">Tidak ada data absensi</p>
                         <p class="text-sm mt-2">
-                            <?php if (!empty($search_query)): ?>
-                                Tidak ditemukan siswa dengan nama "<?php echo htmlspecialchars($search_query); ?>" untuk periode
-                                ini
+                            <?php if (!empty($search_query) || !empty($filter_kelas)): ?>
+                                Tidak ditemukan siswa dengan kriteria pencarian
                             <?php else: ?>
-                                Belum ada siswa atau data absensi untuk bulan ini ini
+                                Belum ada siswa aktif
                             <?php endif; ?>
                         </p>
-                        <?php if (!empty($search_query)): ?>
+                        <?php if (!empty($search_query) || !empty($filter_kelas)): ?>
                             <a href="rekapAbsensi.php?periode=<?php echo $periode; ?>"
                                 class="inline-flex items-center px-4 py-2 mt-4 bg-blue-600 text-white rounded-md hover:bg-blue-700">
-                                <i class="fas fa-times mr-2"></i> Hapus Pencarian
+                                <i class="fas fa-times mr-2"></i> Hapus Filter
                             </a>
                         <?php endif; ?>
                     </div>
@@ -764,16 +799,14 @@ usort($rekap_data, function ($a, $b) {
                             <thead class="bg-gray-50">
                                 <tr>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">No</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nama Siswa
-                                    </th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nama Siswa</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Kelas</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mata
-                                        Pelajaran</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mata Pelajaran</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hadir</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Izin</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sakit</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Alpha</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total Sesi</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th>
                                 </tr>
                             </thead>
@@ -816,11 +849,12 @@ usort($rekap_data, function ($a, $b) {
                                             <?php echo $siswa['total_sesi']; ?>
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                            <button type="button" class="btn-detail" data-siswa-id="<?php echo $siswa['id']; ?>"
+                                            <button type="button" class="btn-detail" 
+                                                data-siswa-id="<?php echo $siswa['id']; ?>"
                                                 data-siswa-nama="<?php echo htmlspecialchars($siswa['nama_lengkap']); ?>"
                                                 data-guru-id="<?php echo $guru_id; ?>"
-                                                data-guru-nama="<?php echo htmlspecialchars($full_name); ?>"
-                                                data-periode="<?php echo $periode; ?>" onclick="showAbsensiDetail(this)">
+                                                data-periode="<?php echo $periode; ?>" 
+                                                onclick="showAbsensiDetail(this)">
                                                 <i class="fas fa-calendar-alt"></i>
                                                 <span>Detail</span>
                                             </button>
@@ -934,7 +968,6 @@ usort($rekap_data, function ($a, $b) {
             const siswaId = button.dataset.siswaId;
             const siswaNama = button.dataset.siswaNama;
             const guruId = button.dataset.guruId;
-            const guruNama = button.dataset.guruNama;
             const periode = button.dataset.periode;
 
             const modal = document.getElementById('absensiModal');
@@ -964,7 +997,7 @@ usort($rekap_data, function ($a, $b) {
                 dataType: 'json',
                 success: function (response) {
                     if (response.success) {
-                        renderAbsensiDetail(response, siswaNama, guruNama, periode);
+                        renderAbsensiDetail(response, siswaNama, periode);
                     } else {
                         modalBody.innerHTML = `
                             <div class="text-center py-8">
@@ -985,131 +1018,142 @@ usort($rekap_data, function ($a, $b) {
             });
         }
 
-        function renderAbsensiDetail(data, siswaNama, guruNama, periode) {
-            const modalBody = document.getElementById('modalBody');
+        function renderAbsensiDetail(data, siswaNama, periode) {
+    const modalBody = document.getElementById('modalBody');
 
-            if (data.total === 0) {
-                modalBody.innerHTML = `
-                    <div class="text-center py-8">
-                        <i class="fas fa-calendar-times text-5xl text-gray-400 mb-4"></i>
-                        <p class="text-gray-700">Tidak ada data absensi untuk periode ini.</p>
-                    </div>
-                `;
-                return;
-            }
+    if (data.total === 0) {
+        modalBody.innerHTML = `
+            <div class="text-center py-8">
+                <i class="fas fa-calendar-times text-5xl text-gray-400 mb-4"></i>
+                <p class="text-gray-700">Tidak ada data absensi untuk periode ini.</p>
+            </div>
+        `;
+        return;
+    }
 
-            const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
-            const [tahun, bulan] = periode.split('-');
-            const bulanName = monthNames[parseInt(bulan) - 1];
-            const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    const [tahun, bulan] = periode.split('-');
+    const bulanName = monthNames[parseInt(bulan) - 1];
+    const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
-            let html = `
-                <div class="mb-4 p-3 bg-gray-100 rounded-lg">
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
-                        <div class="bg-green-100 rounded-lg p-2">
-                            <div class="text-sm text-gray-600">Hadir</div>
-                            <div class="text-xl font-bold text-green-600">${data.summary.hadir}</div>
-                        </div>
-                        <div class="bg-yellow-100 rounded-lg p-2">
-                            <div class="text-sm text-gray-600">Izin</div>
-                            <div class="text-xl font-bold text-yellow-600">${data.summary.izin}</div>
-                        </div>
-                        <div class="bg-blue-100 rounded-lg p-2">
-                            <div class="text-sm text-gray-600">Sakit</div>
-                            <div class="text-xl font-bold text-blue-600">${data.summary.sakit}</div>
-                        </div>
-                        <div class="bg-red-100 rounded-lg p-2">
-                            <div class="text-sm text-gray-600">Alpha</div>
-                            <div class="text-xl font-bold text-red-600">${data.summary.alpha}</div>
-                        </div>
-                    </div>
+    let html = `
+        <div class="mb-4 p-3 bg-gray-100 rounded-lg">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+                <div class="bg-green-100 rounded-lg p-2">
+                    <div class="text-sm text-gray-600">Hadir</div>
+                    <div class="text-xl font-bold text-green-600">${data.summary.hadir}</div>
                 </div>
-                
-                <div class="mb-3 text-sm text-gray-500">
-                    <i class="fas fa-chalkboard-teacher mr-1"></i> Guru: ${escapeHtml(guruNama)}
-                    <span class="mx-2">|</span>
-                    <i class="fas fa-calendar mr-1"></i> Periode: ${bulanName} ${tahun}
-                    <span class="mx-2">|</span>
-                    <i class="fas fa-chart-line mr-1"></i> Total Sesi: ${data.total}
+                <div class="bg-yellow-100 rounded-lg p-2">
+                    <div class="text-sm text-gray-600">Izin</div>
+                    <div class="text-xl font-bold text-yellow-600">${data.summary.izin}</div>
                 </div>
-                
-                <div class="border-t border-gray-200 mt-2 pt-3">
-                    <h4 class="font-medium text-gray-800 mb-3">
-                        <i class="fas fa-list-ul mr-1"></i> Daftar Absensi
-                    </h4>
-                    <div class="space-y-2">
-            `;
+                <div class="bg-blue-100 rounded-lg p-2">
+                    <div class="text-sm text-gray-600">Sakit</div>
+                    <div class="text-xl font-bold text-blue-600">${data.summary.sakit}</div>
+                </div>
+                <div class="bg-red-100 rounded-lg p-2">
+                    <div class="text-sm text-gray-600">Alpha</div>
+                    <div class="text-xl font-bold text-red-600">${data.summary.alpha}</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="mb-3 text-sm text-gray-500">
+            <i class="fas fa-calendar mr-1"></i> Periode: ${bulanName} ${tahun}
+            <span class="mx-2">|</span>
+            <i class="fas fa-chart-line mr-1"></i> Total Sesi: ${data.total}
+        </div>
+        
+        <div class="border-t border-gray-200 mt-2 pt-3">
+            <h4 class="font-medium text-gray-800 mb-3">
+                <i class="fas fa-list-ul mr-1"></i> Daftar Absensi
+            </h4>
+            <div class="space-y-2">
+    `;
 
-            data.data.forEach(function (item) {
-                const statusClass = `detail-card ${item.status}`;
-                const statusBadgeClass = `status-badge status-${item.status}`;
-                let statusIcon = '';
-                let statusText = '';
+    data.data.forEach(function (item) {
+        const statusClass = `detail-card ${item.status}`;
+        const statusBadgeClass = `status-badge status-${item.status}`;
+        let statusIcon = '';
+        let statusText = '';
 
-                switch (item.status) {
-                    case 'hadir':
-                        statusIcon = 'fa-check-circle';
-                        statusText = 'Hadir';
-                        break;
-                    case 'izin':
-                        statusIcon = 'fa-envelope';
-                        statusText = 'Izin';
-                        break;
-                    case 'sakit':
-                        statusIcon = 'fa-thermometer-half';
-                        statusText = 'Sakit';
-                        break;
-                    case 'alpha':
-                        statusIcon = 'fa-times-circle';
-                        statusText = 'Alpha';
-                        break;
-                }
+        switch (item.status) {
+            case 'hadir':
+                statusIcon = 'fa-check-circle';
+                statusText = 'Hadir';
+                break;
+            case 'izin':
+                statusIcon = 'fa-envelope';
+                statusText = 'Izin';
+                break;
+            case 'sakit':
+                statusIcon = 'fa-thermometer-half';
+                statusText = 'Sakit';
+                break;
+            case 'alpha':
+                statusIcon = 'fa-times-circle';
+                statusText = 'Alpha';
+                break;
+        }
 
-                const tanggal = new Date(item.tanggal_absensi);
-                const dayName = dayNames[tanggal.getDay()];
-                const tanggalFormatted = `${dayName}, ${tanggal.getDate()} ${monthNames[tanggal.getMonth()]} ${tanggal.getFullYear()}`;
+        const tanggal = new Date(item.tanggal_absensi);
+        const dayName = dayNames[tanggal.getDay()];
+        const tanggalFormatted = `${dayName}, ${tanggal.getDate()} ${monthNames[tanggal.getMonth()]} ${tanggal.getFullYear()}`;
 
-                html += `
-                    <div class="${statusClass} p-3">
-                        <div class="flex justify-between items-start flex-wrap gap-2">
-                            <div class="flex items-center">
-                                <i class="fas ${statusIcon} mr-2 text-lg"></i>
+        html += `
+            <div class="${statusClass} p-3">
+                <div class="flex justify-between items-start flex-wrap gap-2">
+                    <div class="flex-1">
+                        <div class="flex items-center mb-2 flex-wrap gap-1">
+                            <i class="fas ${statusIcon} mr-2 text-lg"></i>
+                            <div class="font-medium">${tanggalFormatted}</div>
+                            <span class="mx-2 text-gray-400">|</span>
+                            <span class="${statusBadgeClass}">${statusText}</span>
+                        </div>
+                        <div class="text-xs text-gray-500 ml-6">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
                                 <div>
-                                    <div class="font-medium">${tanggalFormatted}</div>
+                                    <i class="fas fa-book mr-1"></i> <span class="font-medium">Mapel:</span> ${escapeHtml(item.nama_pelajaran)}
+                                </div>
+                                <div>
+                                    <i class="fas fa-layer-group mr-1"></i> <span class="font-medium">Sesi ke-${item.sesi_ke}</span>
+                                </div>
+                                <div>
+                                    <i class="fas fa-clock mr-1"></i> <span class="font-medium">Jam :</span> ${escapeHtml(item.jam_input)}
                                 </div>
                             </div>
-                            <div>
-                                <span class="${statusBadgeClass}">${statusText}</span>
-                            </div>
                         </div>
-                `;
-
-                if (item.keterangan && item.keterangan.trim() !== '') {
-                    html += `
-                        <div class="mt-2 text-sm text-gray-600 pl-6">
-                            <i class="fas fa-comment mr-1"></i> Keterangan: ${escapeHtml(item.keterangan)}
-                        </div>
-                    `;
-                }
-
-                if (item.bukti_izin && item.bukti_izin.trim() !== '') {
-                    html += `
-                        <div class="mt-1 text-sm text-gray-500 pl-6">
-                            <i class="fas fa-paperclip mr-1"></i> Ada bukti izin
-                        </div>
-                    `;
-                }
-
-                html += `</div>`;
-            });
-
-            html += `
                     </div>
                 </div>
-            `;
+        `;
 
-            modalBody.innerHTML = html;
+        if (item.keterangan && item.keterangan.trim() !== '') {
+            html += `
+                <div class="mt-2 text-sm text-gray-600 pl-6">
+                    <i class="fas fa-comment mr-1"></i> Keterangan: ${escapeHtml(item.keterangan)}
+                </div>
+            `;
         }
+
+        if (item.bukti_izin && item.bukti_izin.trim() !== '') {
+            html += `
+                <div class="mt-1 text-sm text-gray-500 pl-6">
+                    <i class="fas fa-paperclip mr-1"></i> Ada bukti izin
+                </div>
+            `;
+        }
+
+        html += `</div>`;
+    });
+
+    html += `
+                    </div>
+                </div>
+            </div>
+        `;
+
+    modalBody.innerHTML = html;
+}
 
         function closeModal() {
             const modal = document.getElementById('absensiModal');
@@ -1133,6 +1177,11 @@ usort($rekap_data, function ($a, $b) {
             div.textContent = text;
             return div.innerHTML;
         }
+        
+        // Auto submit when kelas changes
+        document.querySelector('select[name="kelas"]')?.addEventListener('change', function() {
+            document.getElementById('filterForm').submit();
+        });
     </script>
 </body>
 

@@ -60,10 +60,12 @@ if (isset($_SESSION['error_message'])) {
     unset($_SESSION['error_message']);
 }
 
-// AMBIL DATA SISWA YANG DIAJAR OLEH GURU INI (berdasarkan jadwal)
+// ============================================
+// AMBIL DATA SEMUA SISWA AKTIF (TANPA FILTER JADWAL)
+// ============================================
 if ($guru_id > 0) {
     try {
-        // Ambil siswa yang memiliki jadwal dengan guru ini
+        // Ambil semua siswa aktif (TANPA JOIN ke jadwal)
         $sql_siswa_list = "SELECT DISTINCT 
                                 s.id, 
                                 s.nama_lengkap,
@@ -71,16 +73,11 @@ if ($guru_id > 0) {
                                 s.sekolah_asal
                           FROM siswa s
                           INNER JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
-                          INNER JOIN jadwal_belajar jb ON ps.id = jb.pendaftaran_id
-                          INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
-                          WHERE smg.guru_id = ? 
-                            AND jb.status = 'aktif'
-                            AND ps.status = 'aktif'
+                          WHERE ps.status = 'aktif'
                             AND s.status = 'aktif'
                           ORDER BY s.nama_lengkap";
 
         $stmt = $conn->prepare($sql_siswa_list);
-        $stmt->bind_param("i", $guru_id);
         $stmt->execute();
         $result = $stmt->get_result();
         
@@ -89,16 +86,19 @@ if ($guru_id > 0) {
         }
         $stmt->close();
         
-        error_log("Jumlah siswa untuk guru ID $guru_id: " . count($siswa_options));
+        error_log("Jumlah siswa: " . count($siswa_options));
     } catch (Exception $e) {
         $error_message = "❌ Error mengambil data siswa: " . $e->getMessage();
     }
 }
 
-// AMBIL DATA MATA PELAJARAN SISWA BERDASARKAN JADWAL GURU
+// ============================================
+// AMBIL DATA MATA PELAJARAN SISWA (SEMUA MATA PELAJARAN)
+// ============================================
 $mata_pelajaran_list = [];
-if ($siswa_id > 0 && $guru_id > 0) {
+if ($siswa_id > 0) {
     try {
+        // Ambil semua mata pelajaran siswa (TANPA filter guru_id)
         $sql_mapel = "SELECT DISTINCT
                         sp.id as siswa_pelajaran_id,
                         sp.nama_pelajaran,
@@ -107,17 +107,13 @@ if ($siswa_id > 0 && $guru_id > 0) {
                         ps.id as pendaftaran_id
                       FROM siswa_pelajaran sp
                       INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                      INNER JOIN jadwal_belajar jb ON ps.id = jb.pendaftaran_id
-                      INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
                       WHERE ps.siswa_id = ?
-                        AND smg.guru_id = ?
-                        AND jb.status = 'aktif'
                         AND sp.status = 'aktif'
                         AND ps.status = 'aktif'
                       ORDER BY sp.nama_pelajaran";
         
         $stmt = $conn->prepare($sql_mapel);
-        $stmt->bind_param("ii", $siswa_id, $guru_id);
+        $stmt->bind_param("i", $siswa_id);
         $stmt->execute();
         $result = $stmt->get_result();
         
@@ -140,61 +136,61 @@ if ($siswa_id > 0 && $guru_id > 0) {
     }
 }
 
+// ============================================
 // AJAX Handler untuk autocomplete siswa
+// ============================================
 if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
     header('Content-Type: application/json');
     
     $search = isset($_GET['search']) ? trim($_GET['search']) : '';
     $filtered_siswa = [];
     
-    if ($guru_id > 0) {
-        $sql_search = "SELECT DISTINCT 
-                    s.id, 
-                    s.nama_lengkap,
-                    s.kelas,
-                    s.sekolah_asal
-              FROM siswa s
-              INNER JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
-              INNER JOIN jadwal_belajar jb ON ps.id = jb.pendaftaran_id
-              INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
-              WHERE smg.guru_id = ? 
-                AND jb.status = 'aktif'
-                AND ps.status = 'aktif'
-                AND s.status = 'aktif'";
-        if (!empty($search) && strlen($search) >= 2) {
-            $sql_search .= " AND s.nama_lengkap LIKE ?";
-            $search_param = "%" . $search . "%";
-            
-            $stmt = $conn->prepare($sql_search);
-            $stmt->bind_param("is", $guru_id, $search_param);
-        } else {
-            $sql_search .= " ORDER BY s.nama_lengkap LIMIT 20";
-            $stmt = $conn->prepare($sql_search);
-            $stmt->bind_param("i", $guru_id);
-        }
+    // Ambil semua siswa aktif (TANPA filter guru_id dan jadwal)
+    $sql_search = "SELECT DISTINCT 
+                        s.id, 
+                        s.nama_lengkap,
+                        s.kelas,
+                        s.sekolah_asal
+                  FROM siswa s
+                  INNER JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
+                  WHERE ps.status = 'aktif'
+                    AND s.status = 'aktif'";
+    
+    if (!empty($search) && strlen($search) >= 2) {
+        $sql_search .= " AND s.nama_lengkap LIKE ?";
+        $search_param = "%" . $search . "%";
         
-        if ($stmt) {
-            $stmt->execute();
-            $result_search = $stmt->get_result();
-            while ($row = $result_search->fetch_assoc()) {
-                $filtered_siswa[] = $row;
-            }
-            $stmt->close();
+        $stmt = $conn->prepare($sql_search);
+        $stmt->bind_param("s", $search_param);
+    } else {
+        $sql_search .= " ORDER BY s.nama_lengkap LIMIT 20";
+        $stmt = $conn->prepare($sql_search);
+    }
+    
+    if ($stmt) {
+        $stmt->execute();
+        $result_search = $stmt->get_result();
+        while ($row = $result_search->fetch_assoc()) {
+            $filtered_siswa[] = $row;
         }
+        $stmt->close();
     }
     
     echo json_encode($filtered_siswa);
     exit();
 }
 
+// ============================================
 // AJAX Handler untuk mengambil mata pelajaran berdasarkan siswa_id
+// ============================================
 if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran_by_siswa' && isset($_GET['siswa_id'])) {
     header('Content-Type: application/json');
     
     $siswa_id = intval($_GET['siswa_id']);
     $pelajaran_data = [];
     
-    if ($siswa_id > 0 && $guru_id > 0) {
+    if ($siswa_id > 0) {
+        // Ambil semua mata pelajaran siswa (TANPA filter guru_id)
         $sql_pelajaran = "SELECT DISTINCT
                             sp.id as siswa_pelajaran_id,
                             sp.nama_pelajaran,
@@ -203,18 +199,14 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran_by_siswa' && isset($
                             ps.id as pendaftaran_id
                           FROM siswa_pelajaran sp
                           INNER JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                          INNER JOIN jadwal_belajar jb ON ps.id = jb.pendaftaran_id
-                          INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
                           WHERE ps.siswa_id = ?
-                            AND smg.guru_id = ?
-                            AND jb.status = 'aktif'
                             AND sp.status = 'aktif'
                             AND ps.status = 'aktif'
                           ORDER BY sp.nama_pelajaran";
         
         $stmt = $conn->prepare($sql_pelajaran);
         if ($stmt) {
-            $stmt->bind_param("ii", $siswa_id, $guru_id);
+            $stmt->bind_param("i", $siswa_id);
             $stmt->execute();
             $result = $stmt->get_result();
             
@@ -229,7 +221,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran_by_siswa' && isset($
     exit();
 }
 
+// ============================================
 // PROSES SIMPAN PENILAIAN
+// ============================================
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
     
     $siswa_id_post = intval($_POST['siswa_id'] ?? 0);
@@ -257,26 +251,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             
             if ($row = $result->fetch_assoc()) {
                 $pendaftaran_id = $row['pendaftaran_id'];
-                
-                // Verifikasi bahwa guru benar-benar mengajar siswa ini (berdasarkan jadwal)
-                $sql_verify = "SELECT COUNT(*) as jml 
-                              FROM jadwal_belajar jb
-                              INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
-                              WHERE jb.pendaftaran_id = ? 
-                                AND smg.guru_id = ?
-                                AND jb.status = 'aktif'";
-                
-                $stmt_verify = $conn->prepare($sql_verify);
-                $stmt_verify->bind_param("ii", $pendaftaran_id, $guru_id);
-                $stmt_verify->execute();
-                $result_verify = $stmt_verify->get_result();
-                $verify_data = $result_verify->fetch_assoc();
-                
-                if ($verify_data['jml'] == 0) {
-                    throw new Exception("Anda tidak memiliki jadwal mengajar untuk siswa ini.");
-                }
-                $stmt_verify->close();
-                
             } else {
                 throw new Exception("Data mata pelajaran tidak valid untuk siswa ini.");
             }
@@ -850,7 +824,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                             <i class="fas fa-spinner fa-spin mr-1"></i> Memuat mata pelajaran...
                         </div>
                         <p class="text-xs text-gray-500 mt-1">
-                            <i class="fas fa-info-circle"></i> Menampilkan mata pelajaran yang Anda ajar untuk siswa ini
+                            <i class="fas fa-info-circle"></i> Menampilkan semua mata pelajaran yang dimiliki siswa
                         </p>
                     </div>
 
@@ -926,7 +900,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                             <div class="indicator-label">Willingness to Learn</div>
                             <div class="indicator-desc">Kemauan dan antusiasme untuk belajar hal baru</div>
                             <div class="flex items-center justify-between">
-                                <input type="number" name="willingness_learn" min="1" max="10" step="1" value="0"
+                                <input type="number" name="willingness_learn" min="1" max="10" step="1" value=""
                                     class="rating-input" required oninput="validateInput(this)">
                                 <div class="text-sm text-gray-500">Skala 1-10</div>
                             </div>
@@ -937,7 +911,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                             <div class="indicator-label">Problem Solving</div>
                             <div class="indicator-desc">Kemampuan menganalisis dan memecahkan masalah</div>
                             <div class="flex items-center justify-between">
-                                <input type="number" name="problem_solving" min="1" max="10" step="1" value="0"
+                                <input type="number" name="problem_solving" min="1" max="10" step="1" value=""
                                     class="rating-input" required oninput="validateInput(this)">
                                 <div class="text-sm text-gray-500">Skala 1-10</div>
                             </div>
@@ -948,7 +922,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                             <div class="indicator-label">Critical Thinking</div>
                             <div class="indicator-desc">Berpikir kritis, logis, dan analitis</div>
                             <div class="flex items-center justify-between">
-                                <input type="number" name="critical_thinking" min="1" max="10" step="1" value="0"
+                                <input type="number" name="critical_thinking" min="1" max="10" step="1" value=""
                                     class="rating-input" required oninput="validateInput(this)">
                                 <div class="text-sm text-gray-500">Skala 1-10</div>
                             </div>
@@ -959,7 +933,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                             <div class="indicator-label">Concentration</div>
                             <div class="indicator-desc">Fokus dan konsentrasi selama pembelajaran</div>
                             <div class="flex items-center justify-between">
-                                <input type="number" name="concentration" min="1" max="10" step="1" value="0"
+                                <input type="number" name="concentration" min="1" max="10" step="1" value=""
                                     class="rating-input" required oninput="validateInput(this)">
                                 <div class="text-sm text-gray-500">Skala 1-10</div>
                             </div>
@@ -970,7 +944,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                             <div class="indicator-label">Independence</div>
                             <div class="indicator-desc">Kemandirian dalam belajar dan menyelesaikan tugas</div>
                             <div class="flex items-center justify-between">
-                                <input type="number" name="independence" min="1" max="10" step="1" value="0"
+                                <input type="number" name="independence" min="1" max="10" step="1" value=""
                                     class="rating-input" required oninput="validateInput(this)">
                                 <div class="text-sm text-gray-500">Skala 1-10</div>
                             </div>
@@ -1034,15 +1008,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             </form>
 
             <!-- Info Sistem -->
-            <div class="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <h3 class="text-lg font-semibold text-blue-800 mb-2">
+            <div class="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+                <h3 class="text-lg font-semibold text-green-800 mb-2">
                     <i class="fas fa-info-circle mr-2"></i> Informasi Sistem
                 </h3>
-                <ul class="text-sm text-blue-700 space-y-1">
-                    <li>• Sistem mengambil data siswa dari <strong>mata pelajaran</strong> yang Anda ajar (tabel siswa_pelajaran)</li>
+                <ul class="text-sm text-green-700 space-y-1">
+                    <!-- <li>• ✅ <strong>Sistem Fleksibel!</strong> Anda dapat menilai siswa kapan saja, tanpa terikat jadwal</li> -->
+                    <li>• Sistem mengambil data <strong>semua siswa aktif</strong> (tidak hanya yang memiliki jadwal)</li>
+                    <li>• Menampilkan <strong>semua mata pelajaran</strong> yang dimiliki siswa</li>
                     <li>• Total maksimal skor: <strong>50</strong> (5 indikator × 10)</li>
                     <li>• Kategori: &lt;40% (Kurang), 40-59% (Cukup), 60-79% (Baik), ≥80% (Sangat Baik)</li>
                     <li>• Data penilaian dapat dilihat di menu "Riwayat"</li>
+                    <!-- <li>• <strong>Guru pengganti</strong> bisa langsung input nilai tanpa perlu mengubah jadwal</li> -->
                 </ul>
             </div>
         </div>
@@ -1079,8 +1056,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
         // ==================== FUNGSI AUTOCOMPLETE ====================
         $(document).ready(function () {
             initAutocomplete();
-            
-            // Update preview saat halaman dimuat
             updatePreview();
         });
 
@@ -1271,7 +1246,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                     pelajaranSelect.innerHTML = '<option value="">-- Pilih Mata Pelajaran --</option>';
                     
                     if (pelajaranData.length === 0) {
-                        pelajaranSelect.innerHTML = '<option value="">Tidak ada mata pelajaran yang Anda ajar untuk siswa ini</option>';
+                        pelajaranSelect.innerHTML = '<option value="">Tidak ada mata pelajaran untuk siswa ini</option>';
                     } else {
                         pelajaranData.forEach(function(mapel) {
                             const option = document.createElement('option');
@@ -1314,19 +1289,35 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
 
         // ==================== FUNGSI PENILAIAN ====================
         function validateInput(input) {
-            let value = parseInt(input.value) || 5;
-
-            if (value < 1) {
-                value = 1;
-            } else if (value > 10) {
-                value = 10;
-                input.classList.add('error');
-                setTimeout(() => input.classList.remove('error'), 500);
-            }
-
-            input.value = value;
-            updatePreview();
-        }
+    let value = input.value.trim();
+    
+    // Jika kosong, biarkan kosong
+    if (value === '') {
+        updatePreview();
+        return;
+    }
+    
+    value = parseInt(value);
+    
+    // Jika bukan angka
+    if (isNaN(value)) {
+        input.value = '';
+        updatePreview();
+        return;
+    }
+    
+    // Validasi range 1-10
+    if (value < 1) {
+        value = 1;
+    } else if (value > 10) {
+        value = 10;
+        input.classList.add('error');
+        setTimeout(() => input.classList.remove('error'), 500);
+    }
+    
+    input.value = value;
+    updatePreview();
+}
 
         function hitungTotalSkor() {
             const fields = [
