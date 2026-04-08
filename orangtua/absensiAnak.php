@@ -796,12 +796,12 @@ function getStatusIcon($status) {
                                         <div class="font-medium text-gray-900">
                                             <?php echo date('d/m/Y', strtotime($absensi['tanggal_absensi'])); ?>
                                         </div>
-                                        <?php if (!empty($absensi['waktu_input'])): ?>
+                                        <!-- <?php if (!empty($absensi['waktu_input'])): ?>
                                         <div class="text-xs text-gray-500 mt-1">
                                             <i class="far fa-clock mr-1"></i> 
                                             <?php echo $absensi['waktu_input']; ?>
                                         </div>
-                                        <?php else: ?>
+                                        <?php else: ?> -->
                                         <div class="text-xs text-gray-400 mt-1">
                                             <i class="far fa-clock mr-1"></i> 
                                             Waktu tidak tersedia

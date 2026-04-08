@@ -1737,9 +1737,6 @@ if ($filter_siswa > 0) {
                                 <div>
                                     <i class="fas fa-layer-group mr-1"></i> <span class="font-medium">Sesi ke-${item.sesi_ke}</span>
                                 </div>
-                                <div>
-                                    <i class="fas fa-clock mr-1"></i> <span class="font-medium">Jam:</span> ${escapeHtml(item.jam_input)}
-                                </div>
                             </div>
                         </div>
                     </div>
