@@ -207,7 +207,7 @@ if ($selected_anak_id == 0 && !empty($anak_data)) {
 // PARAMETER FILTER
 $filter_guru = isset($_GET['guru']) ? $_GET['guru'] : '';
 $filter_kategori = isset($_GET['kategori']) ? $_GET['kategori'] : '';
-$filter_bulan = isset($_GET['bulan']) ? $_GET['bulan'] : date('Y-m'); // DEFAULT KE BULAN SEKARANG
+$filter_bulan = isset($_GET['bulan']) ? $_GET['bulan'] : date('Y-m');
 $filter_minggu = isset($_GET['minggu']) ? $_GET['minggu'] : '';
 $search_keyword = isset($_GET['search']) ? trim($_GET['search']) : '';
 
@@ -320,7 +320,7 @@ if ($selected_anak_id > 0 && $orangtua_id > 0) {
         $count_param_types .= "s";
     }
 
-    // TAMBAH FILTER BULAN - MENGGUNAKAN INPUT MONTH
+    // TAMBAH FILTER BULAN
     if (!empty($filter_bulan)) {
         $base_query .= " AND DATE_FORMAT(ps.tanggal_penilaian, '%Y-%m') = ?";
         $count_query .= " AND DATE_FORMAT(ps.tanggal_penilaian, '%Y-%m') = ?";
@@ -955,7 +955,7 @@ if (!empty($riwayat_data)) {
                                 </select>
                             </div>
 
-                            <!-- Filter Bulan - Menggunakan input month dengan default bulan sekarang -->
+                            <!-- Filter Bulan -->
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">
                                     <i class="fas fa-calendar-alt mr-1"></i> Pilih Bulan
@@ -965,7 +965,6 @@ if (!empty($riwayat_data)) {
                                     onchange="this.form.submit()"
                                     class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm md:text-base">
                             </div>
-
                         </div>
 
                         <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
@@ -1076,6 +1075,10 @@ if (!empty($riwayat_data)) {
                                             </th>
                                             <th
                                                 class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                Sesi
+                                            </th>
+                                            <th
+                                                class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                 Guru & Pelajaran
                                             </th>
                                             <th
@@ -1086,10 +1089,10 @@ if (!empty($riwayat_data)) {
                                                 class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                 Kategori
                                             </th>
-                                            <th
+                                            <!-- <th
                                                 class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                 Catatan
-                                            </th>
+                                            </th> -->
                                             <th
                                                 class="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                                 Aksi
@@ -1116,6 +1119,17 @@ if (!empty($riwayat_data)) {
                                                     <div class="text-sm font-medium text-gray-900"><?php echo $tanggal_lengkap; ?>
                                                     </div>
                                                 </td>
+                                                <td class="px-4 md:px-6 py-3 md:py-4 whitespace-nowrap">
+                                                    <div class="text-sm font-medium text-gray-900">
+                                                        <?php
+                                                        if (!empty($data['sesi_ke'])) {
+                                                            echo 'Sesi ' . $data['sesi_ke'];
+                                                        } else {
+                                                            echo '<span class="text-gray-400 text-xs">-</span>';
+                                                        }
+                                                        ?>
+                                                    </div>
+                                                </td>
                                                 <td class="px-4 md:px-6 py-3 md:py-4">
                                                     <div class="text-sm font-medium text-gray-900"><?php echo $data['nama_guru']; ?>
                                                     </div>
@@ -1132,14 +1146,14 @@ if (!empty($riwayat_data)) {
                                                         <?php echo $data['kategori']; ?>
                                                     </span>
                                                 </td>
-                                                <td class="px-4 md:px-6 py-3 md:py-4">
+                                                <!-- <td class="px-4 md:px-6 py-3 md:py-4">
                                                     <div class="text-sm text-gray-900 max-w-xs truncate-multiline">
                                                         <?php
                                                         $catatan = $data['catatan_guru'] ?? 'Tidak ada catatan';
                                                         echo strlen($catatan) > 100 ? substr($catatan, 0, 100) . '...' : $catatan;
                                                         ?>
                                                     </div>
-                                                </td>
+                                                </td> -->
                                                 <td class="px-4 md:px-6 py-3 md:py-4 whitespace-nowrap text-sm font-medium">
                                                     <button onclick="showDetailPenilaian(<?php echo $data['id']; ?>)"
                                                         class="text-blue-600 hover:text-blue-900 mr-3">
@@ -1182,6 +1196,20 @@ if (!empty($riwayat_data)) {
                                                 <span class="badge <?php echo $badge_class; ?> text-xs">
                                                     <?php echo $data['kategori']; ?>
                                                 </span>
+                                            </div>
+                                        </div>
+
+                                        <!-- SESI - TAMBAHAN BARU -->
+                                        <div class="mb-3">
+                                            <div class="mobile-card-label">Sesi</div>
+                                            <div class="mobile-card-value font-medium">
+                                                <?php
+                                                if (!empty($data['sesi_ke'])) {
+                                                    echo 'Sesi ' . $data['sesi_ke'];
+                                                } else {
+                                                    echo '<span class="text-gray-400">-</span>';
+                                                }
+                                                ?>
                                             </div>
                                         </div>
 
@@ -1502,6 +1530,7 @@ if (!empty($riwayat_data)) {
                             <h3 class="text-xl font-bold">Detail Penilaian</h3>
                             <div class="mt-2 space-y-2">
                                 <p><i class="fas fa-calendar-alt mr-2"></i> ${tanggalLengkap} </p>
+                                ${d.sesi_ke ? `<p><i class="fas fa-layer-group mr-2"></i> Sesi ${d.sesi_ke}</p>` : ''}
                                 <p><i class="fas fa-user-tie mr-2"></i> ${d.nama_guru}</p>
                                 ${d.nama_pelajaran ? `<p><i class="fas fa-book mr-2"></i> ${d.nama_pelajaran}</p>` : ''}
                             </div>
