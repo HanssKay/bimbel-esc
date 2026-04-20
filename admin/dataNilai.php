@@ -172,18 +172,19 @@ if (isset($_GET['action']) && $_GET['action'] == 'detail' && isset($_GET['id']))
     $penilaian_id = intval($_GET['id']);
 
     $sql = "SELECT ps.*, 
-                   s.nama_lengkap as nama_siswa, s.kelas as kelas_sekolah,
-                   u.full_name as nama_guru, g.bidang_keahlian,
-                   sp.nama_pelajaran, pd.tingkat as tingkat_bimbel,
-                   pd.jenis_kelas as jenis_kelas_bimbel,
-                   sp.id as siswa_pelajaran_id
-            FROM penilaian_siswa ps
-            JOIN siswa s ON ps.siswa_id = s.id
-            JOIN pendaftaran_siswa pd ON ps.pendaftaran_id = pd.id
-            LEFT JOIN siswa_pelajaran sp ON ps.siswa_pelajaran_id = sp.id
-            JOIN guru g ON ps.guru_id = g.id
-            JOIN users u ON g.user_id = u.id
-            WHERE ps.id = ?";
+               ps.sesi_ke,
+               s.nama_lengkap as nama_siswa, s.kelas as kelas_sekolah,
+               u.full_name as nama_guru, g.bidang_keahlian,
+               sp.nama_pelajaran, pd.tingkat as tingkat_bimbel,
+               pd.jenis_kelas as jenis_kelas_bimbel,
+               sp.id as siswa_pelajaran_id
+        FROM penilaian_siswa ps
+        JOIN siswa s ON ps.siswa_id = s.id
+        JOIN pendaftaran_siswa pd ON ps.pendaftaran_id = pd.id
+        LEFT JOIN siswa_pelajaran sp ON ps.siswa_pelajaran_id = sp.id
+        JOIN guru g ON ps.guru_id = g.id
+        JOIN users u ON g.user_id = u.id
+        WHERE ps.id = ?";
 
     $stmt = $conn->prepare($sql);
     $stmt->bind_param("i", $penilaian_id);
@@ -220,6 +221,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'hapus' && isset($_GET['id'])) 
 
 // =============== AMBIL DATA PENILAIAN DENGAN FILTER (DIUBAH) ===============
 $sql = "SELECT ps.*, 
+               ps.sesi_ke,
                s.id as siswa_id, s.nama_lengkap as nama_siswa, s.kelas as kelas_sekolah,
                u.full_name as nama_guru, g.bidang_keahlian,
                sp.nama_pelajaran, pd.tingkat as tingkat_bimbel,
@@ -231,7 +233,6 @@ $sql = "SELECT ps.*,
         JOIN guru g ON ps.guru_id = g.id
         JOIN users u ON g.user_id = u.id
         WHERE 1=1";
-
 $params = [];
 $param_types = "";
 
@@ -966,33 +967,18 @@ $tahun_list = getTahunList();
                     <div class="table-responsive overflow-x-auto">
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
-                                <tr>
-                                    <th
-                                        class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        No</th>
-                                    <th
-                                        class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Siswa</th>
-                                    <th
-                                        class="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Guru</th>
-                                    <th
-                                        class="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Mata Pelajaran</th>
-                                    <th
-                                        class="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Tanggal</th>
-                                    <th
-                                        class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Nilai</th>
-                                    <th
-                                        class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Kategori</th>
-                                    <th
-                                        class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Aksi</th>
-                                </tr>
-                            </thead>
+    <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Siswa</th>
+        <th class="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Guru</th>
+        <th class="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Mata Pelajaran</th>
+        <th class="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal</th>
+        <th class="hidden md:table-cell px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sesi</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nilai</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kategori</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
+    </tr>
+</thead>
                             <tbody class="bg-white divide-y divide-gray-200">
                                     <?php foreach ($penilaian_data as $index => $penilaian): ?>
                                                                     <?php
@@ -1025,6 +1011,14 @@ $tahun_list = getTahunList();
                                                                         <td class="hidden md:table-cell px-4 py-3 whitespace-nowrap text-sm text-gray-900"><?php echo htmlspecialchars($penilaian['nama_guru']); ?></td>
                                                                         <td class="hidden md:table-cell px-4 py-3 whitespace-nowrap text-sm text-gray-900"><?php echo htmlspecialchars($penilaian['nama_pelajaran'] ?? '-'); ?></td>
                                                                         <td class="hidden md:table-cell px-4 py-3 whitespace-nowrap text-sm text-gray-500"><?php echo date('d/m/Y', strtotime($penilaian['tanggal_penilaian'])); ?></td>
+                                                                        <td class="hidden md:table-cell px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+    <?php 
+    $sesi_ke = isset($penilaian['sesi_ke']) && $penilaian['sesi_ke'] > 0 
+        ? 'Sesi ' . $penilaian['sesi_ke'] 
+        : '<span class="text-gray-400">-</span>';
+    echo $sesi_ke;
+    ?>
+</td>
                                                                         <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900"><?php echo $penilaian['total_score'] ?? 0; ?>/50</td>
                                                                         <td class="px-4 py-3 whitespace-nowrap"><span class="badge <?php echo $kategori_class; ?>"><?php echo getKategoriByPersentase($persentase); ?></span></td>
                                                                         <td class="px-4 py-3 whitespace-nowrap text-sm font-medium">
