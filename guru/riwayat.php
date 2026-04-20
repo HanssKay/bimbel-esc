@@ -32,7 +32,7 @@ $filter_mata_pelajaran = isset($_GET['mata_pelajaran']) ? $_GET['mata_pelajaran'
 $filter_tahun = !empty($filter_bulan_tahun) ? substr($filter_bulan_tahun, 0, 4) : date('Y');
 $filter_bulan = !empty($filter_bulan_tahun) ? (int) substr($filter_bulan_tahun, 5, 2) : 0;
 
-// AMBIL DATA SISWA YANG DIAJAR GURU (berdasarkan jadwal, bukan siswa_pelajaran)
+// AMBIL DATA SEMUA SISWA (KESELURUHAN)
 $siswa_list = [];
 if ($guru_id > 0) {
     try {
@@ -42,17 +42,10 @@ if ($guru_id > 0) {
                          s.kelas as kelas_sekolah,
                          s.sekolah_asal
                       FROM siswa s
-                      INNER JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
-                      INNER JOIN jadwal_belajar jb ON ps.id = jb.pendaftaran_id
-                      INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
-                      WHERE smg.guru_id = ? 
-                        AND jb.status = 'aktif'
-                        AND ps.status = 'aktif'
-                        AND s.status = 'aktif'
+                      WHERE s.status = 'aktif'
                       ORDER BY s.nama_lengkap";
 
         $stmt = $conn->prepare($sql_siswa);
-        $stmt->bind_param("i", $guru_id);
         $stmt->execute();
         $result = $stmt->get_result();
 
@@ -60,7 +53,7 @@ if ($guru_id > 0) {
             $siswa_list[] = $row;
         }
 
-        error_log("Siswa untuk guru ID $guru_id: " . count($siswa_list) . " siswa ditemukan");
+        error_log("Total siswa: " . count($siswa_list) . " siswa ditemukan");
 
     } catch (Exception $e) {
         error_log("Error fetching siswa options: " . $e->getMessage());
@@ -94,6 +87,7 @@ if ($guru_id > 0) {
 // BANGUN QUERY DENGAN FILTER DINAMIS
 $sql = "SELECT 
             psn.*,
+            psn.sesi_ke,
             s.id as siswa_id,
             s.nama_lengkap as nama_siswa,
             s.kelas as kelas_sekolah,
@@ -110,7 +104,7 @@ $sql = "SELECT
         JOIN siswa s ON psn.siswa_id = s.id
         JOIN siswa_pelajaran sp ON psn.siswa_pelajaran_id = sp.id
         JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-        WHERE psn.guru_id = ?";  // Hanya filter guru_id dari penilaian
+        WHERE psn.guru_id = ?";
 
 $params = [$guru_id];
 $types = "i";
@@ -195,51 +189,12 @@ foreach ($riwayat_penilaian as $penilaian) {
     }
 }
 
-// AJAX Handler untuk get detail penilaian (untuk edit)
-if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_penilaian_for_edit' && isset($_GET['id'])) {
-    header('Content-Type: application/json');
-
-    $penilaian_id = intval($_GET['id']);
-    $penilaian_data = null;
-
-    if ($penilaian_id > 0 && $guru_id > 0) {
-        $sql = "SELECT 
-                    psn.*,
-                    s.nama_lengkap,
-                    s.kelas,
-                    s.sekolah_asal,
-                    sp.nama_pelajaran,
-                    ps.tingkat,
-                    ps.jenis_kelas
-                FROM penilaian_siswa psn
-                JOIN siswa s ON psn.siswa_id = s.id
-                JOIN siswa_pelajaran sp ON psn.siswa_pelajaran_id = sp.id
-                JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
-                WHERE psn.id = ? AND psn.guru_id = ?";
-
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("ii", $penilaian_id, $guru_id);
-        $stmt->execute();
-        $result = $stmt->get_result();
-
-        if ($row = $result->fetch_assoc()) {
-            $penilaian_data = $row;
-        }
-        $stmt->close();
-    }
-
-    if ($penilaian_data) {
-        echo json_encode(['success' => true, 'data' => $penilaian_data]);
-    } else {
-        echo json_encode(['success' => false, 'error' => 'Data tidak ditemukan atau Anda tidak memiliki akses']);
-    }
-    exit();
-}
 
 // PROSES UPDATE PENILAIAN
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_penilaian'])) {
     $penilaian_id = intval($_POST['penilaian_id']);
     $tanggal_penilaian = $_POST['tanggal_penilaian'] ?? date('Y-m-d');
+    $sesi_ke = !empty($_POST['sesi_ke']) ? intval($_POST['sesi_ke']) : null;
     $periode_penilaian = trim($_POST['periode_penilaian'] ?? '');
     $catatan_guru = trim($_POST['catatan_guru'] ?? '');
     $rekomendasi = trim($_POST['rekomendasi'] ?? '');
@@ -278,9 +233,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_penilaian'])) {
         $kategori = 'Kurang';
     }
 
-    // Update query
+    // Update query dengan menambahkan sesi_ke
     $sql = "UPDATE penilaian_siswa SET 
                 tanggal_penilaian = ?,
+                sesi_ke = ?,
                 periode_penilaian = ?,
                 willingness_learn = ?,
                 problem_solving = ?,
@@ -296,8 +252,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_penilaian'])) {
 
     $stmt = $conn->prepare($sql);
     $stmt->bind_param(
-        "ssiiiiiiisssii",
+        "sisiiiiiiisssii",
         $tanggal_penilaian,
+        $sesi_ke,
         $periode_penilaian,
         $nilai_values['willingness_learn'],
         $nilai_values['problem_solving'],
@@ -323,54 +280,86 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_penilaian'])) {
     exit();
 }
 
-// AJAX Handler untuk autocomplete siswa (SAMA SEPERTI DI INPUTNILAI.PHP)
-if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list_riwayat') {
+if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_penilaian_for_edit' && isset($_GET['id'])) {
     header('Content-Type: application/json');
 
-    $search = isset($_GET['search']) ? trim($_GET['search']) : '';
-    $filtered_siswa = [];
+    $penilaian_id = intval($_GET['id']);
+    $penilaian_data = null;
 
-    if ($guru_id > 0) {
-        $sql_search = "SELECT DISTINCT
-                            s.id,
-                            s.nama_lengkap,
-                            s.kelas as kelas_sekolah,
-                            s.sekolah_asal
-                       FROM siswa s
-                       INNER JOIN pendaftaran_siswa ps ON s.id = ps.siswa_id
-                       INNER JOIN jadwal_belajar jb ON ps.id = jb.pendaftaran_id
-                       INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
-                       WHERE smg.guru_id = ? 
-                         AND jb.status = 'aktif'
-                         AND ps.status = 'aktif'
-                         AND s.status = 'aktif'";
+    if ($penilaian_id > 0 && $guru_id > 0) {
+        $sql = "SELECT 
+                    psn.*,
+                    psn.sesi_ke,
+                    s.nama_lengkap,
+                    s.kelas,
+                    s.sekolah_asal,
+                    sp.nama_pelajaran,
+                    ps.tingkat,
+                    ps.jenis_kelas
+                FROM penilaian_siswa psn
+                JOIN siswa s ON psn.siswa_id = s.id
+                JOIN siswa_pelajaran sp ON psn.siswa_pelajaran_id = sp.id
+                JOIN pendaftaran_siswa ps ON sp.pendaftaran_id = ps.id
+                WHERE psn.id = ? AND psn.guru_id = ?";
 
-        if (!empty($search) && strlen($search) >= 2) {
-            $sql_search .= " AND s.nama_lengkap LIKE ?";
-            $search_param = "%" . $search . "%";
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param("ii", $penilaian_id, $guru_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
 
-            $stmt = $conn->prepare($sql_search);
-            $stmt->bind_param("is", $guru_id, $search_param);
-        } else {
-            $sql_search .= " ORDER BY s.nama_lengkap LIMIT 20";
-            $stmt = $conn->prepare($sql_search);
-            $stmt->bind_param("i", $guru_id);
+        if ($row = $result->fetch_assoc()) {
+            $penilaian_data = $row;
         }
-
-        if ($stmt) {
-            $stmt->execute();
-            $result_search = $stmt->get_result();
-            while ($row = $result_search->fetch_assoc()) {
-                $filtered_siswa[] = $row;
-            }
-            $stmt->close();
-        }
+        $stmt->close();
     }
 
-    echo json_encode($filtered_siswa);
+    if ($penilaian_data) {
+        echo json_encode(['success' => true, 'data' => $penilaian_data]);
+    } else {
+        echo json_encode(['success' => false, 'error' => 'Data tidak ditemukan atau Anda tidak memiliki akses']);
+    }
     exit();
 }
 
+// AJAX Handler untuk autocomplete siswa (SEMUA SISWA)
+if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list_riwayat') {
+    header('Content-Type: application/json');
+    
+    $search = isset($_GET['search']) ? trim($_GET['search']) : '';
+    $filtered_siswa = [];
+    
+    // Ambil SEMUA siswa dari database (tanpa filter guru)
+    $sql_search = "SELECT DISTINCT
+                        s.id,
+                        s.nama_lengkap,
+                        s.kelas as kelas_sekolah,
+                        s.sekolah_asal
+                   FROM siswa s
+                   WHERE s.status = 'aktif'";
+    
+    if (!empty($search) && strlen($search) >= 2) {
+        $sql_search .= " AND s.nama_lengkap LIKE ?";
+        $search_param = "%" . $search . "%";
+        
+        $stmt = $conn->prepare($sql_search);
+        $stmt->bind_param("s", $search_param);
+    } else {
+        $sql_search .= " ORDER BY s.nama_lengkap LIMIT 20";
+        $stmt = $conn->prepare($sql_search);
+    }
+    
+    if ($stmt) {
+        $stmt->execute();
+        $result_search = $stmt->get_result();
+        while ($row = $result_search->fetch_assoc()) {
+            $filtered_siswa[] = $row;
+        }
+        $stmt->close();
+    }
+    
+    echo json_encode($filtered_siswa);
+    exit();
+}
 ?>
 
 <!DOCTYPE html>
@@ -895,12 +884,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list_riwayat') {
                             <div id="filterSiswaDropdown"
                                 class="absolute z-50 w-full md:w-96 bg-white mt-1 border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto hidden">
                             </div>
-                            <?php if (count($siswa_list) > 0): ?>
-                                <p class="text-xs text-gray-500 mt-1">
-                                    <i class="fas fa-users mr-1"></i>
-                                    <?php echo count($siswa_list); ?> siswa yang Anda ajar
-                                </p>
-                            <?php endif; ?>
+                            <!-- <?php if (count($siswa_list) > 0): ?>
+                            <p class="text-xs text-gray-500 mt-1">
+                                <i class="fas fa-users mr-1"></i>
+                                <?php echo count($siswa_list); ?> siswa yang Anda ajar
+                            </p>
+                            <?php endif; ?> -->
                         </div>
 
                         <!-- Filter Bulan & Tahun (pakai input month / kalender) -->
@@ -954,19 +943,28 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list_riwayat') {
                                 <tr>
                                     <th
                                         class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Tanggal</th>
+                                        Tanggal
+                                    </th>
                                     <th
                                         class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Siswa</th>
+                                        Sesi
+                                    </th>
                                     <th
                                         class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Mata Pelajaran & Kelas</th>
+                                        Siswa
+                                    </th>
                                     <th
                                         class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Total & Kategori</th>
+                                        Mata Pelajaran & Kelas
+                                    </th>
                                     <th
                                         class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        Aksi</th>
+                                        Total & Kategori
+                                    </th>
+                                    <th
+                                        class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Aksi
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
@@ -988,6 +986,16 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list_riwayat') {
                                             </div>
                                             <div class="text-xs text-gray-500">
                                                 <?php echo $penilaian['hari_penilaian']; ?>
+                                            </div>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <div class="text-sm text-gray-900">
+                                                <?php
+                                                $sesi_ke = isset($penilaian['sesi_ke']) && $penilaian['sesi_ke'] > 0
+                                                    ? 'Sesi ' . $penilaian['sesi_ke']
+                                                    : '<span class="text-gray-400">-</span>';
+                                                echo $sesi_ke;
+                                                ?>
                                             </div>
                                         </td>
                                         <td class="px-6 py-4">
@@ -1050,6 +1058,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list_riwayat') {
                     </div>
 
                     <!-- Mobile View -->
+                    <!-- Mobile View -->
                     <div class="md:hidden">
                         <?php foreach ($riwayat_penilaian as $penilaian):
                             $badge_class = '';
@@ -1068,6 +1077,18 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list_riwayat') {
                                     <div class="mobile-table-value">
                                         <?php echo date('d/m/Y', strtotime($penilaian['tanggal_penilaian'])); ?>
                                         (<?php echo $penilaian['hari_penilaian']; ?>)
+                                    </div>
+                                </div>
+
+                                <div class="mobile-table-cell">
+                                    <div class="mobile-table-label">Sesi</div>
+                                    <div class="mobile-table-value">
+                                        <?php
+                                        $sesi_ke = isset($penilaian['sesi_ke']) && $penilaian['sesi_ke'] > 0
+                                            ? 'Sesi ' . $penilaian['sesi_ke']
+                                            : '<span class="text-gray-400">-</span>';
+                                        echo $sesi_ke;
+                                        ?>
                                     </div>
                                 </div>
 
@@ -1396,16 +1417,16 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list_riwayat') {
         }
 
         function renderEditForm(data) {
-            // Tentukan warna preview kategori
-            let previewColor = '';
-            let persentase = data.persentase || Math.round((data.total_score / 50) * 100);
+    // Tentukan warna preview kategori
+    let previewColor = '';
+    let persentase = data.persentase || Math.round((data.total_score / 50) * 100);
 
-            if (persentase >= 80) previewColor = 'text-green-600';
-            else if (persentase >= 60) previewColor = 'text-blue-600';
-            else if (persentase >= 40) previewColor = 'text-yellow-600';
-            else previewColor = 'text-red-600';
+    if (persentase >= 80) previewColor = 'text-green-600';
+    else if (persentase >= 60) previewColor = 'text-blue-600';
+    else if (persentase >= 40) previewColor = 'text-yellow-600';
+    else previewColor = 'text-red-600';
 
-            return `
+    return `
         <form id="formEditPenilaian">
             <input type="hidden" name="penilaian_id" value="${data.id}">
             
@@ -1425,11 +1446,19 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list_riwayat') {
                 </div>
             </div>
             
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 <div>
                     <label class="block text-gray-700 font-medium mb-1">Tanggal Penilaian *</label>
                     <input type="date" name="tanggal_penilaian" id="editTanggalPenilaian" 
                         value="${data.tanggal_penilaian}" required
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500">
+                </div>
+                <div>
+                    <label class="block text-gray-700 font-medium mb-1">Sesi ke-</label>
+                    <input type="number" name="sesi_ke" id="editSesiKe"
+                        value="${data.sesi_ke || ''}"
+                        min="1" max="50"
+                        placeholder="Contoh: 1, 2, 3..."
                         class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500">
                 </div>
                 <div>
@@ -1487,7 +1516,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list_riwayat') {
             </div>
         </form>
     `;
-        }
+}
 
         function renderEditIndicator(label, fieldName, value) {
             // Jika value 0 atau null, tampilkan kosong
@@ -1891,139 +1920,159 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list_riwayat') {
         }
 
         function renderDetailContent(data) {
-            let kategoriClass = '';
-            let kategoriBgClass = '';
-            switch (data.kategori) {
-                case 'Sangat Baik':
-                    kategoriClass = 'text-green-600';
-                    kategoriBgClass = 'bg-green-100';
-                    break;
-                case 'Baik':
-                    kategoriClass = 'text-blue-600';
-                    kategoriBgClass = 'bg-blue-100';
-                    break;
-                case 'Cukup':
-                    kategoriClass = 'text-yellow-600';
-                    kategoriBgClass = 'bg-yellow-100';
-                    break;
-                case 'Kurang':
-                    kategoriClass = 'text-red-600';
-                    kategoriBgClass = 'bg-red-100';
-                    break;
-                default:
-                    kategoriClass = 'text-gray-600';
-                    kategoriBgClass = 'bg-gray-100';
-            }
+    let kategoriClass = '';
+    let kategoriBgClass = '';
+    
+    switch (data.kategori) {
+        case 'Sangat Baik':
+            kategoriClass = 'text-green-600';
+            kategoriBgClass = 'bg-green-100';
+            break;
+        case 'Baik':
+            kategoriClass = 'text-blue-600';
+            kategoriBgClass = 'bg-blue-100';
+            break;
+        case 'Cukup':
+            kategoriClass = 'text-yellow-600';
+            kategoriBgClass = 'bg-yellow-100';
+            break;
+        case 'Kurang':
+            kategoriClass = 'text-red-600';
+            kategoriBgClass = 'bg-red-100';
+            break;
+        default:
+            kategoriClass = 'text-gray-600';
+            kategoriBgClass = 'bg-gray-100';
+    }
 
-            const safeData = {
-                nama_siswa: data.nama_lengkap || data.nama_siswa || 'Tidak diketahui',
-                kelas_sekolah: data.kelas_sekolah || '-',
-                tanggal_format: data.tanggal_format || new Date().toLocaleDateString('id-ID'),
-                nama_pelajaran: data.nama_pelajaran || '-',
-                tingkat: data.tingkat || '-',
-                jenis_kelas: data.jenis_kelas || '-',
-                total_score: data.total_score || 0,
-                kategori: data.kategori || 'Belum Dinilai',
-                persentase: data.persentase || 0,
-                willingness_learn: data.willingness_learn || 0,
-                problem_solving: data.problem_solving || 0,
-                critical_thinking: data.critical_thinking || 0,
-                concentration: data.concentration || 0,
-                independence: data.independence || 0,
-                catatan_guru: data.catatan_guru || '',
-                rekomendasi: data.rekomendasi || ''
-            };
+    // Data aman dengan default values
+    const safeData = {
+        id: data.id || 0,
+        nama_siswa: data.nama_lengkap || data.nama_siswa || 'Tidak diketahui',
+        kelas_sekolah: data.kelas_sekolah || '-',
+        tanggal_penilaian: data.tanggal_penilaian || '',
+        tanggal_format: data.tanggal_format || (data.tanggal_penilaian ? new Date(data.tanggal_penilaian).toLocaleDateString('id-ID') : '-'),
+        sesi_ke: data.sesi_ke || null,
+        nama_pelajaran: data.nama_pelajaran || '-',
+        tingkat: data.tingkat || '-',
+        jenis_kelas: data.jenis_kelas || '-',
+        total_score: data.total_score || 0,
+        kategori: data.kategori || 'Belum Dinilai',
+        persentase: data.persentase || 0,
+        willingness_learn: data.willingness_learn || 0,
+        problem_solving: data.problem_solving || 0,
+        critical_thinking: data.critical_thinking || 0,
+        concentration: data.concentration || 0,
+        independence: data.independence || 0,
+        catatan_guru: data.catatan_guru || '',
+        rekomendasi: data.rekomendasi || ''
+    };
 
-            return `
-                <div class="space-y-6">
-                    <div class="bg-blue-50 p-4 rounded-lg">
-                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
-                            <div>
-                                <h3 class="text-xl font-bold text-gray-800">${escapeHtml(safeData.nama_siswa)}</h3>
-                                <p class="text-gray-600">Kelas: ${escapeHtml(safeData.kelas_sekolah)}</p>
-                                <p class="text-gray-600">${escapeHtml(safeData.tanggal_format)}</p>
-                            </div>
-                            <div class="mt-2 md:mt-0">
-                                <span class="px-3 py-1 rounded-full text-sm font-medium ${kategoriBgClass} ${kategoriClass}">
-                                    ${escapeHtml(safeData.kategori)}
-                                </span>
-                            </div>
-                        </div>
-                        <div class="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
-                            <p class="text-sm text-gray-700">
-                                <span class="font-medium">Mata Pelajaran:</span> ${escapeHtml(safeData.nama_pelajaran)}
-                            </p>
-                            <p class="text-sm text-gray-700">
-                                <span class="font-medium">Tingkat:</span> ${escapeHtml(safeData.tingkat)}
-                            </p>
-                            <p class="text-sm text-gray-700">
-                                <span class="font-medium">Jenis Kelas:</span> ${escapeHtml(safeData.jenis_kelas)}
-                            </p>
-                        </div>
-                    </div>
-
-                    <div class="text-center p-4 md:p-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg">
-                        <h4 class="text-lg font-semibold text-gray-700 mb-2">Total Skor</h4>
-                        <div class="text-4xl md:text-5xl font-bold text-blue-600">${safeData.total_score}/50</div>
-                        <div class="mt-2 text-gray-600 text-sm md:text-base">Nilai rata-rata per indikator: ${(safeData.total_score / 5).toFixed(1)}/10</div>
-                    </div>
-
+    return `
+        <div class="space-y-6">
+            <!-- Header Informasi Siswa -->
+            <div class="bg-blue-50 p-4 rounded-lg">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
                     <div>
-                        <h4 class="text-lg font-semibold text-gray-800 mb-4">Detail Indikator</h4>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-                            ${renderIndicator('Willingness to Learn', safeData.willingness_learn)}
-                            ${renderIndicator('Problem Solving', safeData.problem_solving)}
-                            ${renderIndicator('Critical Thinking', safeData.critical_thinking)}
-                            ${renderIndicator('Concentration', safeData.concentration)}
-                            ${renderIndicator('Independence', safeData.independence)}
-                        </div>
+                        <h3 class="text-xl font-bold text-gray-800">${escapeHtml(safeData.nama_siswa)}</h3>
+                        <p class="text-gray-600">Kelas: ${escapeHtml(safeData.kelas_sekolah)}</p>
+                        <p class="text-gray-600">${safeData.tanggal_format}</p>
                     </div>
-
-                    ${safeData.catatan_guru ? `
-                    <div>
-                        <h4 class="text-lg font-semibold text-gray-800 mb-2">Catatan Guru</h4>
-                        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
-                            <p class="text-gray-700">${escapeHtml(safeData.catatan_guru)}</p>
-                        </div>
-                    </div>
-                    ` : ''}
-
-                    ${safeData.rekomendasi ? `
-                    <div>
-                        <h4 class="text-lg font-semibold text-gray-800 mb-2">Rekomendasi</h4>
-                        <div class="bg-green-50 border-l-4 border-green-400 p-4 rounded">
-                            <p class="text-gray-700">${escapeHtml(safeData.rekomendasi)}</p>
-                        </div>
-                    </div>
-                    ` : ''}
-
-                    <div class="text-xs text-gray-400 border-t pt-2">
-                        <p>ID Penilaian: ${data.id}</p>
+                    <div class="mt-2 md:mt-0">
+                        <span class="px-3 py-1 rounded-full text-sm font-medium ${kategoriBgClass} ${kategoriClass}">
+                            ${escapeHtml(safeData.kategori)}
+                        </span>
                     </div>
                 </div>
-            `;
-        }
-
-        function renderIndicator(label, value) {
-            const percentage = (value / 10) * 100;
-            let color = '';
-            if (value >= 9) color = 'bg-green-500';
-            else if (value >= 7) color = 'bg-blue-500';
-            else if (value >= 5) color = 'bg-yellow-500';
-            else color = 'bg-red-500';
-
-            return `
-                <div class="bg-white border border-gray-200 rounded-lg p-3 md:p-4">
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="font-medium text-gray-700 text-sm md:text-base">${label}</span>
-                        <span class="font-bold text-gray-900 text-sm md:text-base">${value}/10</span>
-                    </div>
-                    <div class="w-full bg-gray-200 rounded-full h-2">
-                        <div class="${color} h-2 rounded-full" style="width: ${percentage}%"></div>
-                    </div>
+                <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <p class="text-sm text-gray-700">
+                        <span class="font-medium">Sesi:</span> ${safeData.sesi_ke ? 'Sesi ' + safeData.sesi_ke : '-'}
+                    </p>
+                    <p class="text-sm text-gray-700">
+                        <span class="font-medium">Mata Pelajaran:</span> ${escapeHtml(safeData.nama_pelajaran)}
+                    </p>
+                    <p class="text-sm text-gray-700">
+                        <span class="font-medium">Tingkat Bimbel:</span> ${escapeHtml(safeData.tingkat)}
+                    </p>
+                    <p class="text-sm text-gray-700">
+                        <span class="font-medium">Jenis Kelas:</span> ${escapeHtml(safeData.jenis_kelas)}
+                    </p>
                 </div>
-            `;
-        }
+            </div>
+
+            <!-- Total Skor -->
+            <div class="text-center p-4 md:p-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg">
+                <h4 class="text-lg font-semibold text-gray-700 mb-2">Total Skor</h4>
+                <div class="text-4xl md:text-5xl font-bold text-blue-600">${safeData.total_score}/50</div>
+                <div class="mt-2 text-gray-600 text-sm md:text-base">
+                    Nilai rata-rata per indikator: ${(safeData.total_score / 5).toFixed(1)}/10
+                </div>
+                <div class="mt-1 text-sm font-medium">
+                    Persentase: ${safeData.persentase}%
+                </div>
+            </div>
+
+            <!-- Detail Indikator -->
+            <div>
+                <h4 class="text-lg font-semibold text-gray-800 mb-4">Detail Indikator Penilaian</h4>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+                    ${renderIndicatorDetail('Willingness to Learn', safeData.willingness_learn)}
+                    ${renderIndicatorDetail('Problem Solving', safeData.problem_solving)}
+                    ${renderIndicatorDetail('Critical Thinking', safeData.critical_thinking)}
+                    ${renderIndicatorDetail('Concentration', safeData.concentration)}
+                    ${renderIndicatorDetail('Independence', safeData.independence)}
+                </div>
+            </div>
+
+            <!-- Catatan Guru -->
+            ${safeData.catatan_guru ? `
+            <div>
+                <h4 class="text-lg font-semibold text-gray-800 mb-2">Catatan Guru</h4>
+                <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
+                    <p class="text-gray-700">${escapeHtml(safeData.catatan_guru)}</p>
+                </div>
+            </div>
+            ` : ''}
+
+            <!-- Rekomendasi -->
+            ${safeData.rekomendasi ? `
+            <div>
+                <h4 class="text-lg font-semibold text-gray-800 mb-2">Rekomendasi</h4>
+                <div class="bg-green-50 border-l-4 border-green-400 p-4 rounded">
+                    <p class="text-gray-700">${escapeHtml(safeData.rekomendasi)}</p>
+                </div>
+            </div>
+            ` : ''}
+
+            <!-- Footer Info -->
+            <div class="text-xs text-gray-400 border-t pt-2">
+                <p>ID Penilaian: ${safeData.id}</p>
+                <p>Tanggal Input: ${data.created_at ? new Date(data.created_at).toLocaleString('id-ID') : '-'}</p>
+            </div>
+        </div>
+    `;
+}
+
+function renderIndicatorDetail(label, value) {
+    const percentage = (value / 10) * 100;
+    let color = '';
+    if (value >= 9) color = 'bg-green-500';
+    else if (value >= 7) color = 'bg-blue-500';
+    else if (value >= 5) color = 'bg-yellow-500';
+    else color = 'bg-red-500';
+
+    return `
+        <div class="bg-white border border-gray-200 rounded-lg p-3 md:p-4">
+            <div class="flex justify-between items-center mb-2">
+                <span class="font-medium text-gray-700 text-sm md:text-base">${label}</span>
+                <span class="font-bold text-gray-900 text-sm md:text-base">${value}/10</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-2">
+                <div class="${color} h-2 rounded-full" style="width: ${percentage}%"></div>
+            </div>
+        </div>
+    `;
+}
 
         function escapeHtml(unsafe) {
             if (!unsafe) return '';

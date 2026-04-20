@@ -4,8 +4,8 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
 require_once '../includes/config.php';
-require_once '../config/menu.php'; 
-require_once '../includes/menu_functions.php'; 
+require_once '../config/menu.php';
+require_once '../includes/menu_functions.php';
 
 // CEK LOGIN & ROLE
 if (!isset($_SESSION['user_id'])) {
@@ -73,14 +73,14 @@ try {
                 INNER JOIN pendaftaran_siswa ps ON jb.pendaftaran_id = ps.id AND ps.status = 'aktif'
                 INNER JOIN siswa s ON ps.siswa_id = s.id AND s.status = 'aktif'
                 WHERE smg.guru_id = ? AND smg.status != 'tidak_aktif'";
-        
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("i", $guru_id);
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result && $row = $result->fetch_assoc()) {
-                    $statistics['total_siswa'] = (int)$row['total'];
+                    $statistics['total_siswa'] = (int) $row['total'];
                 }
             }
             $stmt->close();
@@ -94,14 +94,14 @@ try {
                 FROM jadwal_belajar jb
                 INNER JOIN sesi_mengajar_guru smg ON jb.sesi_guru_id = smg.id
                 WHERE smg.guru_id = ? AND jb.status = 'aktif'";
-        
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("i", $guru_id);
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result && $row = $result->fetch_assoc()) {
-                    $statistics['total_jadwal_sesi'] = (int)$row['total'];
+                    $statistics['total_jadwal_sesi'] = (int) $row['total'];
                 }
             }
             $stmt->close();
@@ -113,16 +113,16 @@ try {
                        SUM(kapasitas_maks) as total_maks
                 FROM sesi_mengajar_guru 
                 WHERE guru_id = ? AND status != 'tidak_aktif'";
-        
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("i", $guru_id);
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result && $row = $result->fetch_assoc()) {
-                    $statistics['total_sesi_mengajar'] = (int)$row['total'];
-                    $statistics['kapasitas_terisi'] = (int)$row['total_terisi'];
-                    $statistics['kapasitas_total'] = (int)$row['total_maks'];
+                    $statistics['total_sesi_mengajar'] = (int) $row['total'];
+                    $statistics['kapasitas_terisi'] = (int) $row['total_terisi'];
+                    $statistics['kapasitas_total'] = (int) $row['total_maks'];
                 }
             }
             $stmt->close();
@@ -159,7 +159,7 @@ try {
                     AND smg.status != 'tidak_aktif'
                 GROUP BY smg.id
                 ORDER BY smg.jam_mulai";
-        
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("is", $guru_id, $hari_ini_id);
@@ -182,7 +182,7 @@ try {
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result && $row = $result->fetch_assoc()) {
-                    $statistics['total_penilaian'] = (int)$row['total'];
+                    $statistics['total_penilaian'] = (int) $row['total'];
                 }
             }
             $stmt->close();
@@ -193,14 +193,14 @@ try {
         $sql = "SELECT COUNT(*) as total 
                 FROM penilaian_siswa 
                 WHERE guru_id = ? AND DATE_FORMAT(tanggal_penilaian, '%Y-%m') = ?";
-        
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("is", $guru_id, $bulan_ini);
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result && $row = $result->fetch_assoc()) {
-                    $statistics['penilaian_bulan_ini'] = (int)$row['total'];
+                    $statistics['penilaian_bulan_ini'] = (int) $row['total'];
                 }
             }
             $stmt->close();
@@ -216,7 +216,7 @@ try {
             if ($stmt->execute()) {
                 $result = $stmt->get_result();
                 if ($result && $row = $result->fetch_assoc()) {
-                    $statistics['rata_nilai'] = number_format((float)$row['rata_nilai'], 1);
+                    $statistics['rata_nilai'] = number_format((float) $row['rata_nilai'], 1);
                 }
             }
             $stmt->close();
@@ -237,7 +237,7 @@ try {
                 if ($result && $row = $result->fetch_assoc()) {
                     $statistics['siswa_terbaik'] = [
                         'nama_lengkap' => $row['nama_lengkap'] ?? '-',
-                        'total_score' => (int)($row['total_score'] ?? 0)
+                        'total_score' => (int) ($row['total_score'] ?? 0)
                     ];
                 }
             }
@@ -253,7 +253,7 @@ try {
                 WHERE ps.guru_id = ?
                 ORDER BY ps.tanggal_penilaian DESC 
                 LIMIT 5";
-        
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("i", $guru_id);
@@ -288,7 +288,7 @@ try {
                     )
                 ORDER BY s.nama_lengkap
                 LIMIT 5";
-        
+
         $stmt = $conn->prepare($sql);
         if ($stmt) {
             $stmt->bind_param("iis", $guru_id, $guru_id, $bulan_ini);
@@ -328,29 +328,36 @@ if ($statistics['kapasitas_total'] > 0) {
         .stat-card {
             transition: transform 0.3s, box-shadow 0.3s;
         }
+
         .stat-card:hover {
             transform: translateY(-5px);
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
         }
+
         .progress-bar {
             transition: width 0.5s ease-in-out;
         }
+
         .dropdown-submenu {
             display: none;
             max-height: 500px;
             overflow: hidden;
             transition: max-height 0.3s ease;
         }
+
         .dropdown-submenu[style*="display: block"] {
             display: block;
         }
+
         .dropdown-toggle.open .arrow {
             transform: rotate(90deg);
         }
+
         .menu-item.active {
             background-color: rgba(255, 255, 255, 0.1);
             border-left: 4px solid #60A5FA;
         }
+
         #mobileMenu {
             position: fixed;
             top: 0;
@@ -363,9 +370,11 @@ if ($statistics['kapasitas_total'] > 0) {
             box-shadow: 5px 0 25px rgba(0, 0, 0, 0.2);
             background-color: #1e40af;
         }
+
         #mobileMenu.menu-open {
             transform: translateX(0);
         }
+
         .menu-overlay {
             display: none;
             position: fixed;
@@ -376,19 +385,41 @@ if ($statistics['kapasitas_total'] > 0) {
             background-color: rgba(0, 0, 0, 0.5);
             z-index: 1099;
         }
+
         .menu-overlay.active {
             display: block;
         }
+
         @media (min-width: 768px) {
-            .desktop-sidebar { display: block; }
-            .mobile-header { display: none; }
-            #mobileMenu { display: none; }
-            .menu-overlay { display: none !important; }
+            .desktop-sidebar {
+                display: block;
+            }
+
+            .mobile-header {
+                display: none;
+            }
+
+            #mobileMenu {
+                display: none;
+            }
+
+            .menu-overlay {
+                display: none !important;
+            }
         }
+
         @media (max-width: 767px) {
-            .desktop-sidebar { display: none; }
-            .stat-card { padding: 1rem !important; }
-            .quick-action-btn { padding: 0.75rem !important; }
+            .desktop-sidebar {
+                display: none;
+            }
+
+            .stat-card {
+                padding: 1rem !important;
+            }
+
+            .quick-action-btn {
+                padding: 0.75rem !important;
+            }
         }
     </style>
 </head>
@@ -411,7 +442,8 @@ if ($statistics['kapasitas_total'] > 0) {
                     <p class="font-medium"><?php echo htmlspecialchars($full_name); ?></p>
                     <p class="text-sm text-blue-300">Guru</p>
                     <?php if (!empty($guru_detail['bidang_keahlian'])): ?>
-                        <p class="text-xs text-blue-200"><?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?></p>
+                        <p class="text-xs text-blue-200"><?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?>
+                        </p>
                     <?php endif; ?>
                 </div>
             </div>
@@ -467,7 +499,9 @@ if ($statistics['kapasitas_total'] > 0) {
                         <p class="font-medium"><?php echo htmlspecialchars($full_name); ?></p>
                         <p class="text-sm text-blue-300">Guru</p>
                         <?php if (!empty($guru_detail['bidang_keahlian'])): ?>
-                            <p class="text-xs text-blue-200"><?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?></p>
+                            <p class="text-xs text-blue-200">
+                                <?php echo htmlspecialchars($guru_detail['bidang_keahlian']); ?>
+                            </p>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -496,7 +530,8 @@ if ($statistics['kapasitas_total'] > 0) {
                     <?php endif; ?>
                 </div>
                 <div class="mt-2 md:mt-0 text-right">
-                    <span class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-800">
+                    <span
+                        class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-800">
                         <i class="fas fa-calendar-alt mr-2"></i>
                         <?php echo date('d F Y'); ?>
                     </span>
@@ -507,8 +542,8 @@ if ($statistics['kapasitas_total'] > 0) {
         <!-- Content -->
         <div class="container mx-auto p-4 md:p-6">
             <!-- Stats Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <!-- Total Siswa Diajar -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <!-- Total Siswa Diajar
                 <div class="stat-card bg-white rounded-xl p-5 shadow">
                     <div class="flex items-center">
                         <div class="p-3 bg-blue-100 rounded-lg mr-4">
@@ -522,7 +557,7 @@ if ($statistics['kapasitas_total'] > 0) {
                             <p class="text-xs text-gray-500">Siswa</p>
                         </div>
                     </div>
-                </div>
+                </div> -->
 
                 <!-- Total Pertemuan -->
                 <div class="stat-card bg-white rounded-xl p-5 shadow">
@@ -551,7 +586,8 @@ if ($statistics['kapasitas_total'] > 0) {
                             <h3 class="text-2xl font-bold text-gray-800">
                                 <?php echo number_format($statistics['total_penilaian']); ?>
                             </h3>
-                            <p class="text-xs text-gray-500"><?php echo $statistics['penilaian_bulan_ini']; ?> bulan ini</p>
+                            <p class="text-xs text-gray-500"><?php echo $statistics['penilaian_bulan_ini']; ?> bulan ini
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -650,10 +686,14 @@ if ($statistics['kapasitas_total'] > 0) {
                                                     <div class="h-10 w-10 rounded-full 
                                                         <?php
                                                         $score = $penilaian['total_score'] ?? 0;
-                                                        if ($score >= 40) echo 'bg-green-100 text-green-800';
-                                                        elseif ($score >= 30) echo 'bg-blue-100 text-blue-800';
-                                                        elseif ($score >= 20) echo 'bg-yellow-100 text-yellow-800';
-                                                        else echo 'bg-red-100 text-red-800';
+                                                        if ($score >= 40)
+                                                            echo 'bg-green-100 text-green-800';
+                                                        elseif ($score >= 30)
+                                                            echo 'bg-blue-100 text-blue-800';
+                                                        elseif ($score >= 20)
+                                                            echo 'bg-yellow-100 text-yellow-800';
+                                                        else
+                                                            echo 'bg-red-100 text-red-800';
                                                         ?> flex items-center justify-center">
                                                         <span class="text-xs font-bold"><?php echo $score; ?></span>
                                                     </div>
@@ -663,8 +703,9 @@ if ($statistics['kapasitas_total'] > 0) {
                                                         <?php echo htmlspecialchars($penilaian['nama_siswa'] ?? 'N/A'); ?>
                                                     </p>
                                                     <p class="text-sm text-gray-500 truncate">
-                                                        Kelas: <?php echo htmlspecialchars($penilaian['kelas'] ?? 'N/A'); ?> | 
-                                                        Tingkat: <?php echo htmlspecialchars($penilaian['tingkat_bimbel'] ?? 'N/A'); ?>
+                                                        Kelas: <?php echo htmlspecialchars($penilaian['kelas'] ?? 'N/A'); ?> |
+                                                        Tingkat:
+                                                        <?php echo htmlspecialchars($penilaian['tingkat_bimbel'] ?? 'N/A'); ?>
                                                     </p>
                                                 </div>
                                                 <div class="text-right">
@@ -688,7 +729,8 @@ if ($statistics['kapasitas_total'] > 0) {
                             </ul>
                         </div>
                         <div class="mt-4 text-center">
-                            <a href="riwayat.php" class="inline-flex items-center text-sm text-blue-600 hover:text-blue-900">
+                            <a href="riwayat.php"
+                                class="inline-flex items-center text-sm text-blue-600 hover:text-blue-900">
                                 <i class="fas fa-eye mr-1"></i> Lihat semua penilaian
                             </a>
                         </div>
@@ -754,7 +796,8 @@ if ($statistics['kapasitas_total'] > 0) {
                     <i class="fas fa-bolt mr-2"></i> Aksi Cepat
                 </h3>
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <a href="inputNilai.php" class="flex flex-col items-center justify-center p-6 bg-blue-50 hover:bg-blue-100 rounded-lg transition duration-300">
+                    <a href="inputNilai.php"
+                        class="flex flex-col items-center justify-center p-6 bg-blue-50 hover:bg-blue-100 rounded-lg transition duration-300">
                         <div class="h-12 w-12 rounded-full bg-blue-600 flex items-center justify-center mb-3">
                             <i class="fas fa-plus-circle text-white text-xl"></i>
                         </div>
@@ -762,7 +805,8 @@ if ($statistics['kapasitas_total'] > 0) {
                         <span class="text-xs text-gray-500 mt-1">Penilaian baru</span>
                     </a>
 
-                    <a href="dataSiswa.php" class="flex flex-col items-center justify-center p-6 bg-green-50 hover:bg-green-100 rounded-lg transition duration-300">
+                    <a href="dataSiswa.php"
+                        class="flex flex-col items-center justify-center p-6 bg-green-50 hover:bg-green-100 rounded-lg transition duration-300">
                         <div class="h-12 w-12 rounded-full bg-green-600 flex items-center justify-center mb-3">
                             <i class="fas fa-users text-white text-xl"></i>
                         </div>
@@ -770,7 +814,8 @@ if ($statistics['kapasitas_total'] > 0) {
                         <span class="text-xs text-gray-500 mt-1">Lihat siswa</span>
                     </a>
 
-                    <a href="absensiGuru.php" class="flex flex-col items-center justify-center p-6 bg-orange-50 hover:bg-orange-100 rounded-lg transition duration-300">
+                    <a href="absensiGuru.php"
+                        class="flex flex-col items-center justify-center p-6 bg-orange-50 hover:bg-orange-100 rounded-lg transition duration-300">
                         <div class="h-12 w-12 rounded-full bg-orange-600 flex items-center justify-center mb-3">
                             <i class="fas fa-calendar-check text-white text-xl"></i>
                         </div>
@@ -778,7 +823,8 @@ if ($statistics['kapasitas_total'] > 0) {
                         <span class="text-xs text-gray-500 mt-1">Input kehadiran</span>
                     </a>
 
-                    <a href="riwayat.php" class="flex flex-col items-center justify-center p-6 bg-purple-50 hover:bg-purple-100 rounded-lg transition duration-300">
+                    <a href="riwayat.php"
+                        class="flex flex-col items-center justify-center p-6 bg-purple-50 hover:bg-purple-100 rounded-lg transition duration-300">
                         <div class="h-12 w-12 rounded-full bg-purple-600 flex items-center justify-center mb-3">
                             <i class="fas fa-history text-white text-xl"></i>
                         </div>
@@ -854,16 +900,16 @@ if ($statistics['kapasitas_total'] > 0) {
                 }
             });
         });
-        
+
         document.querySelectorAll('.dropdown-toggle').forEach(toggle => {
-            toggle.addEventListener('click', function(e) {
+            toggle.addEventListener('click', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
-                
+
                 const dropdownGroup = this.closest('.mb-1');
                 const submenu = dropdownGroup.querySelector('.dropdown-submenu');
                 const arrow = this.querySelector('.arrow');
-                
+
                 if (submenu.style.display === 'block') {
                     submenu.style.display = 'none';
                     arrow.style.transform = 'rotate(0deg)';
@@ -876,7 +922,7 @@ if ($statistics['kapasitas_total'] > 0) {
                         t.classList.remove('open');
                         t.querySelector('.arrow').style.transform = 'rotate(0deg)';
                     });
-                    
+
                     submenu.style.display = 'block';
                     arrow.style.transform = 'rotate(-90deg)';
                     this.classList.add('open');
@@ -884,7 +930,7 @@ if ($statistics['kapasitas_total'] > 0) {
             });
         });
 
-        document.addEventListener('click', function(e) {
+        document.addEventListener('click', function (e) {
             if (!e.target.closest('.mb-1')) {
                 document.querySelectorAll('.dropdown-submenu').forEach(submenu => {
                     submenu.style.display = 'none';
@@ -914,4 +960,5 @@ if ($statistics['kapasitas_total'] > 0) {
         console.log('Jadwal Hari Ini:', <?php echo json_encode($jadwal_hari_ini); ?>);
     </script>
 </body>
+
 </html>

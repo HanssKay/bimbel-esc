@@ -61,11 +61,10 @@ if (isset($_SESSION['error_message'])) {
 }
 
 // ============================================
-// AMBIL DATA SEMUA SISWA AKTIF (TANPA FILTER JADWAL)
+// AMBIL DATA SEMUA SISWA AKTIF
 // ============================================
 if ($guru_id > 0) {
     try {
-        // Ambil semua siswa aktif (TANPA JOIN ke jadwal)
         $sql_siswa_list = "SELECT DISTINCT 
                                 s.id, 
                                 s.nama_lengkap,
@@ -85,20 +84,17 @@ if ($guru_id > 0) {
             $siswa_options[] = $row;
         }
         $stmt->close();
-        
-        error_log("Jumlah siswa: " . count($siswa_options));
     } catch (Exception $e) {
         $error_message = "❌ Error mengambil data siswa: " . $e->getMessage();
     }
 }
 
 // ============================================
-// AMBIL DATA MATA PELAJARAN SISWA (SEMUA MATA PELAJARAN)
+// AMBIL DATA MATA PELAJARAN SISWA
 // ============================================
 $mata_pelajaran_list = [];
 if ($siswa_id > 0) {
     try {
-        // Ambil semua mata pelajaran siswa (TANPA filter guru_id)
         $sql_mapel = "SELECT DISTINCT
                         sp.id as siswa_pelajaran_id,
                         sp.nama_pelajaran,
@@ -145,7 +141,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_siswa_list') {
     $search = isset($_GET['search']) ? trim($_GET['search']) : '';
     $filtered_siswa = [];
     
-    // Ambil semua siswa aktif (TANPA filter guru_id dan jadwal)
     $sql_search = "SELECT DISTINCT 
                         s.id, 
                         s.nama_lengkap,
@@ -190,7 +185,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_pelajaran_by_siswa' && isset($
     $pelajaran_data = [];
     
     if ($siswa_id > 0) {
-        // Ambil semua mata pelajaran siswa (TANPA filter guru_id)
         $sql_pelajaran = "SELECT DISTINCT
                             sp.id as siswa_pelajaran_id,
                             sp.nama_pelajaran,
@@ -228,6 +222,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
     
     $siswa_id_post = intval($_POST['siswa_id'] ?? 0);
     $siswa_pelajaran_id = intval($_POST['siswa_pelajaran_id'] ?? 0);
+    $sesi_ke = !empty($_POST['sesi_ke']) ? intval($_POST['sesi_ke']) : null;
     
     // VALIDASI
     if ($siswa_id_post == 0 || $siswa_pelajaran_id == 0) {
@@ -236,6 +231,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
         exit();
     } elseif ($guru_id == 0) {
         $_SESSION['error_message'] = "❌ Data guru tidak valid. Hubungi administrator.";
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit();
+    } elseif ($sesi_ke == null || $sesi_ke < 1) {
+        $_SESSION['error_message'] = "❌ Sesi/pertemuan harus diisi dengan angka minimal 1!";
         header('Location: ' . $_SERVER['PHP_SELF']);
         exit();
     } else {
@@ -289,43 +288,55 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             }
 
             $tanggal = $_POST['tanggal_penilaian'] ?? date('Y-m-d');
-            $periode = trim($_POST['periode_penilaian'] ?? '');
+            
+            // Auto generate periode dari tanggal
+            $bulanIndonesia = [
+                'January' => 'Januari', 'February' => 'Februari', 'March' => 'Maret',
+                'April' => 'April', 'May' => 'Mei', 'June' => 'Juni',
+                'July' => 'Juli', 'August' => 'Agustus', 'September' => 'September',
+                'October' => 'Oktober', 'November' => 'November', 'December' => 'Desember'
+            ];
+            $bulanInggris = date('F', strtotime($tanggal));
+            $periode = $bulanIndonesia[$bulanInggris] . ' ' . date('Y', strtotime($tanggal));
+            
             $catatan = trim($_POST['catatan_guru'] ?? '');
             $rekomendasi = trim($_POST['rekomendasi'] ?? '');
 
-            // Insert ke tabel penilaian_siswa
+            // Insert ke tabel penilaian_siswa (dengan sesi_ke)
             $sql = "INSERT INTO penilaian_siswa (
-                        siswa_id, pendaftaran_id, siswa_pelajaran_id, guru_id, tanggal_penilaian, periode_penilaian,
+                        siswa_id, pendaftaran_id, siswa_pelajaran_id, guru_id, 
+                        tanggal_penilaian, sesi_ke, periode_penilaian,
                         willingness_learn, problem_solving, critical_thinking, 
                         concentration, independence, total_score, persentase, kategori,
                         catatan_guru, rekomendasi, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
 
             $stmt = $conn->prepare($sql);
             
             if ($stmt) {
-                $stmt->bind_param(
-                    "iiiissiiiiiiisss",
-                    $siswa_id_post,
-                    $pendaftaran_id,
-                    $siswa_pelajaran_id,
-                    $guru_id,
-                    $tanggal,
-                    $periode,
-                    $nilai_values['willingness_learn'],
-                    $nilai_values['problem_solving'],
-                    $nilai_values['critical_thinking'],
-                    $nilai_values['concentration'],
-                    $nilai_values['independence'],
-                    $total_score,
-                    $persentase,
-                    $kategori,
-                    $catatan,
-                    $rekomendasi
-                );
+               $stmt->bind_param(
+    "iiiisiiiiiiiiisss",
+    $siswa_id_post,
+    $pendaftaran_id,
+    $siswa_pelajaran_id,
+    $guru_id,
+    $tanggal,
+    $sesi_ke,
+    $periode,
+    $nilai_values['willingness_learn'],
+    $nilai_values['problem_solving'],
+    $nilai_values['critical_thinking'],
+    $nilai_values['concentration'],
+    $nilai_values['independence'],
+    $total_score,
+    $persentase,
+    $kategori,
+    $catatan,
+    $rekomendasi
+);
 
                 if ($stmt->execute()) {
-                    $_SESSION['success_message'] = "✅ Penilaian berhasil disimpan!";
+                    $_SESSION['success_message'] = "✅ Penilaian untuk Sesi $sesi_ke berhasil disimpan!";
                     header('Location: ' . $_SERVER['PHP_SELF'] . '?siswa_id=' . $siswa_id_post);
                     exit();
                 } else {
@@ -344,6 +355,64 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
         }
     }
 }
+
+// Ambil sesi terakhir di BULAN YANG SAMA dengan tanggal hari ini
+$last_sesi = 0;
+$bulan_saat_ini = date('Y-m'); // misal: 2026-04
+
+if ($siswa_id > 0 && !empty($mata_pelajaran_list)) {
+    $first_mapel_id = $mata_pelajaran_list[0]['siswa_pelajaran_id'] ?? 0;
+    if ($first_mapel_id > 0) {
+        $sql_last_sesi = "SELECT MAX(sesi_ke) as last_sesi 
+                          FROM penilaian_siswa 
+                          WHERE siswa_id = ? 
+                            AND siswa_pelajaran_id = ?
+                            AND DATE_FORMAT(tanggal_penilaian, '%Y-%m') = ?";
+        $stmt = $conn->prepare($sql_last_sesi);
+        $stmt->bind_param("iis", $siswa_id, $first_mapel_id, $bulan_saat_ini);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        if ($row = $result->fetch_assoc()) {
+            $last_sesi = $row['last_sesi'] ?? 0;
+        }
+        $stmt->close();
+    }
+}
+
+// ============================================
+// AJAX Handler untuk mengambil sesi terakhir (berdasarkan bulan)
+// ============================================
+if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_last_sesi' && isset($_GET['siswa_id']) && isset($_GET['pelajaran_id'])) {
+    header('Content-Type: application/json');
+    
+    $siswa_id = intval($_GET['siswa_id']);
+    $pelajaran_id = intval($_GET['pelajaran_id']);
+    $bulan_saat_ini = date('Y-m');
+    
+    $last_sesi = 0;
+    
+    if ($siswa_id > 0 && $pelajaran_id > 0) {
+        $sql = "SELECT MAX(sesi_ke) as last_sesi 
+                FROM penilaian_siswa 
+                WHERE siswa_id = ? 
+                  AND siswa_pelajaran_id = ?
+                  AND DATE_FORMAT(tanggal_penilaian, '%Y-%m') = ?";
+        $stmt = $conn->prepare($sql);
+        if ($stmt) {
+            $stmt->bind_param("iis", $siswa_id, $pelajaran_id, $bulan_saat_ini);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            if ($row = $result->fetch_assoc()) {
+                $last_sesi = $row['last_sesi'] ?? 0;
+            }
+            $stmt->close();
+        }
+    }
+    
+    echo json_encode(['last_sesi' => $last_sesi]);
+    exit();
+}
+
 ?>
 
 <!DOCTYPE html>
@@ -626,6 +695,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             border-color: #ef4444;
             background-color: #fef2f2;
         }
+        
+        .sesi-recommendation {
+            font-size: 0.75rem;
+            color: #059669;
+            margin-top: 0.25rem;
+        }
     </style>
 </head>
 
@@ -716,7 +791,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
                 <div>
                     <h1 class="text-2xl font-bold text-gray-800">Input Penilaian Siswa</h1>
-                    <p class="text-gray-600">Isi form penilaian untuk mata pelajaran yang Anda ajar</p>
+                    <p class="text-gray-600">Isi form penilaian untuk setiap sesi/pertemuan</p>
                 </div>
                 <div class="mt-2 md:mt-0 text-right">
                     <a href="riwayat.php" class="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-800 hover:bg-blue-200">
@@ -806,7 +881,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
 
                     <!-- Pilih Mata Pelajaran -->
                     <div>
-                        <label class="block text-gray-700 font-medium mb-2">Pilih Mata Pelajaran *</label>
+                        <label class="block text-gray-700 font-medium mb-2">Pilih Mata Pelajaran <span class="text-red-500">*</span></label>
                         <select name="siswa_pelajaran_id" required
                             class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                             id="selectPelajaran">
@@ -823,22 +898,31 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                         <div id="loadingPelajaran" class="hidden text-sm text-gray-500 mt-1">
                             <i class="fas fa-spinner fa-spin mr-1"></i> Memuat mata pelajaran...
                         </div>
-                        <p class="text-xs text-gray-500 mt-1">
-                            <i class="fas fa-info-circle"></i> Menampilkan semua mata pelajaran yang dimiliki siswa
-                        </p>
                     </div>
 
+                    <!-- Tanggal Penilaian -->
                     <div>
-                        <label class="block text-gray-700 font-medium mb-2">Tanggal Penilaian *</label>
+                        <label class="block text-gray-700 font-medium mb-2">Tanggal Penilaian <span class="text-red-500">*</span></label>
                         <input type="date" name="tanggal_penilaian" required value="<?php echo date('Y-m-d'); ?>"
-                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            id="tanggalPenilaian">
                     </div>
 
+                    <!-- Sesi Ke (PENGANTI Periode) -->
                     <div>
-                        <label class="block text-gray-700 font-medium mb-2">Periode Penilaian</label>
-                        <input type="text" name="periode_penilaian" value="<?php echo date('F Y'); ?>"
-                            placeholder="Contoh: Bulan Januari 2024"
-                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <label class="block text-gray-700 font-medium mb-2">
+                            Sesi / Pertemuan Ke- <span class="text-red-500">*</span>
+                        </label>
+                        <input type="number" name="sesi_ke" id="sesiKe" min="1" max="100" required
+                            value="<?php echo $last_sesi > 0 ? $last_sesi + 1 : 1; ?>"
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="Contoh: 1, 2, 3...">
+                        <?php if ($last_sesi > 0): ?>
+                        <p class="sesi-recommendation">
+                            <i class="fas fa-info-circle mr-1"></i> 
+                            Sesi terakhir: <?php echo $last_sesi; ?> | Rekomendasi sesi berikutnya: <?php echo $last_sesi + 1; ?>
+                        </p>
+                        <?php endif; ?>
                     </div>
                 </div>
 
@@ -900,7 +984,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                             <div class="indicator-label">Willingness to Learn</div>
                             <div class="indicator-desc">Kemauan dan antusiasme untuk belajar hal baru</div>
                             <div class="flex items-center justify-between">
-                                <input type="number" name="willingness_learn" min="1" max="10" step="1" value=""
+                                <input type="number" name="willingness_learn" min="1" max="10" step="1" value="0"
                                     class="rating-input" required oninput="validateInput(this)">
                                 <div class="text-sm text-gray-500">Skala 1-10</div>
                             </div>
@@ -911,7 +995,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                             <div class="indicator-label">Problem Solving</div>
                             <div class="indicator-desc">Kemampuan menganalisis dan memecahkan masalah</div>
                             <div class="flex items-center justify-between">
-                                <input type="number" name="problem_solving" min="1" max="10" step="1" value=""
+                                <input type="number" name="problem_solving" min="1" max="10" step="1" value="0"
                                     class="rating-input" required oninput="validateInput(this)">
                                 <div class="text-sm text-gray-500">Skala 1-10</div>
                             </div>
@@ -922,7 +1006,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                             <div class="indicator-label">Critical Thinking</div>
                             <div class="indicator-desc">Berpikir kritis, logis, dan analitis</div>
                             <div class="flex items-center justify-between">
-                                <input type="number" name="critical_thinking" min="1" max="10" step="1" value=""
+                                <input type="number" name="critical_thinking" min="1" max="10" step="1" value="0"
                                     class="rating-input" required oninput="validateInput(this)">
                                 <div class="text-sm text-gray-500">Skala 1-10</div>
                             </div>
@@ -933,7 +1017,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                             <div class="indicator-label">Concentration</div>
                             <div class="indicator-desc">Fokus dan konsentrasi selama pembelajaran</div>
                             <div class="flex items-center justify-between">
-                                <input type="number" name="concentration" min="1" max="10" step="1" value=""
+                                <input type="number" name="concentration" min="1" max="10" step="1" value="0"
                                     class="rating-input" required oninput="validateInput(this)">
                                 <div class="text-sm text-gray-500">Skala 1-10</div>
                             </div>
@@ -944,7 +1028,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                             <div class="indicator-label">Independence</div>
                             <div class="indicator-desc">Kemandirian dalam belajar dan menyelesaikan tugas</div>
                             <div class="flex items-center justify-between">
-                                <input type="number" name="independence" min="1" max="10" step="1" value=""
+                                <input type="number" name="independence" min="1" max="10" step="1" value="0"
                                     class="rating-input" required oninput="validateInput(this)">
                                 <div class="text-sm text-gray-500">Skala 1-10</div>
                             </div>
@@ -959,14 +1043,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                             <label class="block text-gray-700 font-medium mb-2">Catatan Guru</label>
                             <textarea name="catatan_guru" rows="3"
                                 class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                placeholder="Catatan khusus tentang perkembangan siswa..."></textarea>
+                                placeholder="Catatan khusus tentang perkembangan siswa pada sesi ini..."></textarea>
                         </div>
 
                         <div>
                             <label class="block text-gray-700 font-medium mb-2">Rekomendasi</label>
                             <textarea name="rekomendasi" rows="3"
                                 class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                placeholder="Rekomendasi untuk perbaikan berikutnya..."></textarea>
+                                placeholder="Rekomendasi untuk perbaikan pada sesi berikutnya..."></textarea>
                         </div>
                     </div>
 
@@ -1013,13 +1097,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                     <i class="fas fa-info-circle mr-2"></i> Informasi Sistem
                 </h3>
                 <ul class="text-sm text-green-700 space-y-1">
-                    <!-- <li>• ✅ <strong>Sistem Fleksibel!</strong> Anda dapat menilai siswa kapan saja, tanpa terikat jadwal</li> -->
-                    <li>• Sistem mengambil data <strong>semua siswa aktif</strong> (tidak hanya yang memiliki jadwal)</li>
-                    <li>• Menampilkan <strong>semua mata pelajaran</strong> yang dimiliki siswa</li>
+                    <li>• Penilaian dilakukan per <strong>sesi/pertemuan</strong> untuk memantau perkembangan siswa</li>
+                    <li>• Sistem akan merekomendasikan sesi berikutnya berdasarkan sesi terakhir yang dinilai</li>
                     <li>• Total maksimal skor: <strong>50</strong> (5 indikator × 10)</li>
                     <li>• Kategori: &lt;40% (Kurang), 40-59% (Cukup), 60-79% (Baik), ≥80% (Sangat Baik)</li>
-                    <li>• Data penilaian dapat dilihat di menu "Riwayat"</li>
-                    <!-- <li>• <strong>Guru pengganti</strong> bisa langsung input nilai tanpa perlu mengubah jadwal</li> -->
+                    <li>• Periode penilaian akan diisi otomatis berdasarkan tanggal yang dipilih</li>
                 </ul>
             </div>
         </div>
@@ -1260,6 +1342,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                     
                     pelajaranSelect.disabled = false;
                     document.getElementById('loadingPelajaran').classList.add('hidden');
+                    
+                    // Setelah mapel dipilih, ambil info sesi terakhir
+                    if (pelajaranSelect.options.length > 1) {
+                        loadLastSesi(data.id, pelajaranSelect.options[1].value);
+                    }
                 },
                 error: function () {
                     pelajaranSelect.innerHTML = '<option value="">Gagal memuat mata pelajaran</option>';
@@ -1270,6 +1357,34 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
             
             // Redirect ke URL dengan parameter siswa_id
             window.location.href = '<?php echo $_SERVER['PHP_SELF']; ?>?siswa_id=' + data.id;
+        }
+        
+        function loadLastSesi(siswaId, pelajaranId) {
+            $.ajax({
+                url: '<?php echo $_SERVER['PHP_SELF']; ?>',
+                type: 'GET',
+                data: {
+                    ajax: 'get_last_sesi',
+                    siswa_id: siswaId,
+                    pelajaran_id: pelajaranId
+                },
+                dataType: 'json',
+                success: function(data) {
+                    if (data.last_sesi > 0) {
+                        const sesiInput = document.getElementById('sesiKe');
+                        sesiInput.value = data.last_sesi + 1;
+                        
+                        // Tambah info rekomendasi
+                        let infoDiv = document.querySelector('.sesi-recommendation');
+                        if (!infoDiv) {
+                            infoDiv = document.createElement('p');
+                            infoDiv.className = 'sesi-recommendation';
+                            sesiInput.parentNode.appendChild(infoDiv);
+                        }
+                        infoDiv.innerHTML = `<i class="fas fa-info-circle mr-1"></i> Sesi terakhir: ${data.last_sesi} | Rekomendasi sesi berikutnya: ${data.last_sesi + 1}`;
+                    }
+                }
+            });
         }
 
         function clearSelectedSiswa() {
@@ -1289,35 +1404,32 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
 
         // ==================== FUNGSI PENILAIAN ====================
         function validateInput(input) {
-    let value = input.value.trim();
-    
-    // Jika kosong, biarkan kosong
-    if (value === '') {
-        updatePreview();
-        return;
-    }
-    
-    value = parseInt(value);
-    
-    // Jika bukan angka
-    if (isNaN(value)) {
-        input.value = '';
-        updatePreview();
-        return;
-    }
-    
-    // Validasi range 1-10
-    if (value < 1) {
-        value = 1;
-    } else if (value > 10) {
-        value = 10;
-        input.classList.add('error');
-        setTimeout(() => input.classList.remove('error'), 500);
-    }
-    
-    input.value = value;
-    updatePreview();
-}
+            let value = input.value.trim();
+            
+            if (value === '') {
+                updatePreview();
+                return;
+            }
+            
+            value = parseInt(value);
+            
+            if (isNaN(value)) {
+                input.value = '';
+                updatePreview();
+                return;
+            }
+            
+            if (value < 1) {
+                value = 1;
+            } else if (value > 10) {
+                value = 10;
+                input.classList.add('error');
+                setTimeout(() => input.classList.remove('error'), 500);
+            }
+            
+            input.value = value;
+            updatePreview();
+        }
 
         function hitungTotalSkor() {
             const fields = [
@@ -1395,12 +1507,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
 
                 document.querySelector('input[name="tanggal_penilaian"]').value = 
                     new Date().toISOString().split('T')[0];
-
-                const now = new Date();
-                const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-                    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
-                document.querySelector('input[name="periode_penilaian"]').value = 
-                    `${monthNames[now.getMonth()]} ${now.getFullYear()}`;
+                
+                // Reset sesi ke nilai rekomendasi
+                const sesiInput = document.getElementById('sesiKe');
+                if (sesiInput) {
+                    const lastSesi = <?php echo $last_sesi; ?>;
+                    sesiInput.value = lastSesi > 0 ? lastSesi + 1 : 1;
+                }
 
                 updatePreview();
             }
@@ -1410,6 +1523,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
         document.getElementById('penilaianForm').addEventListener('submit', function(e) {
             const siswaId = document.getElementById('selectedSiswaId').value;
             const pelajaranId = document.getElementById('selectPelajaran').value;
+            const sesiKe = document.getElementById('sesiKe').value;
 
             if (!siswaId) {
                 e.preventDefault();
@@ -1422,6 +1536,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
                 e.preventDefault();
                 alert('Harap pilih mata pelajaran terlebih dahulu!');
                 document.getElementById('selectPelajaran').focus();
+                return;
+            }
+            
+            if (!sesiKe || sesiKe < 1) {
+                e.preventDefault();
+                alert('Harap isi sesi/pertemuan ke berapa!');
+                document.getElementById('sesiKe').focus();
                 return;
             }
         });
@@ -1511,4 +1632,5 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_penilaian'])) {
         });
     </script>
 </body>
+
 </html>
