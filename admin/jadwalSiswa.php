@@ -776,6 +776,7 @@ if (empty($_SESSION['csrf_token'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <?php include '../config/analytics.php'; ?>
     <title>Kelola Jadwal Siswa - Bimbel Esc</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -791,6 +792,7 @@ if (empty($_SESSION['csrf_token'])) {
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
         }
 
+        /* ==================== DROPDOWN AUTOCOMPLETE FIX ==================== */
         .autocomplete-container {
             position: relative;
             width: 100%;
@@ -823,15 +825,12 @@ if (empty($_SESSION['csrf_token'])) {
             display: none;
         }
 
-        .autocomplete-clear:hover {
-            color: #6b7280;
-        }
-
         .autocomplete-dropdown {
             position: absolute;
             top: 100%;
             left: 0;
-            right: 0;
+            right: auto;
+            min-width: 100%;
             max-height: 300px;
             overflow-y: auto;
             background: white;
@@ -840,6 +839,11 @@ if (empty($_SESSION['csrf_token'])) {
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
             z-index: 1000;
             display: none;
+            margin-top: 4px;
+        }
+
+        .autocomplete-clear:hover {
+            color: #6b7280;
         }
 
         .autocomplete-item {
@@ -851,7 +855,7 @@ if (empty($_SESSION['csrf_token'])) {
 
         .autocomplete-item:last-child {
             border-bottom: none;
-        }
+        }   
 
         .autocomplete-item:hover {
             background-color: #f9fafb;
@@ -1407,7 +1411,7 @@ if (empty($_SESSION['csrf_token'])) {
 
                             </div>
                             <div id="filterSiswaDropdown"
-                                class="absolute z-999 w-90 bg-white mt-1 border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto hidden">
+                                class="absolute z-999 w-90 bg-white mt-90 border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto hidden">
                             </div>
                         </div>
 

@@ -623,6 +623,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_jadwal_detail' && isset($_GET[
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <?php include '../config/analytics.php'; ?>
     <title>Jadwal Siswa - Bimbel Esc</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">

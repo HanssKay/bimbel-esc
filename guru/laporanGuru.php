@@ -248,6 +248,7 @@ function formatTanggalIndonesia($date)
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <?php include '../config/analytics.php'; ?>
     <title>Laporan Perkembangan - Bimbel Esc</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
