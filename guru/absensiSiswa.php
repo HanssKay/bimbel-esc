@@ -129,6 +129,32 @@ if (isset($_GET['ajax_delete_sesi']) && isset($_GET['tanggal']) && isset($_GET['
 }
 
 // ============================================
+// HANDLE DELETE ABSENSI SATU SISWA
+// ============================================
+if (isset($_GET['ajax_delete_siswa_absensi']) && isset($_GET['tanggal']) && isset($_GET['guru_id']) && isset($_GET['sesi']) && isset($_GET['siswa_id'])) {
+    header('Content-Type: application/json');
+    
+    $tanggal = $_GET['tanggal'];
+    $guru_id = intval($_GET['guru_id']);
+    $sesi_hapus = intval($_GET['sesi']);
+    $siswa_id = intval($_GET['siswa_id']);
+    
+    try {
+        $sql_delete = "DELETE FROM absensi_siswa WHERE tanggal_absensi = ? AND guru_id = ? AND sesi_ke = ? AND siswa_id = ?";
+        $stmt = $conn->prepare($sql_delete);
+        $stmt->bind_param("siii", $tanggal, $guru_id, $sesi_hapus, $siswa_id);
+        $stmt->execute();
+        $deleted_count = $stmt->affected_rows;
+        $stmt->close();
+        
+        echo json_encode(['success' => true, 'message' => "Berhasil menghapus data absensi siswa."]);
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
+    exit();
+}
+
+// ============================================
 // HANDLE AJAX SEARCH REQUEST
 // ============================================
 if (isset($_GET['ajax_search']) && isset($_GET['query'])) {
@@ -248,10 +274,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_absensi'])) {
             $keterangan = $data['keterangan'] ?? '';
             $siswa_pelajaran_id = !empty($data['siswa_pelajaran_id']) ? intval($data['siswa_pelajaran_id']) : null;
             
-            if (empty($status)) {
-                continue;
-            }
-            
             // Cek apakah sudah ada absensi untuk sesi ini
             $check_sql = "SELECT id FROM absensi_siswa 
                          WHERE siswa_id = ? 
@@ -262,6 +284,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['simpan_absensi'])) {
             $check_stmt->bind_param("iisi", $siswa_id, $guru_id, $tanggal_absensi, $sesi_absensi);
             $check_stmt->execute();
             $check_result = $check_stmt->get_result();
+
+            if (empty($status)) {
+                // Hapus data jika status diset menjadi kosong
+                if ($check_result->num_rows > 0) {
+                    $row = $check_result->fetch_assoc();
+                    $delete_sql = "DELETE FROM absensi_siswa WHERE id = ?";
+                    $delete_stmt = $conn->prepare($delete_sql);
+                    $delete_stmt->bind_param("i", $row['id']);
+                    $delete_stmt->execute();
+                    $delete_stmt->close();
+                }
+                $check_stmt->close();
+                continue;
+            }
+
             
             // Ambil pendaftaran_id
             $pendaftaran_sql = "SELECT id as pendaftaran_id 
@@ -1109,12 +1146,13 @@ $max_display_sesi = $MAX_SESI;
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mata Pelajaran</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Keterangan</th>
+                                    <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Aksi</th>
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
                                 <?php if (empty($daftar_siswa)): ?>
                                     <tr>
-                                        <td colspan="6" class="px-6 py-8 text-center text-gray-500">
+                                        <td colspan="7" class="px-6 py-8 text-center text-gray-500">
                                             <i class="fas fa-user-graduate text-4xl mb-2 block"></i>
                                             Tidak ada siswa yang ditemukan
                                         </td>
@@ -1163,6 +1201,13 @@ $max_display_sesi = $MAX_SESI;
                                                        placeholder="Alasan (jika izin/sakit)"
                                                        value="<?php echo htmlspecialchars($siswa['keterangan']); ?>"
                                                        data-siswa-id="<?php echo $siswa['id']; ?>">
+                                            </td>
+                                            <td class="px-6 py-4 whitespace-nowrap text-center">
+                                                <button type="button" onclick="resetRow(<?php echo $siswa['id']; ?>)" 
+                                                        class="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 p-2 rounded-md transition-colors" 
+                                                        title="Hapus data absensi anak ini">
+                                                    <i class="fas fa-trash-alt"></i>
+                                                </button>
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
@@ -1217,6 +1262,44 @@ $max_display_sesi = $MAX_SESI;
                 mapel_id: '<?php echo $siswa['selected_mapel_id']; ?>'
             };
         <?php endforeach; ?>
+
+        // Fungsi untuk reset/hapus baris siswa
+        function resetRow(siswaId) {
+            // Tanyakan konfirmasi sebelum menghapus
+            if (confirm('Apakah Anda yakin ingin menghapus data absensi siswa ini?')) {
+                const btn = window.event ? window.event.currentTarget : null;
+                let originalHtml = '';
+                if (btn) {
+                    originalHtml = btn.innerHTML;
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                    btn.disabled = true;
+                }
+
+                // Kirim request hapus ke server
+                fetch(window.location.href.split('?')[0] + '?ajax_delete_siswa_absensi=1&tanggal=<?php echo $tanggal; ?>&guru_id=<?php echo $guru_id; ?>&sesi=<?php echo $sesi; ?>&siswa_id=' + siswaId)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            // Hapus berhasil, reload halaman
+                            window.location.reload();
+                        } else {
+                            alert('Gagal menghapus data: ' + data.message);
+                            if (btn) {
+                                btn.innerHTML = originalHtml;
+                                btn.disabled = false;
+                            }
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('Terjadi kesalahan saat menghapus data.');
+                        if (btn) {
+                            btn.innerHTML = originalHtml;
+                            btn.disabled = false;
+                        }
+                    });
+            }
+        }
 
         // Fungsi untuk submit form
         function submitForm() {
@@ -1389,25 +1472,25 @@ $max_display_sesi = $MAX_SESI;
                 
                 if (status) {
                     hasData = true;
-                    
-                    const statusInput = document.createElement('input');
-                    statusInput.type = 'hidden';
-                    statusInput.name = `siswa[${siswaId}][status]`;
-                    statusInput.value = status;
-                    form.appendChild(statusInput);
-                    
-                    const ketInput = document.createElement('input');
-                    ketInput.type = 'hidden';
-                    ketInput.name = `siswa[${siswaId}][keterangan]`;
-                    ketInput.value = absensiData[siswaId]?.keterangan || '';
-                    form.appendChild(ketInput);
-                    
-                    const mapelInput = document.createElement('input');
-                    mapelInput.type = 'hidden';
-                    mapelInput.name = `siswa[${siswaId}][siswa_pelajaran_id]`;
-                    mapelInput.value = absensiData[siswaId]?.mapel_id || '';
-                    form.appendChild(mapelInput);
                 }
+                
+                const statusInput = document.createElement('input');
+                statusInput.type = 'hidden';
+                statusInput.name = `siswa[${siswaId}][status]`;
+                statusInput.value = status;
+                form.appendChild(statusInput);
+                
+                const ketInput = document.createElement('input');
+                ketInput.type = 'hidden';
+                ketInput.name = `siswa[${siswaId}][keterangan]`;
+                ketInput.value = absensiData[siswaId]?.keterangan || '';
+                form.appendChild(ketInput);
+                
+                const mapelInput = document.createElement('input');
+                mapelInput.type = 'hidden';
+                mapelInput.name = `siswa[${siswaId}][siswa_pelajaran_id]`;
+                mapelInput.value = absensiData[siswaId]?.mapel_id || '';
+                form.appendChild(mapelInput);
             });
             
             if (!hasData) {
