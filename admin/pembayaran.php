@@ -85,10 +85,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_payment'])) {
     $errors = [];
     if (!$siswa_id)
         $errors[] = "Harap pilih siswa!";
-    if (empty($tanggal_bayar_input))
+    if ($status == 'lunas' && empty($tanggal_bayar_input))
         $errors[] = "Harap pilih tanggal pembayaran!";
     if (empty($bulan_tagihan))
         $errors[] = "Harap pilih bulan tagihan!";
+
+    if ($status == 'dibebaskan') {
+        $nominal_dibayar = 0;
+        $metode_bayar = NULL;
+    }
+
+    if ($status == 'belum_bayar') {
+        $tanggal_bayar_input = NULL;
+    }
 
     if (empty($errors)) {
         $check_pendaftaran = $conn->query("SELECT id FROM pendaftaran_siswa WHERE siswa_id = $siswa_id AND status = 'aktif' LIMIT 1");
@@ -106,7 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_payment'])) {
             if ($check->num_rows > 0) {
                 $errors[] = "Sudah ada pembayaran untuk siswa ini di bulan " . date('F Y', strtotime($bulan_tagihan . '-01'));
             } else {
-                $tanggal_bayar_db = $tanggal_bayar_input;
+                $tanggal_bayar_sql = !empty($tanggal_bayar_input) ? "'" . $conn->real_escape_string($tanggal_bayar_input) . "'" : "NULL";
                 $metode_bayar_escaped = $metode_bayar ? "'" . $conn->real_escape_string($metode_bayar) . "'" : "NULL";
                 $keterangan_escaped = $keterangan ? "'" . $conn->real_escape_string($keterangan) . "'" : "NULL";
                 $status_escaped = $conn->real_escape_string($status);
@@ -115,7 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_payment'])) {
                     (pendaftaran_id, bulan_tagihan, nominal_tagihan, status, 
                      nominal_dibayar, metode_bayar, tanggal_bayar, keterangan, dibuat_oleh) 
                     VALUES ($pendaftaran_id, '$bulan_tagihan', $nominal_tagihan, '$status_escaped',
-                            $nominal_dibayar, $metode_bayar_escaped, '$tanggal_bayar_db', 
+                            $nominal_dibayar, $metode_bayar_escaped, $tanggal_bayar_sql, 
                             $keterangan_escaped, {$_SESSION['user_id']})";
 
                 if ($conn->query($sql)) {
@@ -178,7 +187,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
         $metode_bayar = NULL;
     }
 
-    $update = $conn->prepare("UPDATE pembayaran SET 
+    // Validasi agar tidak duplikat bulan_tagihan untuk siswa yang sama
+    $dup_stmt = $conn->prepare("SELECT p.id FROM pembayaran p
+        JOIN pendaftaran_siswa ps ON p.pendaftaran_id = ps.id
+        WHERE ps.siswa_id = (
+            SELECT ps2.siswa_id FROM pembayaran p2
+            JOIN pendaftaran_siswa ps2 ON p2.pendaftaran_id = ps2.id
+            WHERE p2.id = ?
+        )
+        AND p.bulan_tagihan = ?
+        AND p.id != ?");
+    $is_duplicate_month = false;
+    if ($dup_stmt) {
+        $dup_stmt->bind_param("isi", $pembayaran_id, $bulan_tagihan, $pembayaran_id);
+        $dup_stmt->execute();
+        $dup_res = $dup_stmt->get_result();
+        if ($dup_res && $dup_res->num_rows > 0) {
+            $is_duplicate_month = true;
+            $error_msg = "Sudah ada tagihan lain untuk siswa ini di bulan " . date('F Y', strtotime($bulan_tagihan . '-01')) . "!";
+        }
+        $dup_stmt->close();
+    }
+
+    $update = !$is_duplicate_month ? $conn->prepare("UPDATE pembayaran SET 
         status = ?,
         nominal_tagihan = ?,
         nominal_dibayar = ?,
@@ -188,9 +219,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
         bulan_tagihan = ?,
         diperbarui_oleh = ?,
         diperbarui_pada = NOW()
-        WHERE id = ?");
+        WHERE id = ?") : false;
 
-    if ($update) {
+    if (!$is_duplicate_month && $update) {
         $update->bind_param(
             "sddssssii", // 9 parameter (s: status, d: nominal_tagihan, d: nominal_dibayar, s: metode_bayar, s: tanggal_bayar, s: keterangan, s: bulan_tagihan, i: diperbarui_oleh, i: id)
             $status,
@@ -219,7 +250,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
         } else {
             $error_msg = "Gagal update: " . $update->error;
         }
-    } else {
+    } elseif (!$is_duplicate_month) {
         $error_msg = "Error preparing update statement: " . $conn->error;
     }
 }
@@ -297,24 +328,26 @@ $sql = "SELECT
 FROM pembayaran p
 JOIN pendaftaran_siswa ps ON p.pendaftaran_id = ps.id
 JOIN siswa s ON ps.siswa_id = s.id
-LEFT JOIN siswa_orangtua so ON s.id = so.siswa_id
+LEFT JOIN (
+    SELECT siswa_id, MIN(orangtua_id) as orangtua_id
+    FROM siswa_orangtua
+    GROUP BY siswa_id
+) so ON s.id = so.siswa_id
 LEFT JOIN orangtua o ON so.orangtua_id = o.id
 WHERE 1=1";
 
 $params = [];
 $types = "";
 
-// Filter periode
+// Filter periode murni berdasarkan bulan_tagihan (menghindari double counting antar bulan)
 if ($filter_tipe == 'bulan') {
-    $sql .= " AND (DATE_FORMAT(p.tanggal_bayar, '%Y-%m') = ? OR p.bulan_tagihan = ?)";
+    $sql .= " AND p.bulan_tagihan = ?";
     $params[] = $selected_filter;
-    $params[] = $selected_filter;
-    $types .= "ss";
+    $types .= "s";
 } else {
-    $sql .= " AND (YEAR(p.tanggal_bayar) = ? OR YEAR(STR_TO_DATE(CONCAT(p.bulan_tagihan, '-01'), '%Y-%m-%d')) = ?)";
+    $sql .= " AND LEFT(p.bulan_tagihan, 4) = ?";
     $params[] = $selected_filter;
-    $params[] = $selected_filter;
-    $types .= "ss";
+    $types .= "s";
 }
 
 // Filter search by nama siswa (seperti di jadwalSiswa)
@@ -1148,6 +1181,9 @@ if (isset($_GET['ajax'])) {
                                     ?>
                                     <tr class="hover:bg-gray-50">
                                         <td class="px-3 md:px-6 py-3 md:py-4 whitespace-nowrap">
+                                            <?php
+                                            $is_beda_bulan = !empty($p['tanggal_bayar']) && date('Y-m', strtotime($p['tanggal_bayar'])) !== $p['bulan_tagihan'];
+                                            ?>
                                             <div class="text-sm font-medium text-gray-900">
                                                 <span class="text-gray-500 text-xs">Tagihan Bulan:</span><br>
                                                 <?= date('F Y', strtotime($p['bulan_tagihan'] . '-01')) ?>
@@ -1156,6 +1192,14 @@ if (isset($_GET['ajax'])) {
                                                 <span class="text-gray-400">Bayar tgl:</span>
                                                 <?= $p['tanggal_bayar'] ? date('d/m/Y', strtotime($p['tanggal_bayar'])) : '-' ?>
                                             </div>
+                                            <?php if ($is_beda_bulan): ?>
+                                                <div class="mt-1">
+                                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800"
+                                                        title="Tagihan bulan <?= date('F Y', strtotime($p['bulan_tagihan'] . '-01')) ?> dibayarkan pada bulan <?= date('F Y', strtotime($p['tanggal_bayar'])) ?>">
+                                                        <i class="fas fa-info-circle mr-1"></i>Bayar beda bulan (<?= date('M Y', strtotime($p['tanggal_bayar'])) ?>)
+                                                    </span>
+                                                </div>
+                                            <?php endif; ?>
                                         </td>
                                         <td class="px-3 md:px-6 py-3 md:py-4">
                                             <div class="flex items-center">
@@ -1473,6 +1517,7 @@ if (isset($_GET['ajax'])) {
                         <span class="text-gray-600">Tanggal Bayar:</span>
                         <span id="detailTanggalBayar" class="font-medium"></span>
                     </div>
+                    <div id="detailBedaBulanInfo" class="hidden mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800"></div>
                 </div>
 
                 <!-- Informasi Siswa -->
@@ -1953,6 +1998,16 @@ if (isset($_GET['ajax'])) {
             document.getElementById('detailStatusBadge').innerHTML = statusBadge;
             document.getElementById('detailBulan').textContent = formatMonth(paymentData.bulan_tagihan);
             document.getElementById('detailTanggalBayar').textContent = paymentData.tgl_bayar_formatted || '-';
+
+            const bedaBulanEl = document.getElementById('detailBedaBulanInfo');
+            if (paymentData.tanggal_bayar && paymentData.bulan_tagihan && paymentData.tanggal_bayar.slice(0, 7) !== paymentData.bulan_tagihan) {
+                const bulanBayarText = formatMonth(paymentData.tanggal_bayar.slice(0, 7));
+                bedaBulanEl.innerHTML = `<i class="fas fa-info-circle mr-1"></i>Dibayar di bulan berbeda (<strong>${bulanBayarText}</strong>), tetap masuk ke pendapatan bulan tagihan <strong>${formatMonth(paymentData.bulan_tagihan)}</strong>.`;
+                bedaBulanEl.classList.remove('hidden');
+            } else {
+                bedaBulanEl.classList.add('hidden');
+                bedaBulanEl.innerHTML = '';
+            }
             document.getElementById('detailNamaLengkap').textContent = paymentData.nama_lengkap;
             document.getElementById('detailKelas').textContent = paymentData.kelas;
             document.getElementById('detailSekolah').textContent = paymentData.sekolah_asal || '-';
@@ -2027,17 +2082,22 @@ if (isset($_GET['ajax'])) {
             const nominalTagihan = document.getElementById('nominalTagihan');
             const nominalDibayar = document.getElementById('nominalDibayar');
             const metodeBayar = document.getElementById('metodeBayar');
+            const tanggalBayar = document.getElementById('tanggalBayar');
 
             if (status === 'lunas') {
                 const tagihanValue = nominalTagihan.value.replace(/\./g, '');
                 nominalDibayar.value = formatNumberDisplay(tagihanValue);
                 metodeBayar.required = true;
+                if (tanggalBayar) tanggalBayar.required = true;
             } else if (status === 'dibebaskan') {
                 nominalDibayar.value = '0';
                 metodeBayar.value = '';
                 metodeBayar.required = false;
+                if (tanggalBayar) tanggalBayar.required = false;
             } else {
+                nominalDibayar.value = '0';
                 metodeBayar.required = false;
+                if (tanggalBayar) tanggalBayar.required = false;
             }
         }
 

@@ -1004,12 +1004,22 @@ for ($i = 0; $i < 12; $i++) {
                                                 <?php endif; ?>
 
                                                 <?php if (!empty($pembayaran['tanggal_bayar'])): ?>
+                                                    <?php
+                                                    $is_beda_bulan = date('Y-m', strtotime($pembayaran['tanggal_bayar'])) !== $pembayaran['bulan_tagihan'];
+                                                    ?>
                                                     <div class="grid md:grid-cols-2 text-sm">
                                                         <span class="text-gray-600">Tanggal Bayar:</span>
                                                         <span class="font-medium text-gray-900">
                                                             <?= date('d/m/Y', strtotime($pembayaran['tanggal_bayar'])) ?>
                                                         </span>
                                                     </div>
+                                                    <?php if ($is_beda_bulan): ?>
+                                                        <div class="mt-1">
+                                                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                                                                <i class="fas fa-info-circle mr-1"></i>Dibayar di bulan berbeda (<?= date('M Y', strtotime($pembayaran['tanggal_bayar'])) ?>)
+                                                            </span>
+                                                        </div>
+                                                    <?php endif; ?>
                                                 <?php endif; ?>
 
                                             </div>
@@ -1311,6 +1321,12 @@ for ($i = 0; $i < 12; $i++) {
                             <span class="detail-label">Tanggal Bayar</span>
                             <span class="detail-value">${formattedDate(paymentData.tanggal_bayar)}</span>
                         </div>
+                        ${paymentData.bulan_tagihan && paymentData.tanggal_bayar.slice(0, 7) !== paymentData.bulan_tagihan ? `
+                        <div class="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                            <i class="fas fa-info-circle mr-1"></i>
+                            Pembayaran ini dilakukan di bulan berbeda (<strong>${new Date(paymentData.tanggal_bayar.slice(0, 7) + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}</strong>) untuk tagihan bulan <strong>${bulanFormatted}</strong>.
+                        </div>
+                        ` : ''}
                         ` : ''}
                     </div>
                 </div>

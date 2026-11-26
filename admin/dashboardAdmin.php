@@ -78,13 +78,14 @@ try {
         $statistics['penilaian_bulan_ini'] = 0;
     }
 
-    // 9. Total Pembayaran Lunas Bulan Ini
+    // 9. Total Pembayaran Lunas Bulan Ini (berdasarkan bulan_tagihan)
+    $current_ym = date('Y-m');
     $sql = "SELECT COUNT(*) as total FROM pembayaran 
             WHERE status = 'lunas' 
-            AND MONTH(tanggal_bayar) = ? AND YEAR(tanggal_bayar) = ?";
+            AND bulan_tagihan = ?";
     $stmt = $conn->prepare($sql);
     if ($stmt) {
-        $stmt->bind_param("ii", $current_month, $current_year);
+        $stmt->bind_param("s", $current_ym);
         $stmt->execute();
         $result = $stmt->get_result();
         $statistics['pembayaran_lunas_bulan_ini'] = $result && $result->num_rows > 0 ?
@@ -99,13 +100,13 @@ try {
     $result = $conn->query($sql);
     $statistics['total_pendaftaran_aktif'] = $result && $result->num_rows > 0 ? $result->fetch_assoc()['total'] ?? 0 : 0;
 
-    // 11. Total Pendapatan Bulan Ini
+    // 11. Total Pendapatan Bulan Ini (berdasarkan bulan_tagihan)
     $sql = "SELECT SUM(nominal_dibayar) as total FROM pembayaran 
             WHERE status = 'lunas' 
-            AND MONTH(tanggal_bayar) = ? AND YEAR(tanggal_bayar) = ?";
+            AND bulan_tagihan = ?";
     $stmt = $conn->prepare($sql);
     if ($stmt) {
-        $stmt->bind_param("ii", $current_month, $current_year);
+        $stmt->bind_param("s", $current_ym);
         $stmt->execute();
         $result = $stmt->get_result();
         $statistics['total_pendapatan_bulan_ini'] = $result && $result->num_rows > 0 ?
