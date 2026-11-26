@@ -86,6 +86,12 @@ $menuConfig = [
             'active' => ['pengumuman.php']
         ],
         [
+            'title' => 'Latihan Soal Murid',
+            'icon' => 'fas fa-pen-to-square',
+            'url' => 'shareLink.php',
+            'active' => ['shareLink.php']
+        ],
+        [
             'title' => 'Pengaturan',
             'icon' => 'fas fa-cog',
             'url' => 'pengaturan.php',
@@ -257,6 +263,12 @@ $menuConfig = [
             'icon' => 'fas fa-bullhorn ',
             'url' => 'pengumumanOrtu.php',
             'active' => ['pengumumanOrtu.php']
+        ],
+        [
+            'title' => 'Smart Quests',
+            'icon' => 'fas fa-pen-to-square',
+            'url' => 'linkBimbel.php',
+            'active' => ['linkBimbel.php']
         ],
         [
             'title' => 'Profile Saya',
