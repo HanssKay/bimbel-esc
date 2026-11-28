@@ -547,9 +547,11 @@ $payload = [
                                     </select>
                                 </div>
 
-                                <select id="selectBulanSesi" onchange="onFilterChange()"
-                                    class="hidden border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs md:text-sm bg-white text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                </select>
+                                <div id="wrapBulanSesi" class="hidden flex items-center border border-gray-300 rounded-lg px-2.5 py-1.5 bg-white">
+                                    <i class="fas fa-calendar-day text-indigo-600 mr-1.5 text-xs"></i>
+                                    <input type="month" id="inputBulanSesi" onchange="onBulanSesiChange()"
+                                        class="bg-transparent text-xs md:text-sm text-gray-700 font-semibold focus:outline-none">
+                                </div>
                             </div>
                         </div>
 
@@ -772,34 +774,60 @@ $payload = [
             state.tahun = years[0] || 'all';
             selTahun.value = state.tahun;
 
-            populateBulanSesiDropdown(getDataByYear());
+            syncBulanSesiInput(getDataByYear());
             renderAll();
         }
 
-        function populateBulanSesiDropdown(list) {
-            const mapBulan = new Map();
-            list.forEach(p => mapBulan.set(p.bulan, p.bulanLabel));
-            const entries = Array.from(mapBulan.entries()).reverse();
-            const sel = document.getElementById('selectBulanSesi');
-            sel.innerHTML = `<option value="latest8">8 Sesi Terakhir</option>` +
-                entries.map(([k, lbl]) => `<option value="${escHtml(k)}">Bulan ${escHtml(lbl)}</option>`).join('');
-            state.selectedBulan = entries[0]?.[0] || 'latest8';
-            sel.value = state.selectedBulan;
+        function formatBulanLabel(ym) {
+            if (!ym || !ym.includes('-')) return ym || '-';
+            const bulan = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
+            const [y, m] = ym.split('-');
+            const idx = parseInt(m, 10) - 1;
+            return (idx >= 0 && idx < 12) ? `${bulan[idx]} ${y}` : ym;
+        }
+
+        function syncBulanSesiInput(list) {
+            const input = document.getElementById('inputBulanSesi');
+            if (!input) return;
+            const months = Array.from(new Set(list.map(p => p.bulan))).sort();
+            const latest = months[months.length - 1] || new Date().toISOString().slice(0, 7);
+            state.selectedBulan = latest;
+            input.value = latest;
         }
 
         function setViewMode(mode) {
             state.viewMode = mode;
+            if (mode === 'sesi') {
+                const input = document.getElementById('inputBulanSesi');
+                if (input && !input.value) {
+                    syncBulanSesiInput(getDataByYear());
+                }
+            }
             renderAll();
         }
         function onTahunChange() {
             state.tahun = document.getElementById('selectTahun').value;
-            populateBulanSesiDropdown(getDataByYear());
+            syncBulanSesiInput(getDataByYear());
+            renderAll();
+        }
+        function onBulanSesiChange() {
+            const input = document.getElementById('inputBulanSesi');
+            if (!input || !input.value) return;
+            state.selectedBulan = input.value;
+
+            // Sinkronkan filter tahun jika bulan yang dipilih berada di tahun lain
+            const pickedYear = input.value.slice(0, 4);
+            const selTahun = document.getElementById('selectTahun');
+            if (selTahun && state.tahun !== 'all' && state.tahun !== pickedYear) {
+                const hasYearOpt = Array.from(selTahun.options).some(o => o.value === pickedYear);
+                state.tahun = hasYearOpt ? pickedYear : 'all';
+                selTahun.value = state.tahun;
+            }
             renderAll();
         }
         function onFilterChange() {
             const selMapel = document.getElementById('selectMapel');
             if (selMapel) state.mapelId = selMapel.value;
-            state.selectedBulan = document.getElementById('selectBulanSesi').value;
             renderAll();
         }
         function filterByMapelCard(mapelId) {
@@ -883,7 +911,7 @@ $payload = [
                 ? 'px-3 py-1.5 rounded-lg text-xs md:text-sm font-semibold bg-blue-600 text-white shadow-sm transition flex items-center gap-1.5'
                 : 'px-3 py-1.5 rounded-lg text-xs md:text-sm font-medium text-gray-600 hover:text-gray-900 transition flex items-center gap-1.5';
 
-            document.getElementById('selectBulanSesi').classList.toggle('hidden', isBulan);
+            document.getElementById('wrapBulanSesi').classList.toggle('hidden', isBulan);
         }
 
         function renderHeroAndKPI(anak, filtered, currMonth, prevMonth) {
@@ -993,19 +1021,16 @@ $payload = [
                 colors = monthlyAll.map(m => getKategori(m.avgPersen).color);
                 metaItems = monthlyAll;
             } else {
-                let sessions = state.selectedBulan === 'latest8'
-                    ? filtered.slice(-8)
-                    : filtered.filter(p => p.bulan === state.selectedBulan);
-
-                if (!sessions.length) sessions = filtered.slice(-8);
-
-                const periodeLbl = state.selectedBulan === 'latest8'
-                    ? `${sessions.length} Sesi Terakhir (${tahunLabel})`
-                    : (sessions[0]?.bulanLabel || state.selectedBulan);
+                const sessions = filtered.filter(p => p.bulan === state.selectedBulan);
+                const periodeLbl = formatBulanLabel(state.selectedBulan);
 
                 document.getElementById('mainChartTitle').textContent = `Diagram Batang Perkembangan Per Sesi (${periodeLbl})`;
-                document.getElementById('mainChartSubtitle').textContent = 'Menampilkan skor setiap pertemuan (skala 0–50). Klik salah satu batang sesi untuk melihat rincian 5 indikator & catatan guru.';
-                document.getElementById('chartInteractiveHint').innerHTML = '<i class="fas fa-hand-pointer mr-1"></i> Klik batang sesi untuk buka detail';
+                document.getElementById('mainChartSubtitle').textContent = sessions.length
+                    ? 'Menampilkan skor setiap pertemuan (skala 0–50). Klik salah satu batang sesi untuk melihat rincian 5 indikator & catatan guru.'
+                    : `Belum ada data penilaian pada bulan ${periodeLbl}. Silakan pilih bulan lain pada kalender.`;
+                document.getElementById('chartInteractiveHint').innerHTML = sessions.length
+                    ? '<i class="fas fa-hand-pointer mr-1"></i> Klik batang sesi untuk buka detail'
+                    : '<i class="fas fa-info-circle mr-1"></i> Tidak ada sesi di bulan ini';
 
                 labels = sessions.map(s => `Sesi ${s.sesi} (${s.mapel.split(' ')[0]})`);
                 values = sessions.map(s => s.total);
@@ -1037,10 +1062,8 @@ $payload = [
                             const clickedMonth = metaItems[idx];
                             state.viewMode = 'sesi';
                             state.selectedBulan = clickedMonth.key;
-                            const sel = document.getElementById('selectBulanSesi');
-                            if (Array.from(sel.options).some(o => o.value === clickedMonth.key)) {
-                                sel.value = clickedMonth.key;
-                            }
+                            const inputBulan = document.getElementById('inputBulanSesi');
+                            if (inputBulan) inputBulan.value = clickedMonth.key;
                             renderAll();
                         } else {
                             openSessionModal(metaItems[idx]);
@@ -1279,13 +1302,10 @@ $payload = [
                         </tr>`;
                 }).join('');
             } else {
-                let sessions = state.selectedBulan === 'latest8'
-                    ? filtered.slice(-8)
-                    : filtered.filter(p => p.bulan === state.selectedBulan);
-                if (!sessions.length) sessions = filtered.slice(-8);
-                sessions = sessions.slice().reverse();
+                const sessions = filtered.filter(p => p.bulan === state.selectedBulan).slice().reverse();
+                const periodeLbl = formatBulanLabel(state.selectedBulan);
 
-                document.getElementById('rekapTableTitle').innerHTML = '<i class="fas fa-table text-blue-600"></i> Rekap Detail Per Sesi';
+                document.getElementById('rekapTableTitle').innerHTML = `<i class="fas fa-table text-blue-600"></i> Rekap Detail Per Sesi (${periodeLbl})`;
                 document.getElementById('rekapTableSubtitle').textContent = 'Rincian setiap sesi penilaian yang tampil di diagram batang';
 
                 thead.innerHTML = `
@@ -1297,37 +1317,39 @@ $payload = [
                         <th class="no-print px-4 py-3 text-right">Aksi</th>
                     </tr>`;
 
-                tbody.innerHTML = sessions.map(s => {
-                    const kat = getKategori(s.persen);
-                    return `
-                        <tr class="hover:bg-gray-50">
-                            <td class="px-4 py-3 whitespace-nowrap">
-                                <div class="font-semibold text-gray-900">Sesi ${s.sesi}</div>
-                                <div class="text-xs text-gray-500">${formatTglIndo(s.tanggal)}</div>
-                            </td>
-                            <td class="px-4 py-3 whitespace-nowrap">
-                                <div class="font-medium text-gray-800">${escHtml(s.mapel)}</div>
-                                <div class="text-xs text-gray-400">${escHtml(s.guru)}</div>
-                            </td>
-                            <td class="px-4 py-3 whitespace-nowrap font-bold text-gray-900">${s.total}/50 <span class="text-xs font-normal text-gray-500">(${s.persen}%)</span></td>
-                            <td class="px-4 py-3 whitespace-nowrap"><span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${kat.badge}">${kat.label}</span></td>
-                            <td class="no-print px-4 py-3 text-right whitespace-nowrap">
-                                <button onclick="openSessionModalById(${s.id})" class="text-xs font-semibold text-blue-600 hover:text-blue-800">
-                                    Detail <i class="fas fa-eye ml-0.5"></i>
-                                </button>
-                            </td>
-                        </tr>`;
-                }).join('');
+                if (!sessions.length) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">Belum ada penilaian pada bulan ${escHtml(periodeLbl)}.</td></tr>`;
+                } else {
+                    tbody.innerHTML = sessions.map(s => {
+                        const kat = getKategori(s.persen);
+                        return `
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-3 whitespace-nowrap">
+                                    <div class="font-semibold text-gray-900">Sesi ${s.sesi}</div>
+                                    <div class="text-xs text-gray-500">${formatTglIndo(s.tanggal)}</div>
+                                </td>
+                                <td class="px-4 py-3 whitespace-nowrap">
+                                    <div class="font-medium text-gray-800">${escHtml(s.mapel)}</div>
+                                    <div class="text-xs text-gray-400">${escHtml(s.guru)}</div>
+                                </td>
+                                <td class="px-4 py-3 whitespace-nowrap font-bold text-gray-900">${s.total}/50 <span class="text-xs font-normal text-gray-500">(${s.persen}%)</span></td>
+                                <td class="px-4 py-3 whitespace-nowrap"><span class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${kat.badge}">${kat.label}</span></td>
+                                <td class="no-print px-4 py-3 text-right whitespace-nowrap">
+                                    <button onclick="openSessionModalById(${s.id})" class="text-xs font-semibold text-blue-600 hover:text-blue-800">
+                                        Detail <i class="fas fa-eye ml-0.5"></i>
+                                    </button>
+                                </td>
+                            </tr>`;
+                    }).join('');
+                }
             }
         }
 
         function drillToMonth(monthKey) {
             state.viewMode = 'sesi';
             state.selectedBulan = monthKey;
-            const sel = document.getElementById('selectBulanSesi');
-            if (Array.from(sel.options).some(o => o.value === monthKey)) {
-                sel.value = monthKey;
-            }
+            const inputBulan = document.getElementById('inputBulanSesi');
+            if (inputBulan) inputBulan.value = monthKey;
             renderAll();
             window.scrollTo({ top: 320, behavior: 'smooth' });
         }
