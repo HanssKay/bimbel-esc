@@ -40,27 +40,52 @@ if (isset($_SESSION['error_message'])) {
     unset($_SESSION['error_message']);
 }
 
+// Redirect legacy link ?tab=ranking ke halaman standalone peringkatSiswa.php
+if (isset($_GET['tab']) && $_GET['tab'] === 'ranking') {
+    $redirect_params = $_GET;
+    unset($redirect_params['tab']);
+    $qs = http_build_query($redirect_params);
+    header('Location: peringkatSiswa.php' . ($qs !== '' ? '?' . $qs : ''));
+    exit();
+}
+
 // FILTER PARAMETER (DIUBAH SEPERTI DI RIWAYAT.PHP)
-$filter_bulan_tahun = isset($_GET['bulan_tahun']) ? $_GET['bulan_tahun'] : date('Y-m');
+$filter_bulan_tahun = isset($_GET['bulan_tahun']) ? trim((string) $_GET['bulan_tahun']) : date('Y-m');
+if (!empty($filter_bulan_tahun) && !preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $filter_bulan_tahun)) {
+    $filter_bulan_tahun = date('Y-m');
+}
 $filter_siswa_id = isset($_GET['siswa_id']) && is_numeric($_GET['siswa_id']) ? (int) $_GET['siswa_id'] : 0;
-$filter_nama_siswa = isset($_GET['nama_siswa']) ? trim($_GET['nama_siswa']) : '';
+$filter_nama_siswa = isset($_GET['nama_siswa']) ? trim((string) $_GET['nama_siswa']) : '';
 $filter_guru_id = isset($_GET['guru_id']) && is_numeric($_GET['guru_id']) ? (int) $_GET['guru_id'] : 0;
-$filter_nama_guru = isset($_GET['nama_guru']) ? trim($_GET['nama_guru']) : '';
-$filter_kategori = isset($_GET['filter_kategori']) ? $_GET['filter_kategori'] : '';
+$filter_nama_guru = isset($_GET['nama_guru']) ? trim((string) $_GET['nama_guru']) : '';
+$filter_kategori = isset($_GET['filter_kategori']) ? trim((string) $_GET['filter_kategori']) : '';
+
+// Parameter audit jika datang dari halaman peringkatSiswa.php ("Lihat Sesi")
+$allowed_jenjang = ['TK', 'SD', 'SMP', 'SMA', 'Alumni', 'Umum'];
+$rank_jenjang = isset($_GET['jenjang']) && in_array($_GET['jenjang'], $allowed_jenjang, true) ? $_GET['jenjang'] : '';
+$rank_min_sesi = isset($_GET['min_sesi']) && is_numeric($_GET['min_sesi']) ? max(1, min(31, (int) $_GET['min_sesi'])) : 4;
+$rank_bulan_tahun = !empty($filter_bulan_tahun) ? $filter_bulan_tahun : date('Y-m');
+$is_audit_mode = (isset($_GET['from_ranking']) && $_GET['from_ranking'] === '1' && $filter_siswa_id > 0);
 
 // Parse bulan dan tahun dari filter_bulan_tahun
 $filter_tahun = !empty($filter_bulan_tahun) ? substr($filter_bulan_tahun, 0, 4) : date('Y');
 $filter_bulan = !empty($filter_bulan_tahun) ? (int) substr($filter_bulan_tahun, 5, 2) : 0;
-
-// SET ACTIVE TAB
-if (isset($_GET['tab'])) {
-    $active_tab = $_GET['tab'];
-    $_SESSION['active_tab'] = $active_tab;
-} elseif (isset($_SESSION['active_tab'])) {
-    $active_tab = $_SESSION['active_tab'];
-}
+$active_tab = 'list';
 
 // =============== FUNGSI BANTU ===============
+function formatPeriodeBulan($ym)
+{
+    if (!preg_match('/^(\d{4})-(0[1-9]|1[0-2])$/', (string) $ym, $m)) {
+        return (string) $ym;
+    }
+    $nama_bulan = [
+        '01' => 'Januari', '02' => 'Februari', '03' => 'Maret', '04' => 'April',
+        '05' => 'Mei', '06' => 'Juni', '07' => 'Juli', '08' => 'Agustus',
+        '09' => 'September', '10' => 'Oktober', '11' => 'November', '12' => 'Desember'
+    ];
+    return ($nama_bulan[$m[2]] ?? $m[2]) . ' ' . $m[1];
+}
+
 function getBulanList()
 {
     return [
@@ -219,151 +244,165 @@ if (isset($_GET['action']) && $_GET['action'] == 'hapus' && isset($_GET['id'])) 
     exit();
 }
 
-// =============== AMBIL DATA PENILAIAN DENGAN FILTER (DIUBAH) ===============
-$sql = "SELECT ps.*, 
-               ps.sesi_ke,
-               s.id as siswa_id, s.nama_lengkap as nama_siswa, s.kelas as kelas_sekolah,
-               u.full_name as nama_guru, g.bidang_keahlian,
-               sp.nama_pelajaran, pd.tingkat as tingkat_bimbel,
-               g.id as guru_pendaftaran_id
-        FROM penilaian_siswa ps
-        JOIN siswa s ON ps.siswa_id = s.id
-        JOIN pendaftaran_siswa pd ON ps.pendaftaran_id = pd.id
-        LEFT JOIN siswa_pelajaran sp ON ps.siswa_pelajaran_id = sp.id
-        JOIN guru g ON ps.guru_id = g.id
-        JOIN users u ON g.user_id = u.id
-        WHERE 1=1";
-$params = [];
-$param_types = "";
+// =============== AMBIL DATA PENILAIAN (TAB DAFTAR SESI) ===============
+$statistik = [
+    'total_penilaian' => 0,
+    'rata_nilai' => 0,
+    'rata_persentase' => 0,
+    'nilai_terendah' => 0,
+    'nilai_tertinggi' => 0,
+    'total_siswa_dinilai' => 0,
+    'total_guru_menilai' => 0
+];
 
-// FILTER TAHUN DAN BULAN (dari input month)
-if (!empty($filter_tahun) && $filter_tahun != 'all') {
-    $sql .= " AND YEAR(ps.tanggal_penilaian) = ?";
-    $params[] = $filter_tahun;
-    $param_types .= "i";
-}
-if (!empty($filter_bulan) && $filter_bulan > 0) {
-    $sql .= " AND MONTH(ps.tanggal_penilaian) = ?";
-    $params[] = $filter_bulan;
-    $param_types .= "i";
+if ($active_tab === 'list') {
+    $sql = "SELECT ps.*, 
+                   ps.sesi_ke,
+                   s.id as siswa_id, s.nama_lengkap as nama_siswa, s.kelas as kelas_sekolah,
+                   u.full_name as nama_guru, g.bidang_keahlian,
+                   sp.nama_pelajaran, pd.tingkat as tingkat_bimbel,
+                   g.id as guru_pendaftaran_id
+            FROM penilaian_siswa ps
+            JOIN siswa s ON ps.siswa_id = s.id
+            JOIN pendaftaran_siswa pd ON ps.pendaftaran_id = pd.id
+            LEFT JOIN siswa_pelajaran sp ON ps.siswa_pelajaran_id = sp.id
+            JOIN guru g ON ps.guru_id = g.id
+            JOIN users u ON g.user_id = u.id
+            WHERE 1=1";
+    $params = [];
+    $param_types = "";
+
+    // FILTER TAHUN DAN BULAN (dari input month)
+    if (!empty($filter_tahun) && $filter_tahun != 'all') {
+        $sql .= " AND YEAR(ps.tanggal_penilaian) = ?";
+        $params[] = $filter_tahun;
+        $param_types .= "i";
+    }
+    if (!empty($filter_bulan) && $filter_bulan > 0) {
+        $sql .= " AND MONTH(ps.tanggal_penilaian) = ?";
+        $params[] = $filter_bulan;
+        $param_types .= "i";
+    }
+
+    // FILTER SISWA (menggunakan ID atau nama)
+    if ($filter_siswa_id > 0) {
+        $sql .= " AND ps.siswa_id = ?";
+        $params[] = $filter_siswa_id;
+        $param_types .= "i";
+    } elseif (!empty($filter_nama_siswa)) {
+        $sql .= " AND s.nama_lengkap LIKE ?";
+        $params[] = "%" . $filter_nama_siswa . "%";
+        $param_types .= "s";
+    }
+
+    // FILTER GURU (menggunakan ID atau nama)
+    if ($filter_guru_id > 0) {
+        $sql .= " AND ps.guru_id = ?";
+        $params[] = $filter_guru_id;
+        $param_types .= "i";
+    } elseif (!empty($filter_nama_guru)) {
+        $sql .= " AND u.full_name LIKE ?";
+        $params[] = "%" . $filter_nama_guru . "%";
+        $param_types .= "s";
+    }
+
+    // FILTER KATEGORI
+    if (!empty($filter_kategori)) {
+        $sql .= " AND ps.kategori = ?";
+        $params[] = $filter_kategori;
+        $param_types .= "s";
+    }
+
+    $sql .= " ORDER BY ps.tanggal_penilaian DESC, ps.created_at DESC";
+
+    $stmt = $conn->prepare($sql);
+    if (!empty($params)) {
+        $stmt->bind_param($param_types, ...$params);
+    }
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    while ($row = $result->fetch_assoc()) {
+        $row['kategori_display'] = getKategoriByPersentase($row['persentase'] ?? 0);
+        $penilaian_data[] = $row;
+    }
+    $stmt->close();
+
+    // Hitung statistik dengan filter yang sama
+    $stats_sql = "SELECT 
+                  COUNT(*) as total_penilaian,
+                  AVG(total_score) as rata_nilai,
+                  AVG(persentase) as rata_persentase,
+                  MIN(total_score) as nilai_terendah,
+                  MAX(total_score) as nilai_tertinggi,
+                  COUNT(DISTINCT ps.siswa_id) as total_siswa_dinilai,
+                  COUNT(DISTINCT ps.guru_id) as total_guru_menilai
+                  FROM penilaian_siswa ps
+                  JOIN siswa s ON ps.siswa_id = s.id
+                  JOIN pendaftaran_siswa pd ON ps.pendaftaran_id = pd.id
+                  LEFT JOIN siswa_pelajaran sp ON ps.siswa_pelajaran_id = sp.id
+                  JOIN guru g ON ps.guru_id = g.id
+                  JOIN users u ON g.user_id = u.id
+                  WHERE 1=1";
+
+    $stats_params = [];
+    $stats_param_types = "";
+
+    if (!empty($filter_tahun) && $filter_tahun != 'all') {
+        $stats_sql .= " AND YEAR(ps.tanggal_penilaian) = ?";
+        $stats_params[] = $filter_tahun;
+        $stats_param_types .= "i";
+    }
+    if (!empty($filter_bulan) && $filter_bulan > 0) {
+        $stats_sql .= " AND MONTH(ps.tanggal_penilaian) = ?";
+        $stats_params[] = $filter_bulan;
+        $stats_param_types .= "i";
+    }
+    if ($filter_siswa_id > 0) {
+        $stats_sql .= " AND ps.siswa_id = ?";
+        $stats_params[] = $filter_siswa_id;
+        $stats_param_types .= "i";
+    } elseif (!empty($filter_nama_siswa)) {
+        $stats_sql .= " AND s.nama_lengkap LIKE ?";
+        $stats_params[] = "%" . $filter_nama_siswa . "%";
+        $stats_param_types .= "s";
+    }
+    if ($filter_guru_id > 0) {
+        $stats_sql .= " AND ps.guru_id = ?";
+        $stats_params[] = $filter_guru_id;
+        $stats_param_types .= "i";
+    } elseif (!empty($filter_nama_guru)) {
+        $stats_sql .= " AND u.full_name LIKE ?";
+        $stats_params[] = "%" . $filter_nama_guru . "%";
+        $stats_param_types .= "s";
+    }
+    if (!empty($filter_kategori)) {
+        $stats_sql .= " AND ps.kategori = ?";
+        $stats_params[] = $filter_kategori;
+        $stats_param_types .= "s";
+    }
+
+    $stats_stmt = $conn->prepare($stats_sql);
+    if (!empty($stats_params)) {
+        $stats_stmt->bind_param($stats_param_types, ...$stats_params);
+    }
+    $stats_stmt->execute();
+    $stats_result = $stats_stmt->get_result();
+    $fetched_stats = $stats_result->fetch_assoc();
+    $stats_stmt->close();
+
+    if ($fetched_stats) {
+        $statistik['rata_nilai'] = $fetched_stats['rata_nilai'] !== null ? round((float) $fetched_stats['rata_nilai'], 1) : 0;
+        $statistik['rata_persentase'] = $fetched_stats['rata_persentase'] !== null ? round((float) $fetched_stats['rata_persentase'], 1) : 0;
+        $statistik['nilai_terendah'] = $fetched_stats['nilai_terendah'] !== null ? (int) $fetched_stats['nilai_terendah'] : 0;
+        $statistik['nilai_tertinggi'] = $fetched_stats['nilai_tertinggi'] !== null ? (int) $fetched_stats['nilai_tertinggi'] : 0;
+        $statistik['total_penilaian'] = $fetched_stats['total_penilaian'] !== null ? (int) $fetched_stats['total_penilaian'] : 0;
+        $statistik['total_siswa_dinilai'] = $fetched_stats['total_siswa_dinilai'] !== null ? (int) $fetched_stats['total_siswa_dinilai'] : 0;
+        $statistik['total_guru_menilai'] = $fetched_stats['total_guru_menilai'] !== null ? (int) $fetched_stats['total_guru_menilai'] : 0;
+    }
 }
 
-// FILTER SISWA (menggunakan ID atau nama)
-if ($filter_siswa_id > 0) {
-    $sql .= " AND ps.siswa_id = ?";
-    $params[] = $filter_siswa_id;
-    $param_types .= "i";
-} elseif (!empty($filter_nama_siswa)) {
-    $sql .= " AND s.nama_lengkap LIKE ?";
-    $params[] = "%" . $filter_nama_siswa . "%";
-    $param_types .= "s";
-}
-
-// FILTER GURU (menggunakan ID atau nama)
-if ($filter_guru_id > 0) {
-    $sql .= " AND ps.guru_id = ?";
-    $params[] = $filter_guru_id;
-    $param_types .= "i";
-} elseif (!empty($filter_nama_guru)) {
-    $sql .= " AND u.full_name LIKE ?";
-    $params[] = "%" . $filter_nama_guru . "%";
-    $param_types .= "s";
-}
-
-// FILTER KATEGORI
-if (!empty($filter_kategori)) {
-    $sql .= " AND ps.kategori = ?";
-    $params[] = $filter_kategori;
-    $param_types .= "s";
-}
-
-$sql .= " ORDER BY ps.tanggal_penilaian DESC, ps.created_at DESC";
-
-$stmt = $conn->prepare($sql);
-if (!empty($params)) {
-    $stmt->bind_param($param_types, ...$params);
-}
-$stmt->execute();
-$result = $stmt->get_result();
-
-while ($row = $result->fetch_assoc()) {
-    $row['kategori_display'] = getKategoriByPersentase($row['persentase'] ?? 0);
-    $penilaian_data[] = $row;
-}
-$stmt->close();
-
-// Hitung statistik dengan filter yang sama
-$stats_sql = "SELECT 
-              COUNT(*) as total_penilaian,
-              AVG(total_score) as rata_nilai,
-              AVG(persentase) as rata_persentase,
-              MIN(total_score) as nilai_terendah,
-              MAX(total_score) as nilai_tertinggi,
-              COUNT(DISTINCT ps.siswa_id) as total_siswa_dinilai,
-              COUNT(DISTINCT ps.guru_id) as total_guru_menilai
-              FROM penilaian_siswa ps
-              JOIN siswa s ON ps.siswa_id = s.id
-              JOIN pendaftaran_siswa pd ON ps.pendaftaran_id = pd.id
-              LEFT JOIN siswa_pelajaran sp ON ps.siswa_pelajaran_id = sp.id
-              JOIN guru g ON ps.guru_id = g.id
-              JOIN users u ON g.user_id = u.id
-              WHERE 1=1";
-
-$stats_params = [];
-$stats_param_types = "";
-
-if (!empty($filter_tahun) && $filter_tahun != 'all') {
-    $stats_sql .= " AND YEAR(ps.tanggal_penilaian) = ?";
-    $stats_params[] = $filter_tahun;
-    $stats_param_types .= "i";
-}
-if (!empty($filter_bulan) && $filter_bulan > 0) {
-    $stats_sql .= " AND MONTH(ps.tanggal_penilaian) = ?";
-    $stats_params[] = $filter_bulan;
-    $stats_param_types .= "i";
-}
-if ($filter_siswa_id > 0) {
-    $stats_sql .= " AND ps.siswa_id = ?";
-    $stats_params[] = $filter_siswa_id;
-    $stats_param_types .= "i";
-} elseif (!empty($filter_nama_siswa)) {
-    $stats_sql .= " AND s.nama_lengkap LIKE ?";
-    $stats_params[] = "%" . $filter_nama_siswa . "%";
-    $stats_param_types .= "s";
-}
-if ($filter_guru_id > 0) {
-    $stats_sql .= " AND ps.guru_id = ?";
-    $stats_params[] = $filter_guru_id;
-    $stats_param_types .= "i";
-} elseif (!empty($filter_nama_guru)) {
-    $stats_sql .= " AND u.full_name LIKE ?";
-    $stats_params[] = "%" . $filter_nama_guru . "%";
-    $stats_param_types .= "s";
-}
-if (!empty($filter_kategori)) {
-    $stats_sql .= " AND ps.kategori = ?";
-    $stats_params[] = $filter_kategori;
-    $stats_param_types .= "s";
-}
-
-$stats_stmt = $conn->prepare($stats_sql);
-if (!empty($stats_params)) {
-    $stats_stmt->bind_param($stats_param_types, ...$stats_params);
-}
-$stats_stmt->execute();
-$stats_result = $stats_stmt->get_result();
-$statistik = $stats_result->fetch_assoc();
-$stats_stmt->close();
-
-// Handle NULL values
-$statistik['rata_nilai'] = $statistik['rata_nilai'] !== null ? round($statistik['rata_nilai'], 1) : 0;
-$statistik['rata_persentase'] = $statistik['rata_persentase'] !== null ? round($statistik['rata_persentase'], 1) : 0;
-$statistik['nilai_terendah'] = $statistik['nilai_terendah'] !== null ? $statistik['nilai_terendah'] : 0;
-$statistik['nilai_tertinggi'] = $statistik['nilai_tertinggi'] !== null ? $statistik['nilai_tertinggi'] : 0;
-$statistik['total_penilaian'] = $statistik['total_penilaian'] !== null ? $statistik['total_penilaian'] : 0;
-$statistik['total_siswa_dinilai'] = $statistik['total_siswa_dinilai'] !== null ? $statistik['total_siswa_dinilai'] : 0;
-$statistik['total_guru_menilai'] = $statistik['total_guru_menilai'] !== null ? $statistik['total_guru_menilai'] : 0;
-
+$rank_periode_label = formatPeriodeBulan($rank_bulan_tahun);
 $bulan_list = getBulanList();
 $tahun_list = getTahunList();
 ?>
@@ -655,6 +694,54 @@ $tahun_list = getTahunList();
             background-color: rgba(255, 255, 255, 0.1);
             border-left: 4px solid #60A5FA;
         }
+
+        .tab-link {
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s ease;
+        }
+
+        .tab-link.active {
+            border-bottom-color: #2563eb;
+            color: #1d4ed8;
+            font-weight: 600;
+        }
+
+        .podium-1 {
+            border-top: 4px solid #eab308;
+        }
+
+        .podium-2 {
+            border-top: 4px solid #9ca3af;
+        }
+
+        .podium-3 {
+            border-top: 4px solid #d97706;
+        }
+
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+
+            #printArea,
+            #printArea * {
+                visibility: visible;
+            }
+
+            #printArea {
+                position: fixed;
+                left: 0;
+                top: 0;
+                width: 100%;
+                background: #ffffff;
+                padding: 20px;
+                box-shadow: none !important;
+            }
+
+            .no-print {
+                display: none !important;
+            }
+        }
     </style>
 </head>
 
@@ -783,6 +870,36 @@ $tahun_list = getTahunList();
                         <div class="ml-3">
                             <p class="text-sm text-red-800"><?php echo htmlspecialchars($error_message); ?></p>
                         </div>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($is_audit_mode): ?>
+                <?php
+                $back_ranking_params = [
+                    'bulan_tahun' => $rank_bulan_tahun,
+                    'jenjang' => $rank_jenjang,
+                    'min_sesi' => $rank_min_sesi
+                ];
+                ?>
+                <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div class="flex items-center text-sm text-blue-800">
+                        <i class="fas fa-search-plus mr-2 text-blue-600"></i>
+                        <span>
+                            Mode Audit Sesi: menampilkan <strong><?php echo count($penilaian_data); ?> sesi harian</strong>
+                            milik <strong><?php echo htmlspecialchars($filter_nama_siswa ?: 'Siswa', ENT_QUOTES, 'UTF-8'); ?></strong>
+                            pada <strong><?php echo htmlspecialchars($rank_periode_label, ENT_QUOTES, 'UTF-8'); ?></strong>.
+                        </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <a href="dataNilai.php?bulan_tahun=<?php echo urlencode($rank_bulan_tahun); ?>"
+                            class="px-3 py-1.5 rounded-md text-xs font-medium bg-white border border-blue-300 text-blue-700 hover:bg-blue-100">
+                            Tampilkan Semua Siswa
+                        </a>
+                        <a href="peringkatSiswa.php?<?php echo http_build_query($back_ranking_params); ?>"
+                            class="px-3 py-1.5 rounded-md text-xs font-medium bg-blue-600 text-white hover:bg-blue-700">
+                            <i class="fas fa-arrow-left mr-1"></i> Kembali ke Peringkat Siswa
+                        </a>
                     </div>
                 </div>
             <?php endif; ?>

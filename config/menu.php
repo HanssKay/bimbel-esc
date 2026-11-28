@@ -40,6 +40,12 @@ $menuConfig = [
                     'active' => ['dataNilai.php']
                 ],
                 [
+                    'title' => 'Peringkat Siswa',
+                    'icon' => 'fas fa-trophy',
+                    'url' => 'peringkatSiswa.php',
+                    'active' => ['peringkatSiswa.php']
+                ],
+                [
                     'title' => 'Jadwal Siswa',
                     'icon' => 'fas fa-calendar-alt',
                     'url' => 'jadwalSiswa.php',
@@ -198,26 +204,19 @@ $menuConfig = [
         [
             'title' => 'Nilai Anak',
             'icon' => 'fas fa-chart-line',
-            'url' => 'riwayatNilai.php',
-            'active' => ['riwayatNilai.php']
+            'submenu' => [
+                [
+                    'title' => 'Perkembangan Anak',
+                    'url' => 'perkembanganAnak.php',
+                    'active' => ['perkembanganAnak.php']
+                ],
+                [
+                    'title' => 'Riwayat Nilai',
+                    'url' => 'riwayatNilai.php',
+                    'active' => ['riwayatNilai.php']
+                ],
+            ]
         ],
-        // [
-        //     'title' => 'Nilai Anak',
-        //     'icon' => 'fas fa-chart-line',
-        //     'submenu' => [
-        //         [
-        //             'title' => 'Laporan Mingguan',
-        //             'url' => 'laporanMingguan.php',
-        //             'active' => ['laporanMingguan.php']
-        //         ],
-        //         [
-        //             'title' => 'Perkembangan Anak',
-        //             'url' => 'perkembanganAnak.php',
-        //             'active' => ['perkembanganAnak.php']
-        //         ],
-
-        //     ]
-        // ],
         [
             'title' => 'Jadwal Anak',
             'icon' => 'fas fa-calendar-alt',
